@@ -162,6 +162,9 @@ export class SpikeAgent extends DurableObject {
 				const { message } = (await request.json()) as { message: string };
 				return Response.json(await this.chat(message));
 			}
+			if (request.method === "GET" && url.pathname === "/session") {
+				return Response.json({ ok: true, name: "pi-harness-spike" });
+			}
 			if (request.method === "GET" && url.pathname === "/entries") {
 				return Response.json(await this.entries());
 			}
@@ -178,10 +181,10 @@ export class SpikeAgent extends DurableObject {
 export default {
 	fetch(request: Request, env: { SpikeAgent: DurableObjectNamespace }): Response | Promise<Response> {
 		const url = new URL(request.url);
-		if (url.pathname.startsWith("/agent/")) {
+		if (url.pathname.startsWith("/agent/") || url.pathname.startsWith("/api/")) {
 			const stub = env.SpikeAgent.get(env.SpikeAgent.idFromName("spike"));
 			const inner = new URL(request.url);
-			inner.pathname = url.pathname.replace(/^\/agent/, "") || "/";
+			inner.pathname = url.pathname.replace(/^\/(agent|api)/, "") || "/";
 			return stub.fetch(new Request(inner, request));
 		}
 		return Response.json({ ok: true, name: "pi-harness-spike" });

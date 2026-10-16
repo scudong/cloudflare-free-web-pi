@@ -4,5 +4,7 @@
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": { "bindings": [{ "name": "SpikeAgent", "class_name": "SpikeAgent" }] },
+  // 前端静态资产同域部署：/agent/* 走 Worker，其余路径走 SPA
+  "assets": { "directory": "./dist-web", "not_found_handling": "single-page-application", "run_worker_first": ["/agent/*", "/api/*"] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SpikeAgent"] }]
 }
