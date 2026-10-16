@@ -74,8 +74,10 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			const name = pickString(entry, ["name", "toolName", "tool", "tool_name"]) || "工具";
 			const rawSummary = textOf(entry.summary ?? entry.output ?? entry.content ?? entry.result ?? entry.text);
 			const failed = entry.isError === true || entry.is_error === true || entry.error === true;
+			const prefix = failed ? "失败：" : "";
 			const summary = truncateOneLine(rawSummary, TOOL_SUMMARY_MAX);
-			pendingTools.push({ name, summary: (failed ? "失败：" : "") + summary });
+			// Keep the untruncated original so the pill can expand to the full output
+			pendingTools.push({ name, summary: prefix + summary, full: prefix + rawSummary });
 		}
 		// 其他 kind：宽容跳过
 	}

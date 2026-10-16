@@ -1,6 +1,7 @@
 /**
- * 同域 API 客户端：全部相对路径（与 Worker 同源部署，无需 CORS）。
- * /api/chat 非流式，可能耗时 10–60s——不设客户端超时，仅支持通过 AbortSignal 主动停止等待。
+ * Same-origin API client: relative paths only (deployed alongside the Worker, no CORS needed).
+ * /api/chat is non-streaming and may take 10-60s — no client timeout, only AbortSignal to stop waiting.
+ * All list endpoints are parsed tolerantly on the caller side (see lib/collections.ts).
  */
 
 export interface SessionInfo {
@@ -37,7 +38,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 	try {
 		data = await res.json();
 	} catch {
-		// 响应体不是 JSON：data 保持 null，按 HTTP 状态处理
+		// Response body is not JSON: keep data = null, handle by HTTP status
 	}
 
 	if (!res.ok) {
@@ -53,18 +54,46 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 	return data as T;
 }
 
+/** Append query params, skipping empty values. */
+function withQuery(path: string, params: Record<string, string>): string {
+	const search = new URLSearchParams();
+	for (const [key, value] of Object.entries(params)) {
+		if (value) search.set(key, value);
+	}
+	const qs = search.toString();
+	return qs ? `${path}?${qs}` : path;
+}
+
+function jsonPost(body: unknown): RequestInit {
+	return {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(body),
+	};
+}
+
 export const api = {
 	session: () => requestJson<SessionInfo>("/api/session"),
 
-	chat: (message: string, signal?: AbortSignal) =>
-		requestJson<ChatResult>("/api/chat", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ message }),
-			signal,
-		}),
+	/** GET /api/sessions — v3 returns a list; v1 may return only the current one. */
+	sessions: () => requestJson<{ sessions?: unknown[] }>("/api/sessions"),
 
-	entries: () => requestJson<{ entries: unknown[] }>("/api/entries"),
+	chat: (message: string, sessionId: string, signal?: AbortSignal) =>
+		requestJson<ChatResult>("/api/chat", { ...jsonPost({ message, sessionId }), signal }),
 
-	reset: () => requestJson<{ ok: boolean }>("/api/reset", { method: "POST" }),
+	entries: (sessionId?: string) => requestJson<{ entries: unknown[] }>(withQuery("/api/entries", { sessionId: sessionId ?? "" })),
+
+	files: (sessionId: string) => requestJson<{ files?: unknown[] }>(withQuery("/api/files", { sessionId })),
+
+	fileContent: (sessionId: string, name: string) =>
+		requestJson<{ name?: string; content?: string }>(withQuery("/api/files/content", { sessionId, name })),
+
+	deleteFile: (sessionId: string, name: string) =>
+		requestJson<{ ok: boolean }>(withQuery("/api/files", { sessionId, name }), { method: "DELETE" }),
+
+	memories: () => requestJson<{ memories?: unknown[] }>("/api/memories"),
+
+	deleteMemory: (id: number) => requestJson<{ ok: boolean }>(withQuery("/api/memories", { id: String(id) }), { method: "DELETE" }),
+
+	reset: (sessionId: string) => requestJson<{ ok: boolean }>("/api/reset", jsonPost({ sessionId })),
 };

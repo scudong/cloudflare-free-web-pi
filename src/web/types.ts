@@ -1,12 +1,34 @@
-/** 一轮工具调用的展示信息。 */
+/** One tool call shown as an expandable pill (summary = truncated brief, full = original text). */
 export interface ToolCallInfo {
 	name: string;
 	summary: string;
+	full?: string;
 }
 
-/** 消息列表条目。notice 为系统提示（停止等待 / 重置失败等）；tool 为孤立的工具活动条。 */
+/** Message list entry. notice = system hint (stopped / reset failed...); tool = orphan tool activity row. */
 export type ChatMessage =
 	| { id: string; role: "user"; text: string }
 	| { id: string; role: "assistant"; text: string; tools?: ToolCallInfo[]; error?: boolean }
 	| { id: string; role: "tool"; tools: ToolCallInfo[] }
 	| { id: string; role: "notice"; text: string };
+
+/** Session list item for the left sidebar. */
+export interface SessionListItem {
+	id: string;
+	title: string;
+	createdAt: string;
+}
+
+/** Virtual file produced by the agent's write_file tool. */
+export interface FileInfo {
+	name: string;
+	size: number;
+	updatedAt: string;
+}
+
+/** Memory library entry. */
+export interface MemoryInfo {
+	id: number;
+	content: string;
+	createdAt: string;
+}

@@ -17,8 +17,9 @@ const ctx = BACKGROUND_CONTEXT;
 
 /** DO 实例的 SQL 门面，open() 时注入（工具在模块级定义，无法用 this）。 */
 let sqlFacade: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } } | null = null;
-const memTable = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } }) => {
+const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } }) => {
 	sql.exec(`CREATE TABLE IF NOT EXISTS pi_mem (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL, created_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS vfs_files (name TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 };
 
 const stripHtml = (html: string) =>
@@ -87,6 +88,42 @@ const spikeExtension = defineExtension({
 				}
 			},
 		}),
+		defineTool({
+			name: "write_file",
+			description: "把内容写入工作台文件（覆盖同名）；适合报告、笔记、代码、数据。文件会出现在右侧工作台面板",
+			parameters: Type.Object({
+				name: Type.String({ description: "文件名，如 report.md / notes.txt / main.js" }),
+				content: Type.String({ description: "完整文件内容" }),
+			}),
+			execute: async (args) => {
+				const a = args as { name?: unknown; content?: unknown };
+				const name = String(a.name ?? "").trim().replace(/^[/.]+/, "").slice(0, 120);
+				if (!name) return { output: [{ type: "text", text: "文件名不能为空。" }] };
+				const content = String(a.content ?? "");
+				sqlFacade!.exec("INSERT INTO vfs_files (name, content, updated_at) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at", name, content, new Date().toISOString());
+				return { output: [{ type: "text", text: `已写入 ${name}（${content.length} 字符）。` }] };
+			},
+		}),
+		defineTool({
+			name: "read_file",
+			description: "读取工作台文件内容",
+			parameters: Type.Object({ name: Type.String({ description: "文件名" }) }),
+			execute: async (args) => {
+				const name = String((args as { name?: unknown }).name ?? "").replace(/^[/.]+/, "");
+				const rows = sqlFacade!.exec("SELECT content FROM vfs_files WHERE name = ?", name).toArray() as { content: string }[];
+				return { output: [{ type: "text", text: rows[0]?.content ?? `文件 ${name} 不存在。` }] };
+			},
+		}),
+		defineTool({
+			name: "list_files",
+			description: "列出工作台全部文件",
+			parameters: Type.Object({}),
+			execute: async () => {
+				const rows = sqlFacade!.exec("SELECT name, length(content) AS size, updated_at FROM vfs_files ORDER BY updated_at DESC").toArray() as { name: string; size: number; updated_at: string }[];
+				const text = rows.length ? rows.map((r) => `${r.name} · ${r.size} 字符 · ${r.updated_at.slice(0, 16).replace("T", " ")}`).join("\n") : "工作台还没有文件。";
+				return { output: [{ type: "text", text }] };
+			},
+		}),
 	],
 });
 export class SpikeAgent extends DurableObject {
@@ -101,7 +138,7 @@ export class SpikeAgent extends DurableObject {
 			registry.install(spikeExtension);
 			// Durable Object SQLite: conversations survive DO restarts and redeploys.
 			const storage = await openDurableObjectSqliteStorage(this.ctx.storage);
-			memTable(this.ctx.storage.sql);
+			ensureTables(this.ctx.storage.sql);
 			sqlFacade = this.ctx.storage.sql;
 			this.harness = await Harness.open(storage, { models, registry }, ctx);
 			this.harness.resume();
@@ -151,16 +188,45 @@ export class SpikeAgent extends DurableObject {
 		const sql = this.ctx.storage.sql;
 		const tables = sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").toArray() as { name: string }[];
 		for (const t of tables) sql.exec(`DELETE FROM ${JSON.stringify(t.name).replace(/"/g, '"')}`);
-		memTable(sql);
+		ensureTables(sql);
 		return { ok: true };
 	}
 
 	override async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 		try {
+			// 所有路由都先确保 DO 初始化（sqlFacade/表/Harness 就绪），幂等。
+			if (url.pathname !== "/") await this.open();
 			if (request.method === "POST" && url.pathname === "/chat") {
 				const { message } = (await request.json()) as { message: string };
 				return Response.json(await this.chat(message));
+			}
+			if (request.method === "GET" && url.pathname === "/sessions") {
+				return Response.json({ sessions: [{ id: "1", title: "当前会话", created_at: new Date().toISOString() }] });
+			}
+			if (url.pathname === "/files" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const rows = sqlFacade!.exec("SELECT name, length(content) AS size, updated_at FROM vfs_files ORDER BY updated_at DESC").toArray();
+				return Response.json({ files: rows });
+			}
+			if (url.pathname === "/files/content" && request.method === "GET") {
+				const name = url.searchParams.get("name") ?? "";
+				const rows = sqlFacade!.exec("SELECT name, content FROM vfs_files WHERE name = ?", name).toArray() as { name: string; content: string }[];
+				if (!rows[0]) return Response.json({ error: "文件不存在" }, { status: 404 });
+				return Response.json(rows[0]);
+			}
+			if (url.pathname === "/files" && request.method === "DELETE") {
+				sqlFacade!.exec("DELETE FROM vfs_files WHERE name = ?", url.searchParams.get("name") ?? "");
+				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/memories" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const rows = sqlFacade!.exec("SELECT id, content, created_at FROM pi_mem ORDER BY id DESC LIMIT 200").toArray();
+				return Response.json({ memories: rows });
+			}
+			if (url.pathname === "/memories" && request.method === "DELETE") {
+				sqlFacade!.exec("DELETE FROM pi_mem WHERE id = ?", Number(url.searchParams.get("id") ?? 0));
+				return Response.json({ ok: true });
 			}
 			if (request.method === "GET" && url.pathname === "/session") {
 				return Response.json({ ok: true, name: "pi-harness-spike" });
