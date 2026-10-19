@@ -67,6 +67,28 @@ body {
 	--color-sky-400: #6aa1ff;
 	--color-sky-500: #4080ff;
 	--color-sky-600: #165dff;
+	/* 工具调用：Arco green（#00B42A 系列） */
+	--color-emerald-950: #0b2410;
+	--color-emerald-500: #00b42a;
+	--color-emerald-400: #4cd263;
+	--color-emerald-300: #7be188;
+	--color-emerald-200: #aff0b5;
+	--color-emerald-100: #e8ffea;
+	/* 思维链：Arco purple（#722ED1 系列） */
+	--color-violet-950: #1e1233;
+	--color-violet-500: #722ed1;
+	--color-violet-400: #8d4eda;
+	--color-violet-300: #a871e3;
+	--color-violet-200: #c396ed;
+	--color-violet-100: #ddbefd;
+	/* 错误 / 警示：Arco red / orange */
+	--color-red-950: #2a0e0b;
+	--color-red-500: #f53f3f;
+	--color-red-300: #ffaaa5;
+	--color-red-200: #ffd2d2;
+	--color-amber-950: #2b1a05;
+	--color-amber-500: #ff7d00;
+	--color-amber-300: #ffb65c;
 }
 
 /* ---------- 浅色（Arco Light：gray-1..10 + arco 蓝） ---------- */
@@ -135,22 +157,32 @@ body {
 }
 
 /* 浅色系：把「深底 + 浅字」的语义色反转成「浅底 + 深字」，
-   覆盖工具 pill（emerald）、思考块（violet）、错误气泡（rose/red）、计划进度（sky/emerald）。 */
+   覆盖工具 pill（Arco green）、思维链（Arco purple）、错误气泡（Arco red/orange）、计划进度。
+   950 档改成对应色卡最浅一级，这样 bg-*-950/40 在浅底上是淡淡的同色背景。 */
 .theme-light,
 .theme-sepia {
-	--color-emerald-100: #064e3b;
-	--color-emerald-200: #065f46;
-	--color-emerald-300: #047857;
-	--color-emerald-400: #059669;
-	--color-violet-100: #2e1065;
-	--color-violet-200: #4c1d95;
-	--color-violet-300: #5b21b6;
-	--color-rose-200: #881337;
-	--color-rose-300: #9f1239;
-	--color-red-200: #991b1b;
-	--color-red-300: #b91c1c;
+	--color-emerald-950: #e8ffea;
+	--color-emerald-500: #00b42a;
+	--color-emerald-400: #009a29;
+	--color-emerald-300: #008026;
+	--color-emerald-200: #007a21;
+	--color-emerald-100: #006622;
+	--color-violet-950: #f5e8ff;
+	--color-violet-500: #722ed1;
+	--color-violet-400: #551db0;
+	--color-violet-300: #551db0;
+	--color-violet-200: #3c108f;
+	--color-violet-100: #27066e;
+	--color-red-950: #ffece8;
+	--color-red-500: #f53f3f;
+	--color-red-300: #cb2634;
+	--color-red-200: #a9151f;
+	--color-amber-950: #fff7e8;
+	--color-amber-500: #ff7d00;
 	--color-amber-300: #b45309;
-	--color-sky-200: #075985;
+	--color-rose-200: #a9151f;
+	--color-rose-300: #cb2634;
+	--color-sky-200: #0e42d2;
 }
 
 /* 滚动条跟随主题 */

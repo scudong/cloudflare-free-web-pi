@@ -27,7 +27,7 @@ export function ThinkingBlock({ text, streaming }: ThinkingBlockProps) {
 	if (!text.trim()) return null;
 
 	return (
-		<div className="w-full max-w-[92%] overflow-hidden rounded-xl border border-violet-500/25 bg-violet-950/20">
+		<div className="w-full max-w-[92%] overflow-hidden rounded-xl border border-violet-500/35 bg-violet-950/50">
 			<button
 				type="button"
 				onClick={() => setOpen((v) => !v)}
@@ -46,7 +46,7 @@ export function ThinkingBlock({ text, streaming }: ThinkingBlockProps) {
 			{open && (
 				<div
 					ref={bodyRef}
-					className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words border-t border-violet-500/20 px-3 py-2 text-[12.5px] leading-relaxed text-violet-100/75"
+					className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words border-t border-violet-500/25 px-3 py-2 text-[12.5px] leading-relaxed text-violet-100/80"
 				>
 					{text}
 				</div>
