@@ -54,6 +54,14 @@ export default function App() {
 	const [mobileTab, setMobileTab] = useState<MobileTab>("chat");
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
+	// 右栏宽度（v0.16.0）：可拖拽分隔条、打开文档时自动加宽、可最大化阅读
+	const [rightWidth, setRightWidth] = useState(() => {
+		const saved = typeof window === "undefined" ? null : Number(localStorage.getItem("pi-right-width") ?? "");
+		return Number.isFinite(saved) && saved && saved >= 260 ? saved : 340;
+	});
+	const [workbenchWide, setWorkbenchWide] = useState(false);
+	const rightWidthRef = useRef(rightWidth);
+	rightWidthRef.current = rightWidth;
 
 	// Session list
 	const [sessionId, setSessionId] = useState("1");
@@ -562,6 +570,34 @@ export default function App() {
 		});
 	}, []);
 
+	/** 拖拽分隔条调整右栏宽度（限制在 260px ~ 视口 65%）。 */
+	const handleRightResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = rightWidth;
+		const onMove = (e: PointerEvent) => {
+			const next = Math.min(Math.max(260, startWidth - (e.clientX - startX)), Math.round(window.innerWidth * 0.65));
+			setRightWidth(next);
+		};
+		const onUp = () => {
+			window.removeEventListener("pointermove", onMove);
+			window.removeEventListener("pointerup", onUp);
+			try {
+				localStorage.setItem("pi-right-width", String(rightWidthRef.current));
+			} catch {
+				// 忽略存储失败
+			}
+		};
+		window.addEventListener("pointermove", onMove);
+		window.addEventListener("pointerup", onUp);
+	}, [rightWidth]);
+
+	/** 打开文件时自动加宽，保证文档可读（v0.16.0）。 */
+	const handleFileOpenChange = useCallback((open: boolean) => {
+		if (!open) return;
+		setRightWidth((w) => (w < 560 ? 560 : w));
+	}, []);
+
 	/** 备份：下载全量 JSON。 */
 	const handleBackup = useCallback(() => {
 		const link = document.createElement("a");
@@ -744,7 +780,8 @@ export default function App() {
 	const currentSession = sessions.find((s) => s.id === sessionId);
 	const sessionLabel = sessionName || (currentSession ? currentSession.title : "");
 	const showSidebar = isDesktop && leftOpen;
-	const showChat = isDesktop || mobileTab === "chat";
+	// 全宽阅读时让文档独占（v0.16.0）：桌面上隐藏聊天栏，避免被挤成窄条
+	const showChat = isDesktop ? !workbenchWide : mobileTab === "chat";
 	const showWorkbench = isDesktop ? rightOpen : mobileTab !== "chat";
 
 	const sidebar = (
@@ -806,8 +843,26 @@ export default function App() {
 					</section>
 				)}
 
+				{showWorkbench && isDesktop && (
+					<div
+						role="separator"
+						aria-orientation="vertical"
+						aria-label="调整工作台宽度"
+						onPointerDown={handleRightResizeStart}
+						className="w-1 shrink-0 cursor-col-resize bg-slate-800/40 transition-colors hover:bg-sky-500/50"
+					/>
+				)}
 				{showWorkbench && (
-					<div className={isDesktop ? "w-80 shrink-0 border-l border-slate-800" : "min-w-0 flex-1"}>
+					<div
+						className={
+							isDesktop
+								? workbenchWide
+									? "min-w-0 flex-1 border-l border-slate-800"
+									: "shrink-0 border-l border-slate-800"
+								: "min-w-0 flex-1"
+						}
+						style={isDesktop && !workbenchWide ? { width: rightWidth } : undefined}
+					>
 						<Workbench
 							tab={workbenchTab}
 							onTabChange={setWorkbenchTab}
@@ -837,6 +892,9 @@ export default function App() {
 							onAddAutomation={handleAddAutomation}
 							onToggleAutomation={handleToggleAutomation}
 							onDeleteAutomation={handleDeleteAutomation}
+							wide={workbenchWide}
+							onToggleWide={() => setWorkbenchWide((v) => !v)}
+							onFileOpenChange={handleFileOpenChange}
 						/>
 					</div>
 				)}

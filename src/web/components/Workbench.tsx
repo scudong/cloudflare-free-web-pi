@@ -21,6 +21,11 @@ interface WorkbenchProps {
 	skillsError: string | null;
 	onAddSkill: (name: string, description: string, content: string) => Promise<boolean>;
 	onDeleteSkill: (name: string) => Promise<boolean>;
+	/** 最大化阅读（v0.16.0）。 */
+	wide: boolean;
+	onToggleWide: () => void;
+	/** 打开/关闭文件时通知外层（用于自动加宽）。 */
+	onFileOpenChange: (open: boolean) => void;
 	automations: AutomationInfo[];
 	automationsLoading: boolean;
 	automationsError: string | null;
@@ -176,12 +181,18 @@ function FileView({
 	refreshTick,
 	onClose,
 	onDelete,
+	wide,
+	onToggleWide,
+	dockRight,
 }: {
 	sessionId: string;
 	name: string;
 	refreshTick: number;
 	onClose: () => void;
 	onDelete: (name: string) => void;
+	wide: boolean;
+	onToggleWide: () => void;
+	dockRight: boolean;
 }) {
 	const [mode, setMode] = useState<"preview" | "source">("preview");
 	// HTML 文件用 sandbox iframe 渲染，其余走 Markdown（v0.15.0）
@@ -242,6 +253,16 @@ function FileView({
 				</div>
 				<button
 					type="button"
+					onClick={onToggleWide}
+					aria-pressed={wide}
+					aria-label={wide ? "退出全宽阅读" : "全宽阅读"}
+					title={wide ? "退出全宽阅读" : "全宽阅读"}
+					className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
+				>
+					{wide ? "⤡" : "⤢"}
+				</button>
+				<button
+					type="button"
 					onClick={() => onDelete(name)}
 					aria-label={`删除文件 ${name}`}
 					title="删除文件"
@@ -250,7 +271,8 @@ function FileView({
 					🗑
 				</button>
 			</div>
-			<div className="min-h-0 flex-1 overflow-y-auto p-3">
+			<div className={`min-h-0 flex-1 overflow-y-auto p-3 ${dockRight ? "md:px-8" : ""}`}>
+				<div className={dockRight ? "mx-auto w-full max-w-4xl" : ""}>
 				{state === "loading" && <p className="text-xs text-slate-500">正在加载文件内容…</p>}
 				{state === "error" && <p className="text-xs text-red-300/90">加载失败：{error}</p>}
 				{state === "ready" && mode === "preview" && isHtml && (
@@ -267,6 +289,7 @@ function FileView({
 				{state === "ready" && mode === "source" && (
 					<pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-slate-300">{content}</pre>
 				)}
+				</div>
 			</div>
 		</div>
 	);
@@ -640,6 +663,9 @@ export function Workbench({
 	skillsError,
 	onAddSkill,
 	onDeleteSkill,
+	wide,
+	onToggleWide,
+	onFileOpenChange,
 	automations,
 	automationsLoading,
 	automationsError,
@@ -660,6 +686,11 @@ export function Workbench({
 			setOpenName(null);
 		}
 	}, [files, openName]);
+
+	const handleOpenFile = (name: string) => {
+		setOpenName(name);
+		onFileOpenChange(true);
+	};
 
 	const handleDeleteFile = (name: string) => {
 		if (!window.confirm(`确认删除文件「${name}」？此操作不可撤销。`)) return;
@@ -697,8 +728,14 @@ export function Workbench({
 					sessionId={sessionId}
 					name={openName}
 					refreshTick={refreshTick}
-					onClose={() => setOpenName(null)}
+					onClose={() => {
+						setOpenName(null);
+						onFileOpenChange(false);
+					}}
 					onDelete={handleDeleteFile}
+					wide={wide}
+					onToggleWide={onToggleWide}
+					dockRight={wide}
 				/>
 			) : (
 				<>
@@ -714,7 +751,7 @@ export function Workbench({
 							files={files}
 							loading={filesLoading}
 							error={filesError}
-							onOpen={setOpenName}
+							onOpen={handleOpenFile}
 							onDelete={handleDeleteFile}
 						/>
 					) : tab === "memories" ? (
