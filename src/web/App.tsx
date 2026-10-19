@@ -806,10 +806,7 @@ function LoginGate({ onSubmit, error }: { onSubmit: (password: string) => Promis
 				}}
 				className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900/80 p-7 shadow-xl"
 			>
-				<div className="mb-1 flex items-center gap-2">
-					<span aria-hidden className="text-lg">π</span>
-					<h1 className="text-lg font-semibold text-slate-100">π Harness</h1>
-				</div>
+				<h1 className="mb-1 text-lg font-semibold text-slate-100">π Harness</h1>
 				<p className="mb-5 text-sm text-slate-400">请输入访问密码</p>
 				{error && <p className="mb-3 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
 				<input

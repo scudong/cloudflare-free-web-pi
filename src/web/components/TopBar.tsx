@@ -67,7 +67,7 @@ export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft
 				>
 					π
 				</span>
-				<h1 className="shrink-0 text-[15px] font-semibold tracking-tight text-slate-100">π Harness</h1>
+				<h1 className="shrink-0 text-[15px] font-semibold tracking-tight text-slate-100">Harness</h1>
 				<span className="flex shrink-0 items-center gap-1.5 rounded-full border border-slate-700/70 px-2 py-0.5 text-xs text-slate-400">
 					<span
 						aria-hidden
