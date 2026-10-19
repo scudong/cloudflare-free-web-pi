@@ -105,8 +105,8 @@ function PlanPanel({ plan }: { plan: PlanStep[] }) {
 		) : (
 			<PlanCard steps={plan} />
 		);
-	// 吸顶：滚动查看历史时不丢掉当前进度
-	return <div className="sticky top-0 z-10 -mx-1 bg-slate-950/80 px-1 py-1 backdrop-blur">{body}</div>;
+	// 吸顶：滚动查看历史时不丢掉当前进度（背景用不透明色，避免正文透出来）
+	return <div className="sticky top-0 z-10 -mx-1 bg-slate-950 px-1 py-1">{body}</div>;
 }
 
 /** 本会话产出文件（v0.22.0）：历史回放时也能一键打开工作台预览。 */

@@ -113,6 +113,25 @@ body {
 	--color-sky-500: #0ea5e9;
 }
 
+/* 浅色系：把「深底 + 浅字」的语义色反转成「浅底 + 深字」，
+   覆盖工具 pill（emerald）、思考块（violet）、错误气泡（rose/red）、计划进度（sky/emerald）。 */
+.theme-light,
+.theme-sepia {
+	--color-emerald-100: #064e3b;
+	--color-emerald-200: #065f46;
+	--color-emerald-300: #047857;
+	--color-emerald-400: #059669;
+	--color-violet-100: #2e1065;
+	--color-violet-200: #4c1d95;
+	--color-violet-300: #5b21b6;
+	--color-rose-200: #881337;
+	--color-rose-300: #9f1239;
+	--color-red-200: #991b1b;
+	--color-red-300: #b91c1c;
+	--color-amber-300: #b45309;
+	--color-sky-200: #075985;
+}
+
 /* 滚动条跟随主题 */
 .theme-light *,
 .theme-sepia *,
@@ -127,16 +146,48 @@ body {
 
 /* 浅色系对比度修正：
    组件里 bg-sky-500/15 + text-white 的选中态在浅底上白字不可读，统一改成深色文字；
-   实心主按钮（bg-sky-600 text-white）仍保持白字。 */
+   实心强调色按钮（bg-sky-600 / bg-violet-600 等）仍保持白字。 */
 .theme-light .text-white,
 .theme-sepia .text-white {
 	color: var(--theme-fg-strong);
 }
 .theme-light .bg-sky-600.text-white,
 .theme-light .bg-rose-600.text-white,
+.theme-light .bg-emerald-600.text-white,
+.theme-light .bg-violet-600.text-white,
+.theme-light .bg-indigo-600.text-white,
+.theme-light .bg-amber-600.text-white,
+.theme-light .bg-sky-600\/90.text-white,
 .theme-sepia .bg-sky-600.text-white,
-.theme-sepia .bg-rose-600.text-white {
+.theme-sepia .bg-rose-600.text-white,
+.theme-sepia .bg-emerald-600.text-white,
+.theme-sepia .bg-violet-600.text-white,
+.theme-sepia .bg-indigo-600.text-white,
+.theme-sepia .bg-amber-600.text-white,
+.theme-sepia .bg-sky-600\/90.text-white {
 	color: #ffffff;
+}
+
+/* 中性按钮的 hover:text-white 在浅底上会变成白字看不见，改回深色 */
+.theme-light .hover\:text-white:hover,
+.theme-sepia .hover\:text-white:hover {
+	color: var(--theme-fg-strong);
+}
+/* 实心强调色按钮 hover 后仍需白字 */
+.theme-light .bg-sky-600.hover\:text-white:hover,
+.theme-light .bg-sky-600\/90.hover\:text-white:hover,
+.theme-sepia .bg-sky-600.hover\:text-white:hover,
+.theme-sepia .bg-sky-600\/90.hover\:text-white:hover {
+	color: #ffffff;
+}
+
+/* 弹窗遮罩：浅色主题下不要用纯黑 60%，太重 */
+.dialog-scrim {
+	background-color: rgb(0 0 0 / 0.6);
+}
+.theme-light .dialog-scrim,
+.theme-sepia .dialog-scrim {
+	background-color: rgb(15 23 42 / 0.32);
 }
 
 /* 深色底上的半透明叠色在浅色主题下需要更实的背景 */

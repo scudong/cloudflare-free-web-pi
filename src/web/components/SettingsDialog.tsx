@@ -41,11 +41,11 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (nex
 			aria-checked={checked}
 			aria-label={label}
 			onClick={() => onChange(!checked)}
-			className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${checked ? "bg-sky-600" : "bg-slate-700"}`}
+			className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${checked ? "bg-sky-600" : "bg-slate-600"}`}
 		>
 			<span
 				aria-hidden
-				className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`}
+				className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/10 transition-all ${checked ? "left-[18px]" : "left-0.5"}`}
 			/>
 		</button>
 	);
@@ -53,15 +53,15 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (nex
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
 	return (
-		<section className="border-b border-slate-800 py-4 first:pt-1 last:border-b-0 last:pb-0">
-			<h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">{title}</h2>
+		<section className="border-b border-slate-700/70 py-4 first:pt-1 last:border-b-0 last:pb-0">
+			<h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{title}</h2>
 			{children}
 		</section>
 	);
 }
 
 const actionButton =
-	"rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-700/60 hover:text-white";
+	"rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-200 shadow-sm transition-colors hover:bg-slate-700/60 hover:text-white";
 
 /** 设置弹窗（v0.20.0）：原顶栏菜单全部收纳于此，参照 Codex/Trae 的设置页。 */
 export function SettingsDialog({
@@ -102,12 +102,12 @@ export function SettingsDialog({
 	if (!open) return null;
 	return (
 		<div className="absolute inset-0 z-40">
-			<button type="button" aria-label="关闭设置" onClick={onClose} className="absolute inset-0 bg-black/60" />
+			<button type="button" aria-label="关闭设置" onClick={onClose} className="dialog-scrim absolute inset-0" />
 			<div
 				role="dialog"
 				aria-modal="true"
 				aria-label="设置"
-				className="absolute left-1/2 top-1/2 max-h-[86vh] w-[min(92vw,30rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl"
+				className="absolute left-1/2 top-1/2 max-h-[86vh] w-[min(92vw,30rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl ring-1 ring-black/5"
 			>
 				<div className="mb-3 flex items-center justify-between">
 					<h1 className="text-base font-semibold text-slate-100">设置</h1>
