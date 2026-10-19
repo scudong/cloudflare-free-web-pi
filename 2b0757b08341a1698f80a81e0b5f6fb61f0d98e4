@@ -1,0 +1,48 @@
+src/web/components/TopBar.tsx
+  00512495ff504ece 1-2,15-17,57-58,87-122
+src/worker.ts
+  00512495ff504ece 503-587,1018-1026
+src/web/App.tsx
+  00512495ff504ece 510-535,713-714
+src/web/lib/api.ts
+  00512495ff504ece 147-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "2b0757b08341a1698f80a81e0b5f6fb61f0d98e4",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 171,
+      "total_deletions": 1,
+      "accepted_lines": 171,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/api.ts": {
+          "additions": 5,
+          "accepted_lines": 5
+        },
+        "src/web/components/TopBar.tsx": {
+          "additions": 43,
+          "deletions": 1,
+          "accepted_lines": 43
+        },
+        "src/worker.ts": {
+          "additions": 95,
+          "accepted_lines": 95
+        },
+        "src/web/App.tsx": {
+          "additions": 28,
+          "accepted_lines": 28
+        }
+      }
+    }
+  }
+}
