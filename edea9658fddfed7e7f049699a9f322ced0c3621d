@@ -1,0 +1,65 @@
+src/web/components/Composer.tsx
+  00512495ff504ece 6-7,11-51,56-58,60,62-82,94-95,97-98,111-130,132-152,158-164,183
+src/web/App.tsx
+  00512495ff504ece 115-117,188,194,222
+src/web/lib/api.ts
+  00512495ff504ece 90,97,129-130
+src/web/types.ts
+  00512495ff504ece 10
+src/web/components/MessageList.tsx
+  00512495ff504ece 8,10-27,36-46,136
+src/web/lib/entries.ts
+  00512495ff504ece 20-25,35-54,87-88,91-94,96,98,104-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "edea9658fddfed7e7f049699a9f322ced0c3621d",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 215,
+      "total_deletions": 33,
+      "accepted_lines": 215,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/MessageList.tsx": {
+          "additions": 31,
+          "deletions": 15,
+          "accepted_lines": 31
+        },
+        "src/web/lib/entries.ts": {
+          "additions": 51,
+          "deletions": 8,
+          "accepted_lines": 51
+        },
+        "src/web/components/Composer.tsx": {
+          "additions": 122,
+          "deletions": 4,
+          "accepted_lines": 122
+        },
+        "src/web/types.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/lib/api.ts": {
+          "additions": 4,
+          "deletions": 2,
+          "accepted_lines": 4
+        },
+        "src/web/App.tsx": {
+          "additions": 6,
+          "deletions": 3,
+          "accepted_lines": 6
+        }
+      }
+    }
+  }
+}
