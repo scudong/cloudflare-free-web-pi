@@ -1,0 +1,31 @@
+src/worker.ts
+  00512495ff504ece 17,184-186,188,211-213,225,230-251,276,303-305,731-733
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "ea2b08b8d82e21494773459269d0d8d29b80f0ca",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 51,
+      "total_deletions": 30,
+      "accepted_lines": 41,
+      "overriden_lines": 1,
+      "per_file_stats": {
+        "src/worker.ts": {
+          "additions": 51,
+          "deletions": 30,
+          "accepted_lines": 41,
+          "overriden_lines": 1
+        }
+      }
+    }
+  }
+}
