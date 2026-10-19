@@ -1,4 +1,8 @@
-/** 主题（v0.24.0）：深色 / 浅色 / 米黄 / 午夜蓝。全部靠 CSS 变量覆盖实现，组件无需感知。 */
+/**
+ * 主题（v0.25.0）：深色 / 浅色 / 米黄 / 午夜蓝。
+ * 调色板取自 Arco Design（字节跳动开源设计系统）：灰阶 gray-1..10 + 品牌蓝 #165DFF。
+ * 全部靠 CSS 变量覆盖实现，组件无需感知。
+ */
 
 export type ThemeId = "dark" | "light" | "sepia" | "midnight";
 
@@ -14,10 +18,10 @@ export interface ThemeMeta {
 }
 
 export const THEMES: ThemeMeta[] = [
-	{ id: "dark", label: "深色", icon: "🌙", scheme: "dark", color: "#020617", swatch: "#0f172a" },
-	{ id: "light", label: "浅色", icon: "☀️", scheme: "light", color: "#f8fafc", swatch: "#f8fafc" },
-	{ id: "sepia", label: "米黄", icon: "📜", scheme: "light", color: "#f4eee1", swatch: "#f4eee1" },
-	{ id: "midnight", label: "午夜蓝", icon: "🌌", scheme: "dark", color: "#060b18", swatch: "#0d1830" },
+	{ id: "dark", label: "深色", icon: "🌙", scheme: "dark", color: "#17171a", swatch: "#232324" },
+	{ id: "light", label: "浅色", icon: "☀️", scheme: "light", color: "#f7f8fa", swatch: "#f7f8fa" },
+	{ id: "sepia", label: "米黄", icon: "📜", scheme: "light", color: "#fcf8ec", swatch: "#f7efd9" },
+	{ id: "midnight", label: "午夜蓝", icon: "🌌", scheme: "dark", color: "#0b1220", swatch: "#1a2440" },
 ];
 
 export const THEME_KEY = "pi-theme";

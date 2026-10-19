@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#020617" />
+    <meta name="theme-color" content="#17171a" />
     <meta name="description" content="π Harness —— Cloudflare Worker 上的 pi-durable 会话前端。" />
     <title>π Harness</title>
   </head>
@@ -13,10 +13,10 @@
       // 首屏应用主题，避免闪烁（v0.11.0；v0.24.0 支持四套主题）
       try {
         var META = {
-          dark: { cls: "", scheme: "dark", color: "#020617" },
-          light: { cls: "theme-light", scheme: "light", color: "#f8fafc" },
-          sepia: { cls: "theme-sepia", scheme: "light", color: "#f4eee1" },
-          midnight: { cls: "theme-midnight", scheme: "dark", color: "#060b18" }
+          dark: { cls: "", scheme: "dark", color: "#17171a" },
+          light: { cls: "theme-light", scheme: "light", color: "#f7f8fa" },
+          sepia: { cls: "theme-sepia", scheme: "light", color: "#fcf8ec" },
+          midnight: { cls: "theme-midnight", scheme: "dark", color: "#0b1220" }
         };
         var param = new URLSearchParams(location.search).get("theme");
         var saved = param || localStorage.getItem("pi-theme") || "dark";

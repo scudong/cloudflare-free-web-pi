@@ -40,77 +40,98 @@ body {
 }
 
 /*
- * 主题（v0.24.0）：全部通过覆盖 Tailwind v4 的 slate 调色板变量实现，
- * 组件里写的 bg-slate-900 / text-slate-100 等都编译成 var(--color-slate-*)，因此无需改任何组件。
- *   深色（默认，无需 class）/ 浅色 theme-light / 米黄 theme-sepia / 午夜蓝 theme-midnight
+ * 主题（v0.25.0）：调色板取自 **Arco Design（字节跳动开源设计系统）**。
+ * 全部通过覆盖 Tailwind v4 的 slate/sky 变量实现，组件零改动。
+ *   深色（默认，:root）/ 浅色 theme-light / 米黄 theme-sepia / 午夜蓝 theme-midnight
+ *
+ * Arco 色卡：灰阶 gray-1..10 = #F7F8FA #F2F3F5 #E5E6EB #C9CDD4 #A9AEB8 #86909C #6B7785 #4E5969 #272E3B #1D2129
+ *           品牌蓝 arcoblue = #165DFF（浅 #4080FF / #6AA1FF / #94BFFF，深 #0E42D2）
+ *           金 gold = #F7BA1E（#D99800 / #B37A00）
  */
 
-/* ---------- 浅色 ---------- */
+/* ---------- 深色（Arco Dark：中性灰 + arco 蓝） ---------- */
+:root {
+	--theme-scroll: #3a3a3c;
+	--color-slate-950: #17171a;
+	--color-slate-900: #232324;
+	--color-slate-800: #2a2a2b;
+	--color-slate-700: #3a3a3c;
+	--color-slate-600: #4e5969;
+	--color-slate-500: #86909c;
+	--color-slate-400: #a9aeb8;
+	--color-slate-300: #c9cdd4;
+	--color-slate-200: #e5e6eb;
+	--color-slate-100: #f2f3f5;
+	--color-slate-50: #f7f8fa;
+	--color-sky-300: #94bfff;
+	--color-sky-400: #6aa1ff;
+	--color-sky-500: #4080ff;
+	--color-sky-600: #165dff;
+}
+
+/* ---------- 浅色（Arco Light：gray-1..10 + arco 蓝） ---------- */
 .theme-light {
 	color-scheme: light;
-	--theme-fg-strong: #0f172a;
-	--theme-scroll: #cfd9e6;
-	--color-slate-950: #f8fafc;
+	--theme-fg-strong: #1d2129;
+	--theme-scroll: #e5e6eb;
+	--color-slate-950: #f7f8fa;
 	--color-slate-900: #ffffff;
-	--color-slate-800: #e8eef6;
-	--color-slate-700: #cfd9e6;
-	--color-slate-600: #9aa9bb;
-	--color-slate-500: #6b7c92;
-	--color-slate-400: #4b5a6e;
-	--color-slate-300: #334155;
-	--color-slate-200: #1e293b;
-	--color-slate-100: #0f172a;
-	--color-slate-50: #020617;
-	/* 强调色更深，保证浅底可读 */
-	--color-sky-300: #0369a1;
-	--color-sky-400: #0284c7;
-	--color-sky-500: #0ea5e9;
-	--color-rose-300: #be123c;
-	--color-amber-300: #b45309;
+	--color-slate-800: #f2f3f5;
+	--color-slate-700: #e5e6eb;
+	--color-slate-600: #c9cdd4;
+	--color-slate-500: #86909c;
+	--color-slate-400: #6b7785;
+	--color-slate-300: #4e5969;
+	--color-slate-200: #272e3b;
+	--color-slate-100: #1d2129;
+	--color-slate-50: #0e1116;
+	--color-sky-300: #0e42d2;
+	--color-sky-400: #165dff;
+	--color-sky-500: #4080ff;
+	--color-sky-600: #165dff;
 }
 
-/* ---------- 米黄（暖色浅底，长时间阅读更柔和） ---------- */
+/* ---------- 米黄（Arco 金色系：暖底 + 金强调色） ---------- */
 .theme-sepia {
 	color-scheme: light;
-	--theme-fg-strong: #2b2118;
-	--theme-scroll: #ddd0b8;
-	--color-slate-950: #f4eee1;
-	--color-slate-900: #fbf6ea;
-	--color-slate-800: #efe6d2;
-	--color-slate-700: #ddcfb4;
-	--color-slate-600: #b8a68c;
-	--color-slate-500: #8a7a63;
-	--color-slate-400: #6b5c47;
-	--color-slate-300: #4d4032;
-	--color-slate-200: #3a2f24;
-	--color-slate-100: #2b2118;
-	--color-slate-50: #1a1410;
-	--color-sky-300: #0f5f73;
-	--color-sky-400: #14708a;
-	--color-sky-500: #0e7490;
-	--color-rose-300: #a8321f;
-	--color-amber-300: #9a5b12;
+	--theme-fg-strong: #2e2415;
+	--theme-scroll: #ebdcbc;
+	--color-slate-950: #fcf8ec;
+	--color-slate-900: #fffdf6;
+	--color-slate-800: #f7efd9;
+	--color-slate-700: #ebdcbc;
+	--color-slate-600: #d0be9b;
+	--color-slate-500: #a08c68;
+	--color-slate-400: #7c6944;
+	--color-slate-300: #5c4a2c;
+	--color-slate-200: #453722;
+	--color-slate-100: #2e2415;
+	--color-slate-50: #17110a;
+	--color-sky-300: #8c5c00;
+	--color-sky-400: #b37a00;
+	--color-sky-500: #d99800;
+	--color-sky-600: #b37a00;
 }
 
-/* ---------- 午夜蓝（冷色深底） ---------- */
+/* ---------- 午夜蓝（arco 蓝压暗做中性底） ---------- */
 .theme-midnight {
 	color-scheme: dark;
-	--theme-fg-strong: #ffffff;
-	--theme-scroll: #22304f;
-	--color-slate-950: #060b18;
-	--color-slate-900: #0c1426;
-	--color-slate-800: #16213c;
-	--color-slate-700: #22304f;
-	--color-slate-600: #33456b;
-	--color-slate-500: #5a6f99;
-	--color-slate-400: #8098c2;
-	--color-slate-300: #a8bcdd;
-	--color-slate-200: #ccd8ee;
-	--color-slate-100: #e6edfa;
+	--theme-scroll: #263454;
+	--color-slate-950: #0b1220;
+	--color-slate-900: #121a2e;
+	--color-slate-800: #1a2440;
+	--color-slate-700: #263454;
+	--color-slate-600: #3a4c74;
+	--color-slate-500: #6b80a8;
+	--color-slate-400: #93a6c9;
+	--color-slate-300: #b8c7e0;
+	--color-slate-200: #d6dff0;
+	--color-slate-100: #eaf0fa;
 	--color-slate-50: #f5f8ff;
-	--color-sky-300: #7dd3fc;
-	--color-sky-400: #38bdf8;
-	--color-sky-500: #0ea5e9;
+	--color-sky-300: #94bfff;
+	--color-sky-400: #6aa1ff;
+	--color-sky-500: #4080ff;
+	--color-sky-600: #165dff;
 }
 
 /* 浅色系：把「深底 + 浅字」的语义色反转成「浅底 + 深字」，
