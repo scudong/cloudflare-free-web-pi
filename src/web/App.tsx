@@ -309,6 +309,45 @@ export default function App() {
 		[sessionId],
 	);
 
+	/** 重命名会话：乐观更新侧栏，失败回滚由下一次刷新兜底。 */
+	const handleRenameSession = useCallback(
+		(id: string, title: string) => {
+			setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)));
+			void api.renameSession(id, title).catch(() => setPanelTick((tick) => tick + 1));
+		},
+		[],
+	);
+
+	/** 删除会话：删掉后若删的是当前会话，切到第一个剩余会话（没有就新建）。 */
+	const handleDeleteSession = useCallback(
+		(id: string) => {
+			void (async () => {
+				try {
+					await api.deleteSession(id);
+				} catch {
+					setPanelTick((tick) => tick + 1);
+					return;
+				}
+				const rest = sessions.filter((s) => s.id !== id);
+				setSessions(rest);
+				if (id === sessionId) {
+					const next = rest[0]?.id;
+					if (next) {
+						abortRef.current?.abort();
+						generationRef.current += 1;
+						setSessionId(next);
+						setMessages([]);
+						setLoading(true);
+					} else {
+						setMessages([]);
+						setPanelTick((tick) => tick + 1);
+					}
+				}
+			})();
+		},
+		[sessions, sessionId],
+	);
+
 	const handleRetry = useCallback(() => {
 		setLoading(true);
 		setLoadError(null);
@@ -389,6 +428,8 @@ export default function App() {
 			onQueryChange={setSessionQuery}
 			onSelect={handleSelectSession}
 			onNewSession={handleNewSession}
+			onRename={handleRenameSession}
+			onDelete={handleDeleteSession}
 			onOpenMemories={handleOpenMemories}
 		/>
 	);

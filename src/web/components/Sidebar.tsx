@@ -9,6 +9,8 @@ interface SidebarProps {
 	onQueryChange: (query: string) => void;
 	onSelect: (id: string) => void;
 	onNewSession: () => void;
+	onRename: (id: string, title: string) => void;
+	onDelete: (id: string) => void;
 	onOpenMemories: () => void;
 }
 
@@ -32,6 +34,8 @@ export function Sidebar({
 	onQueryChange,
 	onSelect,
 	onNewSession,
+	onRename,
+	onDelete,
 	onOpenMemories,
 }: SidebarProps) {
 	const keyword = query.trim().toLowerCase();
@@ -72,12 +76,12 @@ export function Sidebar({
 					{filtered.map((session) => {
 						const current = session.id === currentId;
 						return (
-							<li key={session.id}>
+							<li key={session.id} className="group relative">
 								<button
 									type="button"
 									onClick={() => onSelect(session.id)}
 									aria-current={current ? "true" : undefined}
-									className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+									className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 pr-12 text-left transition-colors ${
 										current
 											? "border-sky-500/40 bg-sky-500/15 text-white"
 											: "border-transparent text-slate-300 hover:bg-slate-800 hover:text-slate-100"
@@ -93,6 +97,33 @@ export function Sidebar({
 										)}
 									</span>
 								</button>
+								<span className="absolute right-1.5 top-1/2 hidden -translate-y-1/2 gap-0.5 group-hover:flex group-focus-within:flex">
+									<button
+										type="button"
+										title="重命名"
+										aria-label={`重命名 ${session.title}`}
+										onClick={(e) => {
+											e.stopPropagation();
+											const next = window.prompt("新的会话名称", session.title);
+											if (next && next.trim() && next.trim() !== session.title) onRename(session.id, next.trim());
+										}}
+										className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-slate-100"
+									>
+										✎
+									</button>
+									<button
+										type="button"
+										title="删除"
+										aria-label={`删除 ${session.title}`}
+										onClick={(e) => {
+											e.stopPropagation();
+											if (window.confirm(`删除会话「${session.title}」？该会话的文件也会一并删除。`)) onDelete(session.id);
+										}}
+										className="rounded p-1 text-slate-400 hover:bg-rose-500/20 hover:text-rose-300"
+									>
+										🗑
+									</button>
+								</span>
 							</li>
 						);
 					})}

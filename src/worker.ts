@@ -22,7 +22,22 @@ const ctx = BACKGROUND_CONTEXT;
 let sqlFacade: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } } | null = null;
 const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } }) => {
 	sql.exec(`CREATE TABLE IF NOT EXISTS pi_mem (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL, created_at TEXT NOT NULL)`);
-	sql.exec(`CREATE TABLE IF NOT EXISTS vfs_files (name TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS vfs_v2 (conversation_id TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (conversation_id, name))`);
+	// 旧版全局文件表 → 迁到 v2 的根会话（'1'），然后丢弃旧表。
+	try {
+		const legacy = sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='vfs_files'").toArray() as { name: string }[];
+		if (legacy.length) {
+			sql.exec(`INSERT OR IGNORE INTO vfs_v2 (conversation_id, name, content, updated_at) SELECT '1', name, content, updated_at FROM vfs_files`);
+			sql.exec(`DROP TABLE vfs_files`);
+		}
+	} catch (err) {
+		console.warn("vfs migration skipped", err);
+	}
+	try {
+		sql.exec(`ALTER TABLE sessions_meta ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0`);
+	} catch {
+		// 列已存在
+	}
 	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS reflect_state (conversation_id TEXT PRIMARY KEY, last_entry_id INTEGER NOT NULL, updated_at TEXT NOT NULL)`);
 	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
@@ -106,12 +121,12 @@ const spikeExtension = defineExtension({
 				name: Type.String({ description: "文件名，如 report.md / notes.txt / main.js" }),
 				content: Type.String({ description: "完整文件内容" }),
 			}),
-			execute: async (args) => {
+			execute: async (args, api) => {
 				const a = args as { name?: unknown; content?: unknown };
 				const name = String(a.name ?? "").trim().replace(/^[/.]+/, "").slice(0, 120);
 				if (!name) return { output: [{ type: "text", text: "文件名不能为空。" }] };
 				const content = String(a.content ?? "");
-				sqlFacade!.exec("INSERT INTO vfs_files (name, content, updated_at) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at", name, content, new Date().toISOString());
+				sqlFacade!.exec("INSERT INTO vfs_v2 (conversation_id, name, content, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(conversation_id, name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at", String(api.conversationId), name, content, new Date().toISOString());
 				return { output: [{ type: "text", text: `已写入 ${name}（${content.length} 字符）。` }] };
 			},
 		}),
@@ -119,9 +134,9 @@ const spikeExtension = defineExtension({
 			name: "read_file",
 			description: "读取工作台文件内容",
 			parameters: Type.Object({ name: Type.String({ description: "文件名" }) }),
-			execute: async (args) => {
+			execute: async (args, api) => {
 				const name = String((args as { name?: unknown }).name ?? "").replace(/^[/.]+/, "");
-				const rows = sqlFacade!.exec("SELECT content FROM vfs_files WHERE name = ?", name).toArray() as { content: string }[];
+				const rows = sqlFacade!.exec("SELECT content FROM vfs_v2 WHERE conversation_id = ? AND name = ?", String(api.conversationId), name).toArray() as { content: string }[];
 				return { output: [{ type: "text", text: rows[0]?.content ?? `文件 ${name} 不存在。` }] };
 			},
 		}),
@@ -129,8 +144,8 @@ const spikeExtension = defineExtension({
 			name: "list_files",
 			description: "列出工作台全部文件",
 			parameters: Type.Object({}),
-			execute: async () => {
-				const rows = sqlFacade!.exec("SELECT name, length(content) AS size, updated_at FROM vfs_files ORDER BY updated_at DESC").toArray() as { name: string; size: number; updated_at: string }[];
+			execute: async (_args, api) => {
+				const rows = sqlFacade!.exec("SELECT name, length(content) AS size, updated_at FROM vfs_v2 WHERE conversation_id = ? ORDER BY updated_at DESC", String(api.conversationId)).toArray() as { name: string; size: number; updated_at: string }[];
 				const text = rows.length ? rows.map((r) => `${r.name} · ${r.size} 字符 · ${r.updated_at.slice(0, 16).replace("T", " ")}`).join("\n") : "工作台还没有文件。";
 				return { output: [{ type: "text", text }] };
 			},
@@ -271,7 +286,7 @@ export class SpikeAgent extends DurableObject {
 		ensureTables(sqlFacade!);
 		const harness = await this.open();
 		const root = await harness.root(ctx);
-		const rows = sqlFacade!.exec("SELECT id, title, created_at, updated_at FROM sessions_meta ORDER BY updated_at DESC").toArray() as {
+		const rows = sqlFacade!.exec("SELECT id, title, created_at, updated_at FROM sessions_meta WHERE deleted = 0 ORDER BY updated_at DESC").toArray() as {
 			id: string; title: string; created_at: string; updated_at: string;
 		}[];
 		const known = new Set(rows.map((r) => r.id));
@@ -281,6 +296,9 @@ export class SpikeAgent extends DurableObject {
 		for (const c of scan.items) {
 			const id = String(c.id);
 			if (known.has(id)) continue;
+			// 已删除的会话不重新出现（元数据表里仍留一行 deleted=1）。
+			const tomb = sqlFacade!.exec("SELECT id FROM sessions_meta WHERE id = ?", id).toArray();
+			if (tomb.length) continue;
 			sqlFacade!.exec(
 				"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
 				id, id === String(root.id) ? "默认会话" : `会话 ${id}`, now, now,
@@ -537,19 +555,37 @@ export class SpikeAgent extends DurableObject {
 			if (request.method === "POST" && url.pathname === "/sessions") {
 				return Response.json(await this.newSession());
 			}
+			if (request.method === "PATCH" && url.pathname === "/sessions") {
+				const { id, title } = (await request.json()) as { id?: string; title?: string };
+				if (!id || !title?.trim()) return Response.json({ error: "缺少 id 或标题" }, { status: 400 });
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec("UPDATE sessions_meta SET title = ?, updated_at = ? WHERE id = ?", title.trim().slice(0, 60), new Date().toISOString(), id);
+				return Response.json({ ok: true });
+			}
+			if (request.method === "DELETE" && url.pathname === "/sessions") {
+				const id = url.searchParams.get("id") ?? "";
+				if (!id) return Response.json({ error: "缺少 id" }, { status: 400 });
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec("UPDATE sessions_meta SET deleted = 1, updated_at = ? WHERE id = ?", new Date().toISOString(), id);
+				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ?", id);
+				return Response.json({ ok: true });
+			}
 			if (url.pathname === "/files" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				const rows = sqlFacade!.exec("SELECT name, length(content) AS size, updated_at FROM vfs_files ORDER BY updated_at DESC").toArray();
+				const sid = url.searchParams.get("sessionId") ?? "1";
+				const rows = sqlFacade!.exec("SELECT name, length(content) AS size, updated_at FROM vfs_v2 WHERE conversation_id = ? ORDER BY updated_at DESC", sid).toArray();
 				return Response.json({ files: rows });
 			}
 			if (url.pathname === "/files/content" && request.method === "GET") {
 				const name = url.searchParams.get("name") ?? "";
-				const rows = sqlFacade!.exec("SELECT name, content FROM vfs_files WHERE name = ?", name).toArray() as { name: string; content: string }[];
+				const sid = url.searchParams.get("sessionId") ?? "1";
+				const rows = sqlFacade!.exec("SELECT name, content FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, name).toArray() as { name: string; content: string }[];
 				if (!rows[0]) return Response.json({ error: "文件不存在" }, { status: 404 });
 				return Response.json(rows[0]);
 			}
 			if (url.pathname === "/files" && request.method === "DELETE") {
-				sqlFacade!.exec("DELETE FROM vfs_files WHERE name = ?", url.searchParams.get("name") ?? "");
+				const sid = url.searchParams.get("sessionId") ?? "1";
+				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/reflect" && request.method === "POST") {
