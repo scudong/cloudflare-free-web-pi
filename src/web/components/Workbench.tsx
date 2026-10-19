@@ -239,7 +239,9 @@ export function Workbench({
 		if (filesLoading) return;
 		if (openName && !files.some((file) => file.name === openName)) {
 			setOpenName(null);
+			onFileOpenChange(false); // 同步通知外层还原宽度 / 退出全宽
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [files, openName, filesLoading]);
 
 	const handleOpenFile = (name: string) => {
@@ -251,7 +253,10 @@ export function Workbench({
 		if (!window.confirm(`确认删除文件「${name}」？此操作不可撤销。`)) return;
 		void (async () => {
 			const ok = await onDeleteFile(name);
-			if (ok && name === openName) setOpenName(null);
+			if (ok && name === openName) {
+				setOpenName(null);
+				onFileOpenChange(false); // 删掉正在看的文件同样还原布局
+			}
 		})();
 	};
 

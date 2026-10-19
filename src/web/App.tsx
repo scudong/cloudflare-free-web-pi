@@ -51,6 +51,8 @@ export default function App() {
 	const [workbenchWide, setWorkbenchWide] = useState(false);
 	const rightWidthRef = useRef(rightWidth);
 	rightWidthRef.current = rightWidth;
+	/** 打开文件前的右栏宽度：关闭文件时还原（null = 无需还原）。 */
+	const widthBeforeFileRef = useRef<number | null>(null);
 
 	// Session list
 	const [sessionId, setSessionId] = useState("1");
@@ -716,6 +718,8 @@ export default function App() {
 		const onUp = () => {
 			window.removeEventListener("pointermove", onMove);
 			window.removeEventListener("pointerup", onUp);
+			// 用户手动调过宽度：关闭文件时不要再还原成打开前的值
+			widthBeforeFileRef.current = null;
 			try {
 				localStorage.setItem("pi-right-width", String(rightWidthRef.current));
 			} catch {
@@ -726,10 +730,20 @@ export default function App() {
 		window.addEventListener("pointerup", onUp);
 	}, [rightWidth]);
 
-	/** 打开文件时自动加宽，保证文档可读（v0.16.0）。 */
+	/**
+	 * 打开文件时自动加宽，保证文档可读（v0.16.0）；
+	 * 关闭文件时还原到打开前的宽度并退出全宽阅读（v0.22.1 修复「关掉标签页后右栏没恢复」）。
+	 */
 	const handleFileOpenChange = useCallback((open: boolean) => {
-		if (!open) return;
-		setRightWidth((w) => (w < 560 ? 560 : w));
+		if (open) {
+			if (widthBeforeFileRef.current === null) widthBeforeFileRef.current = rightWidthRef.current;
+			setRightWidth((w) => (w < 560 ? 560 : w));
+			return;
+		}
+		const before = widthBeforeFileRef.current;
+		widthBeforeFileRef.current = null;
+		if (before !== null) setRightWidth(before);
+		setWorkbenchWide(false);
 	}, []);
 
 	/** 备份：下载全量 JSON。 */
