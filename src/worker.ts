@@ -39,6 +39,11 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	} catch {
 		// 列已存在
 	}
+	try {
+		sql.exec(`ALTER TABLE sessions_meta ADD COLUMN model TEXT NOT NULL DEFAULT 'deepseek-flash'`);
+	} catch {
+		// 列已存在
+	}
 	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS reflect_state (conversation_id TEXT PRIMARY KEY, last_entry_id INTEGER NOT NULL, updated_at TEXT NOT NULL)`);
@@ -154,6 +159,10 @@ const spikeExtension = defineExtension({
 		}),
 	],
 });
+/** 可选模型（pi-ai deepseek provider 的目录）。 */
+const AVAILABLE_MODELS = ["deepseek-flash", "deepseek-v4-pro"];
+const DEFAULT_MODEL_ID = "deepseek-flash";
+
 /** Code mode 扩展：单例即可（沙箱无状态，脚本每次执行新建 VM）。 */
 const codemodeExtension = createCodemodeExtension({
 	sandbox: createInlineCodemodeSandbox({ memoryLimitBytes: 64 * 1024 * 1024 }),
@@ -248,6 +257,7 @@ export class SpikeAgent extends DurableObject {
 		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
 		await root.configure(
 			{
+				model: { provider: "deepseek", modelId: this.modelFor(sessionId) },
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0 ? [spikeExtension, codemodeExtension, mcpExt as never] : [spikeExtension, codemodeExtension],
 				instructions:
 					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
@@ -309,9 +319,21 @@ export class SpikeAgent extends DurableObject {
 	}
 
 	/** 取会话：有 id 用 id（不存在则退根会话），无 id 用根会话；并维护 sessions_meta。 */
+	/** 会话当前模型（未设置时用默认）。 */
+	private modelFor(sessionId?: string): string {
+		if (!sessionId) return DEFAULT_MODEL_ID;
+		try {
+			const row = sqlFacade!.exec("SELECT model FROM sessions_meta WHERE id = ?", sessionId).toArray() as { model?: string }[];
+			const model = row[0]?.model;
+			return model && AVAILABLE_MODELS.includes(model) ? model : DEFAULT_MODEL_ID;
+		} catch {
+			return DEFAULT_MODEL_ID;
+		}
+	}
+
 	private async conversationFor(harness: Awaited<ReturnType<typeof this.open>>, sessionId?: string) {
 		const agentChange = {
-			model: { provider: "deepseek", modelId: "deepseek-flash" },
+			model: { provider: "deepseek", modelId: this.modelFor(sessionId) },
 			extensions: [spikeExtension, codemodeExtension],
 		};
 		if (sessionId) {
@@ -330,7 +352,7 @@ export class SpikeAgent extends DurableObject {
 		const conversation = await harness.createConversation(
 			{
 				ownership: { kind: "ownerless" },
-				agent: { model: { provider: "deepseek", modelId: "deepseek-flash" }, extensions: [spikeExtension, codemodeExtension] },
+				agent: { model: { provider: "deepseek", modelId: DEFAULT_MODEL_ID }, extensions: [spikeExtension, codemodeExtension] },
 			},
 			ctx,
 		);
@@ -347,8 +369,8 @@ export class SpikeAgent extends DurableObject {
 		ensureTables(sqlFacade!);
 		const harness = await this.open();
 		const root = await harness.root(ctx);
-		const rows = sqlFacade!.exec("SELECT id, title, created_at, updated_at FROM sessions_meta WHERE deleted = 0 ORDER BY updated_at DESC").toArray() as {
-			id: string; title: string; created_at: string; updated_at: string;
+		const rows = sqlFacade!.exec("SELECT id, title, created_at, updated_at, model FROM sessions_meta WHERE deleted = 0 ORDER BY updated_at DESC").toArray() as {
+			id: string; title: string; created_at: string; updated_at: string; model?: string;
 		}[];
 		const known = new Set(rows.map((r) => r.id));
 		// 存储里存在但元数据缺失的会话（例如根会话）补一条。
@@ -463,6 +485,7 @@ export class SpikeAgent extends DurableObject {
 		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
 		await root.configure(
 			{
+				model: { provider: "deepseek", modelId: this.modelFor(sessionId) },
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0 ? [spikeExtension, codemodeExtension, mcpExt as never] : [spikeExtension, codemodeExtension],
 				instructions:
 					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
@@ -654,6 +677,23 @@ export class SpikeAgent extends DurableObject {
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/models" && request.method === "GET") {
+				return Response.json({ models: AVAILABLE_MODELS, default: DEFAULT_MODEL_ID });
+			}
+			if (url.pathname === "/model" && request.method === "POST") {
+				const body = (await request.json()) as { sessionId?: string; modelId?: string };
+				const modelId = body.modelId ?? "";
+				if (!AVAILABLE_MODELS.includes(modelId)) {
+					return Response.json({ error: "不支持的模型" }, { status: 400 });
+				}
+				if (!body.sessionId) return Response.json({ error: "缺少 sessionId" }, { status: 400 });
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec(
+					"INSERT INTO sessions_meta (id, title, created_at, updated_at, model) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET model = excluded.model",
+					body.sessionId, "新会话", new Date().toISOString(), new Date().toISOString(), modelId,
+				);
+				return Response.json({ ok: true, modelId });
 			}
 			if (url.pathname === "/mcp" && request.method === "GET") {
 				ensureTables(sqlFacade!);

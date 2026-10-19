@@ -17,6 +17,8 @@ export interface SessionListItem {
 	id: string;
 	title: string;
 	createdAt: string;
+	/** 该会话使用的模型（v6）；旧数据可能为空。 */
+	model?: string;
 }
 
 /** Virtual file produced by the agent's write_file tool. */

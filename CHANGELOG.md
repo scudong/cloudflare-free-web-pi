@@ -2,6 +2,14 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（多模型切换）
+
+### 按会话选择模型（v0.6.0）
+- `GET /api/models`（deepseek-flash / deepseek-v4-pro）、`POST /api/model {sessionId, modelId}`
+- `sessions_meta.model` 持久化，会话列表返回该字段；聊天时 `configure({model})` 生效
+- 中栏顶条模型名改为下拉选择，切换即保存（按会话，不影响其他会话）
+- 验证：两个会话分别用 flash / v4-pro，回答风格与模型一致
+
 ## 2026-10-19（MCP 接入）
 
 ### MCP（Model Context Protocol）工具接入（本条提交）

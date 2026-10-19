@@ -45,6 +45,7 @@ export function parseSessions(raw: unknown): SessionListItem[] {
 		id: pickString(entry, ["id", "sessionId", "session_id"]) || String(index + 1),
 		title: pickString(entry, ["title", "name", "label"]) || `会话 ${index + 1}`,
 		createdAt: pickString(entry, ["created_at", "createdAt", "updated_at"]),
+		model: pickString(entry, ["model", "model_id"]) || undefined,
 	}));
 }
 

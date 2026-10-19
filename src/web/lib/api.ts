@@ -135,6 +135,11 @@ export const api = {
 	deleteFile: (sessionId: string, name: string) =>
 		requestJson<{ ok: boolean }>(withQuery("/api/files", { sessionId, name }), { method: "DELETE" }),
 
+	models: () => requestJson<{ models?: string[]; default?: string }>("/api/models"),
+
+	setModel: (sessionId: string, modelId: string) =>
+		requestJson<{ ok?: boolean }>("/api/model", jsonPost({ sessionId, modelId })),
+
 	mcpServers: () => requestJson<{ servers?: unknown[] }>("/api/mcp"),
 
 	addMcp: (name: string, url: string) =>

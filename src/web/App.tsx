@@ -48,6 +48,8 @@ export default function App() {
 	// Session list
 	const [sessionId, setSessionId] = useState("1");
 	const [sessions, setSessions] = useState<SessionListItem[]>([]);
+	const [models, setModels] = useState<string[]>([]);
+	const [model, setModel] = useState("deepseek-flash");
 	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
 	const [mcpLoading, setMcpLoading] = useState(true);
 	const [mcpError, setMcpError] = useState<string | null>(null);
@@ -266,6 +268,39 @@ export default function App() {
 	const handleStop = useCallback(() => {
 		abortRef.current?.abort();
 	}, []);
+
+	// 可用模型（一次）
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.models();
+				if (!alive) return;
+				const list = Array.isArray(data.models) ? data.models : [];
+				setModels(list);
+				if (data.default) setModel(data.default);
+			} catch {
+				// 保持默认
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, []);
+
+	// 切换会话时，从会话列表带出该会话的模型（若无则默认）
+	useEffect(() => {
+		const listed = sessions.find((s) => s.id === sessionId);
+		if (listed?.model) setModel(listed.model);
+	}, [sessions, sessionId]);
+
+	const handleModelChange = useCallback(
+		(next: string) => {
+			setModel(next);
+			void api.setModel(sessionId, next).catch(() => {});
+		},
+		[sessionId],
+	);
 
 	// MCP 服务器列表（全局，随 panelTick 刷新）
 	useEffect(() => {
@@ -496,7 +531,14 @@ export default function App() {
 
 				{showChat && (
 					<section className="flex min-w-0 flex-1 flex-col" aria-label="聊天">
-						<ChatHeader sessionId={sessionId} sessionTitle={currentSession?.title ?? ""} pending={pending} />
+						<ChatHeader
+							sessionId={sessionId}
+							sessionTitle={currentSession?.title ?? ""}
+							pending={pending}
+							models={models}
+							model={model}
+							onModelChange={handleModelChange}
+						/>
 						<MessageList
 							messages={messages}
 							pending={pending}
