@@ -89,6 +89,12 @@ body {
 	--color-amber-950: #2b1a05;
 	--color-amber-500: #ff7d00;
 	--color-amber-300: #ffb65c;
+	/* 产出文件：Arco cyan（#14C9C9 系列） */
+	--color-cyan-950: #062626;
+	--color-cyan-500: #14c9c9;
+	--color-cyan-400: #3ddbd9;
+	--color-cyan-300: #6ee7e7;
+	--color-cyan-200: #a6f4f4;
 }
 
 /* ---------- 浅色（Arco Light：gray-1..10 + arco 蓝） ---------- */
@@ -180,6 +186,11 @@ body {
 	--color-amber-950: #fff7e8;
 	--color-amber-500: #ff7d00;
 	--color-amber-300: #b45309;
+	--color-cyan-950: #e6fffb;
+	--color-cyan-500: #14c9c9;
+	--color-cyan-400: #0e9a9a;
+	--color-cyan-300: #0b7a7a;
+	--color-cyan-200: #096666;
 	--color-rose-200: #a9151f;
 	--color-rose-300: #cb2634;
 	--color-sky-200: #0e42d2;
@@ -251,4 +262,125 @@ body {
 .theme-sepia .bg-slate-900\/40,
 .theme-sepia .bg-slate-900\/80 {
 	background-color: var(--color-slate-900);
+}
+
+/*
+ * Markdown 排版（v0.25.2）：字号跟随容器，标题/代码/表格用 em 相对缩放，
+ * 因此在窄栏、宽阅读、聊天气泡里都能按各自基准保持一致比例。
+ */
+.md-prose {
+	line-height: 1.75;
+	color: var(--color-slate-200);
+	overflow-wrap: break-word;
+}
+.md-prose > :first-child {
+	margin-top: 0;
+}
+.md-prose > :last-child {
+	margin-bottom: 0;
+}
+.md-prose h1,
+.md-prose h2,
+.md-prose h3,
+.md-prose h4,
+.md-prose h5,
+.md-prose h6 {
+	margin: 1.4em 0 0.55em;
+	font-weight: 600;
+	line-height: 1.35;
+	color: var(--color-slate-100);
+}
+.md-prose h1 {
+	font-size: 1.5em;
+}
+.md-prose h2 {
+	font-size: 1.26em;
+}
+.md-prose h3 {
+	font-size: 1.12em;
+}
+.md-prose h4,
+.md-prose h5,
+.md-prose h6 {
+	font-size: 1em;
+}
+.md-prose p {
+	margin: 0.6em 0;
+}
+.md-prose ul,
+.md-prose ol {
+	margin: 0.6em 0;
+	padding-left: 1.45em;
+}
+.md-prose ul {
+	list-style: disc;
+}
+.md-prose ol {
+	list-style: decimal;
+}
+.md-prose li {
+	margin: 0.22em 0;
+}
+.md-prose li::marker {
+	color: var(--color-slate-500);
+}
+.md-prose li > ul,
+.md-prose li > ol {
+	margin: 0.22em 0;
+}
+.md-prose blockquote {
+	margin: 0.85em 0;
+	padding: 0.15em 0 0.15em 0.9em;
+	border-left: 3px solid var(--color-slate-600);
+	color: var(--color-slate-400);
+}
+.md-prose blockquote p {
+	margin: 0.3em 0;
+}
+.md-prose hr {
+	margin: 1.3em 0;
+	border: 0;
+	border-top: 1px solid var(--color-slate-700);
+}
+.md-prose .md-table-wrap {
+	margin: 0.9em 0;
+	overflow-x: auto;
+	border: 1px solid var(--color-slate-700);
+	border-radius: 0.5rem;
+}
+.md-prose table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.92em;
+}
+.md-prose th,
+.md-prose td {
+	padding: 0.45em 0.7em;
+	border-bottom: 1px solid var(--color-slate-700);
+	vertical-align: top;
+}
+.md-prose thead th {
+	background: var(--color-slate-800);
+	font-weight: 600;
+	color: var(--color-slate-100);
+}
+.md-prose tbody tr:last-child td {
+	border-bottom: 0;
+}
+.md-prose a {
+	color: var(--color-sky-400);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+.md-prose img {
+	max-width: 100%;
+	margin: 0.6em 0;
+	border-radius: 0.5rem;
+	border: 1px solid var(--color-slate-700);
+}
+.md-prose code {
+	font-size: 0.9em;
+}
+.md-prose .md-code-label {
+	font-size: 0.78em;
 }

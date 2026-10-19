@@ -55,7 +55,7 @@ function AssistantBubble({
 			)}
 			{hasBody && message.text.trim() && (
 				<div
-					className={`max-w-[85%] break-words rounded-2xl rounded-bl-md border px-4 py-2.5 text-[15px] leading-relaxed sm:max-w-[72%] ${
+					className={`md-prose w-full break-words rounded-2xl rounded-bl-md border px-4 py-2.5 text-[15px] ${
 						message.error
 							? "border-red-500/40 bg-red-950/40 text-red-200"
 							: "border-slate-700/60 bg-slate-800/80 text-slate-100"
@@ -113,11 +113,13 @@ function PlanPanel({ plan }: { plan: PlanStep[] }) {
 function ArtifactSummary({ files, onOpen }: { files: FileInfo[]; onOpen?: (name: string) => void }) {
 	if (files.length === 0) return null;
 	return (
-		<div className="w-full max-w-md rounded-xl border border-slate-700/60 bg-slate-900/60">
-			<div className="flex items-center gap-2 border-b border-slate-800/70 px-3 py-1.5">
-				<span aria-hidden>📁</span>
-				<span className="text-xs font-medium text-slate-300">产出文件</span>
-				<span className="tabular-nums text-[11px] text-slate-500">{files.length}</span>
+		<div className="w-full rounded-xl border border-cyan-500/35 bg-cyan-950/40">
+			<div className="flex items-center gap-2 border-b border-cyan-500/25 px-3 py-1.5">
+				<span aria-hidden className="text-cyan-400">
+					📁
+				</span>
+				<span className="text-xs font-medium text-slate-200">产出文件</span>
+				<span className="tabular-nums text-[11px] text-cyan-300/80">{files.length}</span>
 			</div>
 			<ul className="flex flex-wrap gap-1 p-2">
 				{files.slice(0, 12).map((file) => (
@@ -126,7 +128,7 @@ function ArtifactSummary({ files, onOpen }: { files: FileInfo[]; onOpen?: (name:
 							type="button"
 							onClick={() => onOpen?.(file.name)}
 							disabled={!onOpen}
-							className="rounded-lg border border-slate-700/70 px-2 py-1 text-[12px] text-slate-300 transition-colors enabled:hover:border-sky-500/50 enabled:hover:text-sky-300"
+							className="rounded-lg border border-cyan-500/30 px-2 py-1 text-[12px] text-cyan-200 transition-colors enabled:hover:border-cyan-400 enabled:hover:bg-cyan-500/10"
 						>
 							{file.name}
 						</button>

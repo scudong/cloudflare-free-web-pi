@@ -199,7 +199,7 @@ function FileView({
 						/>
 					)}
 					{state === "ready" && mode === "preview" && !isHtml && (
-						<article className="text-[13px] leading-relaxed text-slate-200">{renderMarkdown(content)}</article>
+						<article className="md-prose text-[14px] sm:text-[15px] xl:text-[16px]">{renderMarkdown(content)}</article>
 					)}
 					{state === "ready" && mode === "source" && (
 						<pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-slate-300">{content}</pre>

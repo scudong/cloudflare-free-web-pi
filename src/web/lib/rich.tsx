@@ -92,16 +92,16 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
 	return (
 		<div className="my-2 overflow-hidden rounded-lg border border-slate-700 bg-slate-950/70">
 			<div className="flex items-center justify-between border-b border-slate-800 px-3 py-1">
-				<span className="font-mono text-[11px] uppercase tracking-wide text-slate-500">{lang || "text"}</span>
+				<span className="md-code-label font-mono uppercase tracking-wide text-slate-500">{lang || "text"}</span>
 				<button
 					type="button"
 					onClick={copy}
-					className="rounded px-1.5 py-0.5 text-[11px] text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
+					className="rounded px-1.5 py-0.5 text-[0.78em] text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
 				>
 					{copied ? "已复制" : "复制"}
 				</button>
 			</div>
-			<pre className="overflow-x-auto p-3 text-[12.5px] leading-relaxed">
+			<pre className="overflow-x-auto p-3 text-[0.9em] leading-relaxed">
 				<code className="font-mono text-slate-200">{code}</code>
 			</pre>
 		</div>
@@ -128,10 +128,7 @@ function renderList(items: ListItem[], ordered: boolean, keyBase: string): React
 
 	const ListTag = ordered ? "ol" : "ul";
 	return (
-		<ListTag
-			key={keyBase}
-			className={`my-1 space-y-0.5 pl-5 ${ordered ? "list-decimal" : "list-disc"} marker:text-slate-500`}
-		>
+		<ListTag key={keyBase}>
 			{roots.map(({ item, children }, index) => (
 				<li key={index} className={item.task ? "list-none" : undefined}>
 					{renderItemMarker(item)}
@@ -143,10 +140,15 @@ function renderList(items: ListItem[], ordered: boolean, keyBase: string): React
 	);
 }
 
-/** 表格对齐：`:---` 左、`:---:` 中、`---:` 右。 */
+/** 分隔行单元格：`---` / `:---` / `:---:` / `---:`。 */
+function isSeparatorCell(cell: string): boolean {
+	return /^:?-{2,}:?$/.test(cell.trim());
+}
+
+/** 表格对齐：`:---` 左、`:---:` 中、`---:` 右；无冒号按默认（不设 text-align）。 */
 function parseAlign(cell: string): "left" | "center" | "right" | undefined {
 	const t = cell.trim();
-	if (!/^:?-{2,}:?$/.test(t)) return undefined;
+	if (!isSeparatorCell(t)) return undefined;
 	const l = t.startsWith(":");
 	const r = t.endsWith(":");
 	return l && r ? "center" : r ? "right" : l ? "left" : undefined;
@@ -173,11 +175,9 @@ export function renderMarkdown(text: string): ReactNode[] {
 		const items = quote;
 		quote = [];
 		nodes.push(
-			<blockquote key={key++} className="my-1.5 border-l-2 border-slate-600 pl-3 text-slate-400">
+			<blockquote key={key++}>
 				{items.map((item, index) => (
-					<p key={index} className="my-0.5">
-						{renderRichText(item)}
-					</p>
+					<p key={index}>{renderRichText(item)}</p>
 				))}
 			</blockquote>,
 		);
@@ -193,18 +193,14 @@ export function renderMarkdown(text: string): ReactNode[] {
 		table = [];
 		const header = rows[0] ?? [];
 		const aligns = (rows[1] ?? []).map(parseAlign);
-		const body = rows.filter((row, index) => index > 0 && !row.every((cell) => parseAlign(cell)));
+		const body = rows.filter((row, index) => index > 0 && !row.every(isSeparatorCell));
 		nodes.push(
-			<div key={key++} className="my-2 overflow-x-auto rounded-lg border border-slate-700">
-				<table className="w-full border-collapse text-[13px]">
+			<div key={key++} className="md-table-wrap">
+				<table>
 					<thead>
 						<tr>
 							{header.map((cell, index) => (
-								<th
-									key={index}
-									style={{ textAlign: aligns[index] }}
-									className="border-b border-slate-700 bg-slate-800/60 px-2 py-1 font-medium"
-								>
+								<th key={index} style={{ textAlign: aligns[index] }}>
 									{renderRichText(cell)}
 								</th>
 							))}
@@ -212,13 +208,9 @@ export function renderMarkdown(text: string): ReactNode[] {
 					</thead>
 					<tbody>
 						{body.map((row, rIndex) => (
-							<tr key={rIndex} className="even:bg-slate-800/20">
+							<tr key={rIndex}>
 								{row.map((cell, cIndex) => (
-									<td
-										key={cIndex}
-										style={{ textAlign: aligns[cIndex] }}
-										className="border-b border-slate-800 px-2 py-1 align-top"
-									>
+									<td key={cIndex} style={{ textAlign: aligns[cIndex] }}>
 										{renderRichText(cell)}
 									</td>
 								))}
@@ -261,7 +253,7 @@ export function renderMarkdown(text: string): ReactNode[] {
 		// 分隔线
 		if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
 			flushAll();
-			nodes.push(<hr key={key++} className="my-3 border-slate-700" />);
+			nodes.push(<hr key={key++} />);
 			continue;
 		}
 
@@ -269,21 +261,11 @@ export function renderMarkdown(text: string): ReactNode[] {
 		const heading = /^(#{1,6})\s+(.+)$/.exec(line);
 		if (heading) {
 			flushAll();
-			const level = heading[1]?.length ?? 1;
+			const level = Math.min(6, heading[1]?.length ?? 1);
 			const content = heading[2] ?? "";
-			const cls =
-				level === 1
-					? "mb-1.5 mt-3 text-lg font-semibold text-white first:mt-0"
-					: level === 2
-						? "mb-1 mt-2.5 text-base font-semibold text-slate-100 first:mt-0"
-						: level === 3
-							? "mb-1 mt-2 text-[15px] font-semibold text-slate-200 first:mt-0"
-							: "mt-2 text-sm font-semibold text-slate-300 first:mt-0";
-			nodes.push(
-				<div key={key++} className={cls}>
-					{renderRichText(content)}
-				</div>,
-			);
+			const tags = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
+			const Tag = tags[level - 1]!;
+			nodes.push(<Tag key={key++}>{renderRichText(content)}</Tag>);
 			continue;
 		}
 
@@ -328,11 +310,7 @@ export function renderMarkdown(text: string): ReactNode[] {
 		}
 
 		flushAll();
-		nodes.push(
-			<p key={key++} className="my-0.5">
-				{renderRichText(line)}
-			</p>,
-		);
+		nodes.push(<p key={key++}>{renderRichText(line)}</p>);
 	}
 	flushAll();
 	return nodes;

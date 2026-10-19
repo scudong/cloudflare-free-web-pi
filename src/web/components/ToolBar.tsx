@@ -20,7 +20,7 @@ function ToolPill({ tool, all }: { tool: ToolCallInfo; all: ToolCallInfo[] }) {
 
 	return (
 		<div
-			className={`max-w-full self-start border text-xs ${
+			className={`w-full border text-xs ${
 				tool.status === "error"
 					? "border-rose-500/30 bg-rose-950/30 text-rose-200/90"
 					: "border-emerald-500/30 bg-emerald-950/40 text-emerald-200/90"
@@ -82,7 +82,7 @@ export function ToolBar({ tools }: { tools: ToolCallInfo[] }) {
 	const known = new Set(tools.map((t) => t.id).filter(Boolean) as string[]);
 	const top = tools.filter((t) => !t.parentId || !known.has(t.parentId));
 	return (
-		<div className="flex flex-col items-start gap-1">
+		<div className="flex w-full flex-col items-stretch gap-1">
 			{top.map((tool, index) => (
 				<ToolPill key={tool.id ?? `${tool.name}-${index}`} tool={tool} all={tools} />
 			))}

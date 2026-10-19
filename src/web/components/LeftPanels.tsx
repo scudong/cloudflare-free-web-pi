@@ -462,7 +462,7 @@ export function SkillPanel({
 								</div>
 								{skill.description && <p className="mt-0.5 text-[11px] text-slate-500">{skill.description}</p>}
 								{openName === skill.name && (
-									<div className="mt-1 max-h-64 overflow-y-auto rounded-md border border-slate-700 bg-slate-950/50 p-2 text-[12px] leading-relaxed">
+									<div className="md-prose mt-1 max-h-64 overflow-y-auto rounded-md border border-slate-700 bg-slate-950/50 p-2 text-[12px]">
 										{renderMarkdown(skill.content)}
 									</div>
 								)}

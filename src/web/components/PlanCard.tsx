@@ -7,7 +7,7 @@ export function PlanCard({ steps }: { steps: PlanStep[] }) {
 	const allDone = done === steps.length;
 
 	return (
-		<div className="w-full max-w-[92%] overflow-hidden rounded-xl border border-slate-700/70 bg-slate-900/70">
+		<div className="w-full overflow-hidden rounded-xl border border-slate-700/70 bg-slate-900/70">
 			<div className="flex items-center gap-2 border-b border-slate-800/80 px-3 py-1.5">
 				<span aria-hidden>{allDone ? "✅" : "🗒️"}</span>
 				<span className="text-xs font-medium text-slate-200">计划</span>

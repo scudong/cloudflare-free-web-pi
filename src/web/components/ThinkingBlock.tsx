@@ -27,7 +27,7 @@ export function ThinkingBlock({ text, streaming }: ThinkingBlockProps) {
 	if (!text.trim()) return null;
 
 	return (
-		<div className="w-full max-w-[92%] overflow-hidden rounded-xl border border-violet-500/35 bg-violet-950/50">
+		<div className="w-full overflow-hidden rounded-xl border border-violet-500/35 bg-violet-950/50">
 			<button
 				type="button"
 				onClick={() => setOpen((v) => !v)}
