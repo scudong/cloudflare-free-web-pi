@@ -1,0 +1,76 @@
+src/web/lib/collections.ts
+  00512495ff504ece 1,103-111
+src/web/lib/api.ts
+  00512495ff504ece 147-153
+src/worker.ts
+  00512495ff504ece 49,113-134,330,332,528-545,562,607-614,874,876,1074-1093
+src/web/App.tsx
+  00512495ff504ece 11-12,14,42-53,73-75,363-404,694-702,829-833
+src/web/types.ts
+  00512495ff504ece 56-62
+src/web/components/Workbench.tsx
+  00512495ff504ece 4,6,19-23,187-188,256-269,510-623,638-642,682,705,710,724,733-739
+src/web/lib/rich.tsx
+  00512495ff504ece 9-10,17-41,49-50,56-58,62,73-142,144-145,147-166,169,173-176,180-181,183,188,190-193,202-217,220,222-223,225,229-232,237,244
+src/web/lib/localStore.ts
+  00512495ff504ece 24-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "8add81742e49d4ccbbf342f2c25dede7b0371c9c",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 520,
+      "total_deletions": 41,
+      "accepted_lines": 520,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/Workbench.tsx": {
+          "additions": 154,
+          "deletions": 11,
+          "accepted_lines": 154
+        },
+        "src/web/lib/localStore.ts": {
+          "additions": 11,
+          "accepted_lines": 11
+        },
+        "src/web/App.tsx": {
+          "additions": 75,
+          "deletions": 5,
+          "accepted_lines": 75
+        },
+        "src/worker.ts": {
+          "additions": 80,
+          "deletions": 2,
+          "accepted_lines": 80
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 11,
+          "deletions": 1,
+          "accepted_lines": 11
+        },
+        "src/web/lib/rich.tsx": {
+          "additions": 175,
+          "deletions": 22,
+          "accepted_lines": 175
+        },
+        "src/web/types.ts": {
+          "additions": 7,
+          "accepted_lines": 7
+        },
+        "src/web/lib/api.ts": {
+          "additions": 7,
+          "accepted_lines": 7
+        }
+      }
+    }
+  }
+}
