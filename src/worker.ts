@@ -1070,7 +1070,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				return Response.json({ ok: true });
 			}
 			if (request.method === "GET" && url.pathname === "/version") {
-				return Response.json({ do: "v0.12.1", images: true });
+				return Response.json({ build: (this.env as { BUILD?: string }).BUILD ?? "dev", images: true, search: true });
 			}
 			if (request.method === "GET" && url.pathname === "/session") {
 				return Response.json({ ok: true, name: "pi-harness-spike" });

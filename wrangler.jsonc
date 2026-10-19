@@ -1,5 +1,6 @@
 {
   "name": "pi-harness-spike",
+  "vars": { "BUILD": "dev" },
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
