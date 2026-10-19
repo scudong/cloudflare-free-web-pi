@@ -12,6 +12,7 @@ import { api } from "./lib/api";
 import { parseEntries, truncateOneLine } from "./lib/entries";
 import { parseAutomations, parseFiles, parseMemories, parseSessions, parseSkills } from "./lib/collections";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
+import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
 import type { AutomationInfo, ChatMessage, FileArtifact, FileInfo, McpServerInfo, MemoryInfo, PlanStep, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
 
@@ -57,13 +58,7 @@ export default function App() {
 	// Session list
 	const [sessionId, setSessionId] = useState("1");
 	const [sessions, setSessions] = useState<SessionListItem[]>([]);
-	const [light, setLight] = useState(() => {
-		try {
-			return document.documentElement.classList.contains("theme-light");
-		} catch {
-			return false;
-		}
-	});
+	const [theme, setTheme] = useState<ThemeId>(() => readTheme());
 	const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean } | null>(null);
 	const [loginError, setLoginError] = useState<string | null>(null);
 	const [models, setModels] = useState<string[]>([]);
@@ -679,22 +674,10 @@ export default function App() {
 		[sessionId],
 	);
 
-	/** 主题切换：浅色/深色，写入 localStorage 供首屏脚本使用。 */
-	const handleToggleTheme = useCallback(() => {
-		setLight((prev) => {
-			const next = !prev;
-			try {
-				document.documentElement.classList.toggle("theme-light", next);
-				localStorage.setItem("pi-theme", next ? "light" : "dark");
-				const scheme = document.querySelector('meta[name="color-scheme"]');
-				if (scheme) scheme.setAttribute("content", next ? "light" : "dark");
-				const themeColor = document.querySelector('meta[name="theme-color"]');
-				if (themeColor) themeColor.setAttribute("content", next ? "#f8fafc" : "#020617");
-			} catch {
-				// 无 localStorage 时仅本次会话生效
-			}
-			return next;
-		});
+	/** 主题切换（v0.24.0）：深色/浅色/米黄/午夜蓝，写入 localStorage 供首屏脚本使用。 */
+	const handleThemeChange = useCallback((next: ThemeId) => {
+		setTheme(next);
+		applyTheme(next);
 	}, []);
 
 	/** 从聊天里的文件卡打开右栏预览。 */
@@ -1089,8 +1072,8 @@ export default function App() {
 			<SettingsDialog
 				open={settingsOpen}
 				onClose={() => setSettingsOpen(false)}
-				light={light}
-				onToggleTheme={handleToggleTheme}
+				theme={theme}
+				onThemeChange={handleThemeChange}
 				leftOpen={leftOpen}
 				rightOpen={rightOpen}
 				onToggleLeft={toggleLeft}

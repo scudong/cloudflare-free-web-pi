@@ -40,11 +40,16 @@ body {
 }
 
 /*
- * 浅色主题（v0.11.0）：直接反转 Tailwind v4 的 slate/sky/rose/amber 调色板变量。
+ * 主题（v0.24.0）：全部通过覆盖 Tailwind v4 的 slate 调色板变量实现，
  * 组件里写的 bg-slate-900 / text-slate-100 等都编译成 var(--color-slate-*)，因此无需改任何组件。
+ *   深色（默认，无需 class）/ 浅色 theme-light / 米黄 theme-sepia / 午夜蓝 theme-midnight
  */
+
+/* ---------- 浅色 ---------- */
 .theme-light {
 	color-scheme: light;
+	--theme-fg-strong: #0f172a;
+	--theme-scroll: #cfd9e6;
 	--color-slate-950: #f8fafc;
 	--color-slate-900: #ffffff;
 	--color-slate-800: #e8eef6;
@@ -64,27 +69,82 @@ body {
 	--color-amber-300: #b45309;
 }
 
-.theme-light * {
-	scrollbar-color: #cfd9e6 transparent;
-}
-.theme-light *::-webkit-scrollbar-thumb {
-	background-color: #cfd9e6;
+/* ---------- 米黄（暖色浅底，长时间阅读更柔和） ---------- */
+.theme-sepia {
+	color-scheme: light;
+	--theme-fg-strong: #2b2118;
+	--theme-scroll: #ddd0b8;
+	--color-slate-950: #f4eee1;
+	--color-slate-900: #fbf6ea;
+	--color-slate-800: #efe6d2;
+	--color-slate-700: #ddcfb4;
+	--color-slate-600: #b8a68c;
+	--color-slate-500: #8a7a63;
+	--color-slate-400: #6b5c47;
+	--color-slate-300: #4d4032;
+	--color-slate-200: #3a2f24;
+	--color-slate-100: #2b2118;
+	--color-slate-50: #1a1410;
+	--color-sky-300: #0f5f73;
+	--color-sky-400: #14708a;
+	--color-sky-500: #0e7490;
+	--color-rose-300: #a8321f;
+	--color-amber-300: #9a5b12;
 }
 
-/* 浅色主题下的对比度修正：
+/* ---------- 午夜蓝（冷色深底） ---------- */
+.theme-midnight {
+	color-scheme: dark;
+	--theme-fg-strong: #ffffff;
+	--theme-scroll: #22304f;
+	--color-slate-950: #060b18;
+	--color-slate-900: #0c1426;
+	--color-slate-800: #16213c;
+	--color-slate-700: #22304f;
+	--color-slate-600: #33456b;
+	--color-slate-500: #5a6f99;
+	--color-slate-400: #8098c2;
+	--color-slate-300: #a8bcdd;
+	--color-slate-200: #ccd8ee;
+	--color-slate-100: #e6edfa;
+	--color-slate-50: #f5f8ff;
+	--color-sky-300: #7dd3fc;
+	--color-sky-400: #38bdf8;
+	--color-sky-500: #0ea5e9;
+}
+
+/* 滚动条跟随主题 */
+.theme-light *,
+.theme-sepia *,
+.theme-midnight * {
+	scrollbar-color: var(--theme-scroll) transparent;
+}
+.theme-light *::-webkit-scrollbar-thumb,
+.theme-sepia *::-webkit-scrollbar-thumb,
+.theme-midnight *::-webkit-scrollbar-thumb {
+	background-color: var(--theme-scroll);
+}
+
+/* 浅色系对比度修正：
    组件里 bg-sky-500/15 + text-white 的选中态在浅底上白字不可读，统一改成深色文字；
    实心主按钮（bg-sky-600 text-white）仍保持白字。 */
-.theme-light .text-white {
-	color: #0f172a;
+.theme-light .text-white,
+.theme-sepia .text-white {
+	color: var(--theme-fg-strong);
 }
 .theme-light .bg-sky-600.text-white,
-.theme-light .bg-rose-600.text-white {
+.theme-light .bg-rose-600.text-white,
+.theme-sepia .bg-sky-600.text-white,
+.theme-sepia .bg-rose-600.text-white {
 	color: #ffffff;
 }
 
 /* 深色底上的半透明叠色在浅色主题下需要更实的背景 */
 .theme-light .bg-slate-900\/60,
 .theme-light .bg-slate-900\/40,
-.theme-light .bg-slate-900\/80 {
-	background-color: #ffffff;
+.theme-light .bg-slate-900\/80,
+.theme-sepia .bg-slate-900\/60,
+.theme-sepia .bg-slate-900\/40,
+.theme-sepia .bg-slate-900\/80 {
+	background-color: var(--color-slate-900);
 }

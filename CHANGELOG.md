@@ -2,6 +2,16 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（四套主题）
+
+### 新增米黄、午夜蓝主题（v0.24.0）
+- 外观从「深/浅」两套扩展为**四套**：深色（默认）、浅色、**米黄**（暖色浅底，长时间阅读更柔和）、**午夜蓝**（冷色深底）
+- 设置 → 外观改为四宫格选择器，每格带色块预览
+- 实现沿用变量覆盖：只改 `--color-slate-*` 调色板 + 少量对比度修正，组件零改动
+- `?theme=sepia` / `?theme=midnight` 可直接指定；`pi-theme` 记住选择，首屏内联脚本防闪烁
+- 主题逻辑抽到 `lib/theme.ts`（`THEMES` / `readTheme` / `applyTheme`）
+- 实测四套主题的 `<html>` class 与 body 背景色：`theme-sepia` #f4eee1、`theme-midnight` #060b18、`theme-light` #f8fafc、深色 slate-950
+
 ## 2026-10-19（输入框调用技能）
 
 ### 输入框 `/` 唤起技能（v0.23.0）

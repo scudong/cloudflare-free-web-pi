@@ -1,13 +1,14 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { formatTime } from "../lib/format";
+import { THEMES, type ThemeId } from "../lib/theme";
 import type { MemoryInfo } from "../types";
 
 interface SettingsDialogProps {
 	open: boolean;
 	onClose: () => void;
-	/** 当前是否浅色主题。 */
-	light: boolean;
-	onToggleTheme: () => void;
+	/** 当前主题（v0.24.0：深色/浅色/米黄/午夜蓝）。 */
+	theme: ThemeId;
+	onThemeChange: (next: ThemeId) => void;
 	leftOpen: boolean;
 	rightOpen: boolean;
 	onToggleLeft: () => void;
@@ -66,8 +67,8 @@ const actionButton =
 export function SettingsDialog({
 	open,
 	onClose,
-	light,
-	onToggleTheme,
+	theme,
+	onThemeChange,
 	leftOpen,
 	rightOpen,
 	onToggleLeft,
@@ -123,23 +124,30 @@ export function SettingsDialog({
 				</div>
 
 				<Section title="外观">
-					<div className="inline-flex rounded-lg border border-slate-700 p-0.5">
-						<button
-							type="button"
-							onClick={() => light && onToggleTheme()}
-							aria-pressed={!light}
-							className={`rounded-md px-3 py-1.5 text-sm transition-colors ${!light ? "bg-sky-600 text-white" : "text-slate-300 hover:text-white"}`}
-						>
-							🌙 深色
-						</button>
-						<button
-							type="button"
-							onClick={() => !light && onToggleTheme()}
-							aria-pressed={light}
-							className={`rounded-md px-3 py-1.5 text-sm transition-colors ${light ? "bg-sky-600 text-white" : "text-slate-300 hover:text-white"}`}
-						>
-							☀️ 浅色
-						</button>
+					<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+						{THEMES.map((option) => (
+							<button
+								key={option.id}
+								type="button"
+								onClick={() => onThemeChange(option.id)}
+								aria-pressed={theme === option.id}
+								className={`flex flex-col items-center gap-1.5 rounded-lg border px-2 py-2.5 text-xs transition-colors ${
+									theme === option.id
+										? "border-sky-500/70 bg-sky-500/10 text-slate-100"
+										: "border-slate-700 text-slate-300 hover:border-slate-600 hover:text-white"
+								}`}
+							>
+								<span
+									aria-hidden
+									className="h-6 w-full rounded border border-slate-600/60"
+									style={{ backgroundColor: option.swatch }}
+								/>
+								<span className="flex items-center gap-1">
+									<span aria-hidden>{option.icon}</span>
+									{option.label}
+								</span>
+							</button>
+						))}
 					</div>
 				</Section>
 
