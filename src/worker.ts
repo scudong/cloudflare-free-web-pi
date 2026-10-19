@@ -1034,10 +1034,81 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 	}
 }
 
+/* ---------------- 访问控制（v0.10.0） ---------------- */
+
+const SESSION_COOKIE = "pi_access";
+const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
+
+/** 会话令牌 = HMAC(ACCESS_PASSWORD, 固定串)，改密码即全体失效。 */
+async function accessToken(password: string): Promise<string> {
+	const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+	const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("pi-harness-access-v1")));
+	return [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function timingSafeEqualStr(a: string, b: string): boolean {
+	if (a.length !== b.length) return false;
+	let diff = 0;
+	for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+	return diff === 0;
+}
+
+function cookieValue(request: Request, name: string): string | null {
+	const header = request.headers.get("cookie");
+	if (!header) return null;
+	for (const part of header.split(";")) {
+		const [key, ...rest] = part.trim().split("=");
+		if (key === name) return decodeURIComponent(rest.join("="));
+	}
+	return null;
+}
+
+async function isAuthorized(request: Request, password: string): Promise<boolean> {
+	const token = cookieValue(request, SESSION_COOKIE);
+	if (!token) return false;
+	return timingSafeEqualStr(token, await accessToken(password));
+}
+
 export default {
-	fetch(request: Request, env: { SpikeAgent: DurableObjectNamespace }): Response | Promise<Response> {
+	async fetch(request: Request, env: { SpikeAgent: DurableObjectNamespace; ACCESS_PASSWORD?: string }): Promise<Response> {
 		const url = new URL(request.url);
-		if (url.pathname.startsWith("/agent/") || url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/")) {
+		const password = env.ACCESS_PASSWORD ?? "";
+		const protect = Boolean(password);
+
+		// 登录/登出/状态：不需要已登录。
+		if (url.pathname === "/api/auth" && request.method === "GET") {
+			return Response.json({ required: protect, authenticated: protect ? await isAuthorized(request, password) : true });
+		}
+		if (url.pathname === "/api/login" && request.method === "POST") {
+			if (!protect) return Response.json({ ok: true, required: false });
+			const body = (await request.json().catch(() => ({}))) as { password?: string };
+			if (!timingSafeEqualStr(String(body.password ?? ""), password)) {
+				return Response.json({ error: "密码不正确" }, { status: 401 });
+			}
+			const token = await accessToken(password);
+			return new Response(JSON.stringify({ ok: true }), {
+				headers: {
+					"content-type": "application/json",
+					"set-cookie": `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`,
+				},
+			});
+		}
+		if (url.pathname === "/api/logout" && request.method === "POST") {
+			return new Response(JSON.stringify({ ok: true }), {
+				headers: {
+					"content-type": "application/json",
+					"set-cookie": `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+				},
+			});
+		}
+
+		// 分享页保持公开：只读、只含被打包的内容。
+		const isShare = url.pathname.startsWith("/s/");
+		if (protect && url.pathname.startsWith("/api/") && !isShare && !(await isAuthorized(request, password))) {
+			return Response.json({ error: "未登录" }, { status: 401 });
+		}
+
+		if (url.pathname.startsWith("/agent/") || url.pathname.startsWith("/api/") || isShare) {
 			const stub = env.SpikeAgent.get(env.SpikeAgent.idFromName("spike"));
 			const inner = new URL(request.url);
 			inner.pathname = url.pathname.replace(/^\/(agent|api)/, "") || "/";

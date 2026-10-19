@@ -48,6 +48,8 @@ export default function App() {
 	// Session list
 	const [sessionId, setSessionId] = useState("1");
 	const [sessions, setSessions] = useState<SessionListItem[]>([]);
+	const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean } | null>(null);
+	const [loginError, setLoginError] = useState<string | null>(null);
 	const [models, setModels] = useState<string[]>([]);
 	const [model, setModel] = useState("deepseek-flash");
 	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
@@ -270,6 +272,36 @@ export default function App() {
 	/** 停止：only abort the wait; the in-flight request's catch/finally does the cleanup. */
 	const handleStop = useCallback(() => {
 		abortRef.current?.abort();
+	}, []);
+
+	// 访问控制（一次）
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.auth();
+				if (alive) setAuth({ required: !!data.required, authenticated: !!data.authenticated });
+			} catch {
+				if (alive) setAuth({ required: false, authenticated: true });
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, []);
+
+	const handleLogin = useCallback(async (password: string) => {
+		setLoginError(null);
+		try {
+			const result = await api.login(password);
+			if (result.ok === false) {
+				setLoginError(result.error ?? "密码不正确");
+				return;
+			}
+			setAuth({ required: true, authenticated: true });
+		} catch {
+			setLoginError("密码不正确");
+		}
 	}, []);
 
 	// 可用模型（一次）
@@ -580,6 +612,16 @@ export default function App() {
 		[sessionId, nextId],
 	);
 
+	// 未登录：整屏登录闸门（登录成功后同一组件继续渲染）
+	if (auth && auth.required && !auth.authenticated) {
+		return <LoginGate onSubmit={handleLogin} error={loginError} />;
+	}
+	if (!auth) {
+		return (
+			<div className="flex h-dvh items-center justify-center bg-slate-950 text-sm text-slate-500">正在检查访问权限…</div>
+		);
+	}
+
 	const currentSession = sessions.find((s) => s.id === sessionId);
 	const sessionLabel = sessionName || (currentSession ? currentSession.title : "");
 	const showSidebar = isDesktop && leftOpen;
@@ -718,6 +760,48 @@ export default function App() {
 					))}
 				</nav>
 			)}
+		</div>
+	);
+}
+
+/** 访问密码登录闸门（v0.10.0）。 */
+function LoginGate({ onSubmit, error }: { onSubmit: (password: string) => Promise<void>; error: string | null }) {
+	const [password, setPassword] = useState("");
+	const [busy, setBusy] = useState(false);
+	return (
+		<div className="flex h-dvh items-center justify-center bg-slate-950 px-4">
+			<form
+				onSubmit={(e) => {
+					e.preventDefault();
+					if (!password.trim() || busy) return;
+					setBusy(true);
+					void onSubmit(password.trim()).finally(() => setBusy(false));
+				}}
+				className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900/80 p-7 shadow-xl"
+			>
+				<div className="mb-1 flex items-center gap-2">
+					<span aria-hidden className="text-lg">π</span>
+					<h1 className="text-lg font-semibold text-slate-100">π Harness</h1>
+				</div>
+				<p className="mb-5 text-sm text-slate-400">请输入访问密码</p>
+				{error && <p className="mb-3 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
+				<input
+					type="password"
+					value={password}
+					onChange={(e) => setPassword(e.target.value)}
+					placeholder="访问密码"
+					aria-label="访问密码"
+					autoFocus
+					className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500"
+				/>
+				<button
+					type="submit"
+					disabled={busy || !password.trim()}
+					className="w-full rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40"
+				>
+					{busy ? "验证中…" : "进入"}
+				</button>
+			</form>
 		</div>
 	);
 }

@@ -2,6 +2,16 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（访问控制）
+
+### 访问密码登录（v0.10.0）
+- 环境变量 `ACCESS_PASSWORD`（wrangler secret）；未设置时服务保持开放（向后兼容）
+- `GET /api/auth` 返回是否需要登录；`POST /api/login` 校验后下发 `pi_access` cookie（HMAC-SHA256，HttpOnly/Secure/SameSite=Lax，30 天）；`POST /api/logout` 清除
+- 外层 Worker 统一拦截：`/api/*` 未登录返回 401；`/s/*` 分享页保持公开
+- 改密码 = 全部会话立即失效（token 由密码派生）
+- 前端未登录时显示整屏登录闸门
+- 注意：本版本之前部署是**完全开放**的，若曾暴露需更换 DeepSeek key
+
 ## 2026-10-19（只读分享）
 
 ### 只读分享链接（v0.9.0）

@@ -135,6 +135,13 @@ export const api = {
 	deleteFile: (sessionId: string, name: string) =>
 		requestJson<{ ok: boolean }>(withQuery("/api/files", { sessionId, name }), { method: "DELETE" }),
 
+	auth: () => requestJson<{ required?: boolean; authenticated?: boolean }>("/api/auth"),
+
+	login: (password: string) =>
+		requestJson<{ ok?: boolean; error?: string }>("/api/login", jsonPost({ password })),
+
+	logout: () => requestJson<{ ok?: boolean }>("/api/logout", { method: "POST" }),
+
 	models: () => requestJson<{ models?: string[]; default?: string }>("/api/models"),
 
 	setModel: (sessionId: string, modelId: string) =>
