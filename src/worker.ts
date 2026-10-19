@@ -22,6 +22,7 @@ let sqlFacade: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } } | 
 const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } }) => {
 	sql.exec(`CREATE TABLE IF NOT EXISTS pi_mem (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS vfs_files (name TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 };
 
 const stripHtml = (html: string) =>
@@ -135,6 +136,8 @@ const codemodeExtension = createCodemodeExtension({
 });
 
 export class SpikeAgent extends DurableObject {
+	/** pi-durable 的存储句柄，用来枚举会话（Harness 本身不提供列表 API）。 */
+	private storageRef: { scanConversations(q: object, limit: number, cursor: undefined, context: unknown): Promise<unknown> } | null = null;
 
 	private harness: Harness | null = null;
 
@@ -150,17 +153,16 @@ export class SpikeAgent extends DurableObject {
 			const storage = await openDurableObjectSqliteStorage(this.ctx.storage);
 			ensureTables(this.ctx.storage.sql);
 			sqlFacade = this.ctx.storage.sql;
+			this.storageRef = storage;
 			this.harness = await Harness.open(storage, { models, registry }, ctx);
 			this.harness.resume();
 		}
 		return this.harness;
 	}
 
-	async chat(message: string): Promise<{ answer: string; tools: { name: string; summary: string }[] }> {
+	async chat(message: string, sessionId?: string): Promise<{ answer: string; tools: { name: string; summary: string }[] }> {
 		const harness = await this.open();
-		const root = await harness.root(ctx, {
-			agent: { model: { provider: "deepseek", modelId: "deepseek-flash" }, extensions: [spikeExtension, codemodeExtension] },
-		});
+		const root = await this.conversationFor(harness, sessionId);
 		// 会话首次创建后 agent 选择会固化在 pi.agent 文档里；幂等重设，保证新扩展开关对老会话也生效。
 		await root.configure(
 			{
@@ -183,6 +185,23 @@ export class SpikeAgent extends DurableObject {
 		const text = typeof c === "string" ? c : Array.isArray(c)
 			? c.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).join("")
 			: "";
+		// 会话标题：首轮用消息前 24 字，之后只更新时间。
+		try {
+			const id = String(root.id);
+			const now = new Date().toISOString();
+			const meta = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", id).toArray() as { title: string }[];
+			const title = meta[0]?.title;
+			if (!title || title === "新会话" || /^会话 \d+$/.test(title)) {
+				sqlFacade!.exec(
+					"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at",
+					id, message.slice(0, 24), now, now,
+				);
+			} else {
+				sqlFacade!.exec("UPDATE sessions_meta SET updated_at = ? WHERE id = ?", now, id);
+			}
+		} catch (e) {
+			console.warn("session meta update failed", e);
+		}
 		const page2 = await root.entries({}, 60, undefined, ctx);
 		const tools: { name: string; summary: string }[] = [];
 		for (const e of page2.items as unknown as Record<string, unknown>[]) {
@@ -196,22 +215,79 @@ export class SpikeAgent extends DurableObject {
 		return { answer: text || "(empty)", tools: tools.slice(-6) };
 	}
 
-	async entries(): Promise<unknown> {
+	async entries(sessionId?: string): Promise<unknown> {
 		const harness = await this.open();
-		const root = await harness.root(ctx);
-		const page = await root.entries({}, 200, undefined, ctx);
+		const conversation = await this.conversationFor(harness, sessionId);
+		const page = await conversation.entries({}, 200, undefined, ctx);
 		return page.items;
 	}
 
-	async reset(): Promise<{ ok: true }> {
-		if (this.harness) {
-			await this.harness.close(ctx);
-			this.harness = null;
+	/** 取会话：有 id 用 id（不存在则退根会话），无 id 用根会话；并维护 sessions_meta。 */
+	private async conversationFor(harness: Awaited<ReturnType<typeof this.open>>, sessionId?: string) {
+		const agentChange = {
+			model: { provider: "deepseek", modelId: "deepseek-flash" },
+			extensions: [spikeExtension, codemodeExtension],
+		};
+		if (sessionId) {
+			const numeric = Number(sessionId);
+			if (Number.isFinite(numeric) && numeric > 0) {
+				const existing = await harness.conversation(numeric as never, ctx);
+				if (existing) return existing;
+			}
 		}
-		const sql = this.ctx.storage.sql;
-		const tables = sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").toArray() as { name: string }[];
-		for (const t of tables) sql.exec(`DELETE FROM ${JSON.stringify(t.name).replace(/"/g, '"')}`);
-		ensureTables(sql);
+		return harness.root(ctx, { agent: agentChange });
+	}
+
+	/** 新建会话，返回 id。 */
+	async newSession(): Promise<{ id: string; title: string }> {
+		const harness = await this.open();
+		const conversation = await harness.createConversation(
+			{
+				ownership: { kind: "ownerless" },
+				agent: { model: { provider: "deepseek", modelId: "deepseek-flash" }, extensions: [spikeExtension, codemodeExtension] },
+			},
+			ctx,
+		);
+		const now = new Date().toISOString();
+		sqlFacade!.exec(
+			"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+			String(conversation.id), "新会话", now, now,
+		);
+		return { id: String(conversation.id), title: "新会话" };
+	}
+
+	/** 会话列表：元数据表为准，缺失的从存储枚举补齐（含根会话）。 */
+	async listSessions(): Promise<{ sessions: { id: string; title: string; created_at: string; updated_at: string }[] }> {
+		ensureTables(sqlFacade!);
+		const harness = await this.open();
+		const root = await harness.root(ctx);
+		const rows = sqlFacade!.exec("SELECT id, title, created_at, updated_at FROM sessions_meta ORDER BY updated_at DESC").toArray() as {
+			id: string; title: string; created_at: string; updated_at: string;
+		}[];
+		const known = new Set(rows.map((r) => r.id));
+		// 存储里存在但元数据缺失的会话（例如根会话）补一条。
+		const scan = (await this.storageRef!.scanConversations({}, 100, undefined, ctx)) as { items: readonly { id: unknown }[] };
+		const now = new Date().toISOString();
+		for (const c of scan.items) {
+			const id = String(c.id);
+			if (known.has(id)) continue;
+			sqlFacade!.exec(
+				"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+				id, id === String(root.id) ? "默认会话" : `会话 ${id}`, now, now,
+			);
+			rows.push({ id, title: id === String(root.id) ? "默认会话" : `会话 ${id}`, created_at: now, updated_at: now });
+		}
+		return { sessions: rows };
+	}
+
+	/** 重置一个会话的转录（工作台文件与记忆库保留）。 */
+	async reset(sessionId?: string): Promise<{ ok: true }> {
+		const harness = await this.open();
+		const conversation = await this.conversationFor(harness, sessionId);
+		await conversation.reset(undefined, ctx);
+		if (sessionId) {
+			sqlFacade!.exec("UPDATE sessions_meta SET title = ?, updated_at = ? WHERE id = ?", "新会话", new Date().toISOString(), sessionId);
+		}
 		return { ok: true };
 	}
 
@@ -221,8 +297,8 @@ export class SpikeAgent extends DurableObject {
 			// 所有路由都先确保 DO 初始化（sqlFacade/表/Harness 就绪），幂等。
 			if (url.pathname !== "/") await this.open();
 			if (request.method === "POST" && url.pathname === "/chat") {
-				const { message } = (await request.json()) as { message: string };
-				return Response.json(await this.chat(message));
+				const { message, sessionId } = (await request.json()) as { message: string; sessionId?: string };
+				return Response.json(await this.chat(message, sessionId));
 			}
 			if (request.method === "GET" && url.pathname === "/debug/agent") {
 				const harness = await this.open();
@@ -245,7 +321,10 @@ export class SpikeAgent extends DurableObject {
 				});
 			}
 			if (request.method === "GET" && url.pathname === "/sessions") {
-				return Response.json({ sessions: [{ id: "1", title: "当前会话", created_at: new Date().toISOString() }] });
+				return Response.json(await this.listSessions());
+			}
+			if (request.method === "POST" && url.pathname === "/sessions") {
+				return Response.json(await this.newSession());
 			}
 			if (url.pathname === "/files" && request.method === "GET") {
 				ensureTables(sqlFacade!);
@@ -275,10 +354,11 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true, name: "pi-harness-spike" });
 			}
 			if (request.method === "GET" && url.pathname === "/entries") {
-				return Response.json(await this.entries());
+				return Response.json(await this.entries(url.searchParams.get("sessionId") ?? undefined));
 			}
 			if (request.method === "POST" && url.pathname === "/reset") {
-				return Response.json(await this.reset());
+				const body = (await request.json().catch(() => ({}))) as { sessionId?: string };
+				return Response.json(await this.reset(body.sessionId));
 			}
 			return Response.json({ error: "not found" }, { status: 404 });
 		} catch (e) {

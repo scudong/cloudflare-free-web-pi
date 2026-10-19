@@ -77,6 +77,8 @@ export const api = {
 
 	/** GET /api/sessions — v3 returns a list; v1 may return only the current one. */
 	sessions: () => requestJson<{ sessions?: unknown[] }>("/api/sessions"),
+	/** POST /api/sessions — create a new conversation and return its id. */
+	createSession: () => requestJson<{ id?: string; title?: string }>("/api/sessions", { method: "POST" }),
 
 	chat: (message: string, sessionId: string, signal?: AbortSignal) =>
 		requestJson<ChatResult>("/api/chat", { ...jsonPost({ message, sessionId }), signal }),

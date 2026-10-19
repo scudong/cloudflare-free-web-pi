@@ -222,30 +222,33 @@ export default function App() {
 		abortRef.current?.abort();
 	}, []);
 
-	/** 新会话：abort in-flight wait → POST /api/reset → clear the UI and refresh panels. */
-	const handleReset = useCallback(() => {
+	/** 新会话：abort in-flight wait → POST /api/sessions → switch to the new conversation. */
+	const handleNewSession = useCallback(() => {
 		if (resetting) return;
 		abortRef.current?.abort();
 		generationRef.current += 1;
 		setResetting(true);
 
 		void (async () => {
-			let ok = true;
+			let created: { id?: string } | null = null;
 			try {
-				await api.reset(sessionId);
+				created = await api.createSession();
 			} catch {
-				ok = false;
+				created = null;
 			}
+			setResetting(false);
+			const id = created?.id;
+			if (!id) {
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "新建会话失败，请重试。" }]);
+				return;
+			}
+			setSessionId(id);
 			setMessages([]);
 			setPending(false);
 			setElapsed(0);
-			setResetting(false);
-			setPanelTick((tick) => tick + 1); // reset wipes backend files/memories too
-			if (!ok) {
-				setMessages([{ id: nextId(), role: "notice", text: "重置请求失败，已清空本地界面。" }]);
-			}
+			setPanelTick((tick) => tick + 1); // refresh the session list
 		})();
-	}, [resetting, nextId, sessionId]);
+	}, [resetting, nextId]);
 
 	/** Switch to another session from the sidebar (v3). */
 	const handleSelectSession = useCallback(
@@ -343,7 +346,7 @@ export default function App() {
 			memoryCount={memories.length}
 			onQueryChange={setSessionQuery}
 			onSelect={handleSelectSession}
-			onNewSession={handleReset}
+			onNewSession={handleNewSession}
 			onOpenMemories={handleOpenMemories}
 		/>
 	);
