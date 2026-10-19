@@ -87,13 +87,14 @@ export const api = {
 	streamChat: async (
 		message: string,
 		sessionId: string,
+		images: string[],
 		onEvent: (event: { type: string; [key: string]: unknown }) => void,
 		signal?: AbortSignal,
 	): Promise<void> => {
 		const resp = await fetch("/api/chat/stream", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ message, sessionId }),
+			body: JSON.stringify({ message, sessionId, ...(images.length ? { images } : {}) }),
 			signal,
 		});
 		if (!resp.ok || !resp.body) throw new Error(`流式请求失败（HTTP ${resp.status}）`);
@@ -125,7 +126,8 @@ export const api = {
 	chat: (message: string, sessionId: string, signal?: AbortSignal) =>
 		requestJson<ChatResult>("/api/chat", { ...jsonPost({ message, sessionId }), signal }),
 
-	entries: (sessionId?: string) => requestJson<{ entries: unknown[] }>(withQuery("/api/entries", { sessionId: sessionId ?? "" })),
+	/** 后端返回条目数组本身（不是 { entries } 包装），由调用方宽容解析。 */
+	entries: (sessionId?: string) => requestJson<unknown>(withQuery("/api/entries", { sessionId: sessionId ?? "" })),
 
 	files: (sessionId: string) => requestJson<{ files?: unknown[] }>(withQuery("/api/files", { sessionId })),
 

@@ -5,12 +5,26 @@ import { ToolBar } from "./ToolBar";
 
 const AUTO_SCROLL_THRESHOLD = 80;
 
-function UserBubble({ text }: { text: string }) {
+function UserBubble({ message }: { message: Extract<ChatMessage, { role: "user" }> }) {
 	return (
-		<div className="flex justify-end">
-			<div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-sky-600 px-4 py-2.5 text-[15px] leading-relaxed text-white sm:max-w-[72%]">
-				{renderRichText(text)}
-			</div>
+		<div className="flex flex-col items-end gap-1.5">
+			{message.images && message.images.length > 0 && (
+				<div className="flex max-w-[85%] flex-wrap justify-end gap-1.5 sm:max-w-[72%]">
+					{message.images.map((src, index) => (
+						<img
+							key={`${src.slice(0, 24)}-${index}`}
+							src={src}
+							alt={`图片 ${index + 1}`}
+							className="max-h-44 max-w-[12rem] rounded-xl border border-slate-700 object-cover"
+						/>
+					))}
+				</div>
+			)}
+			{message.text && message.text !== "（图片）" && (
+				<div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-sky-600 px-4 py-2.5 text-[15px] leading-relaxed text-white sm:max-w-[72%]">
+					{renderRichText(message.text)}
+				</div>
+			)}
 		</div>
 	);
 }
@@ -19,15 +33,17 @@ function AssistantBubble({ message }: { message: Extract<ChatMessage, { role: "a
 	return (
 		<div className="flex flex-col items-start gap-1.5">
 			{message.tools && message.tools.length > 0 && <ToolBar tools={message.tools} />}
-			<div
-				className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-bl-md border px-4 py-2.5 text-[15px] leading-relaxed sm:max-w-[72%] ${
-					message.error
-						? "border-red-500/40 bg-red-950/40 text-red-200"
-						: "border-slate-700/60 bg-slate-800/80 text-slate-100"
-				}`}
-			>
-				{renderRichText(message.text)}
-			</div>
+			{(message.text.trim() || !message.tools?.length) && (
+				<div
+					className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-bl-md border px-4 py-2.5 text-[15px] leading-relaxed sm:max-w-[72%] ${
+						message.error
+							? "border-red-500/40 bg-red-950/40 text-red-200"
+							: "border-slate-700/60 bg-slate-800/80 text-slate-100"
+					}`}
+				>
+					{renderRichText(message.text)}
+				</div>
+			)}
 		</div>
 	);
 }
@@ -117,7 +133,7 @@ export function MessageList({ messages, pending, elapsed, loading, loadError, on
 				{messages.map((message) => {
 					switch (message.role) {
 						case "user":
-							return <UserBubble key={message.id} text={message.text} />;
+							return <UserBubble key={message.id} message={message} />;
 						case "assistant":
 							return <AssistantBubble key={message.id} message={message} />;
 						case "tool":

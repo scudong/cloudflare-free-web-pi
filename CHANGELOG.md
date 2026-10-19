@@ -2,6 +2,19 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（图片输入 + 历史修复）
+
+### 图片输入（v0.12.0）
+- `POST /api/chat` 与 `/api/chat/stream` 接受 `images: string[]`（data URL，最多 4 张），转为 pi-ai `ImageContent` 内容块提交
+- 输入框新增 📎 附件按钮 + 粘贴图片；前端压缩到最长边 1568px（有透明保 PNG，否则 JPEG 0.85），带缩略图预览与移除
+- 用户气泡渲染图片；导出/分享仍只取文字
+
+### 修复：历史消息不显示（重要）
+- `GET /api/entries` 返回的是**数组**，前端却按 `{ entries }` 读取 → 历史一直为空（界面停在「开始与 π 对话」）
+- 条目 `kind` 形如 `pi.user` / `pi.assistant`，解析时未去前缀 → 进一步导致匹配失败；现已统一归一化
+- 工具活动 pill 的 `toolName` / 内容在 `model[0]` 里，已补充解析（此前显示为空 pill）
+- 助手仅含工具调用时不再渲染空气泡
+
 ## 2026-10-19（主题切换）
 
 ### 浅色 / 深色主题（v0.11.0）

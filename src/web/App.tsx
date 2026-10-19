@@ -112,7 +112,9 @@ export default function App() {
 				if (!alive) return;
 				setOnline(session.ok !== false);
 				setSessionName(typeof session.name === "string" ? session.name : "");
-				setMessages(parseEntries(entries.entries));
+				// 后端直接返回数组；兼容旧格式 { entries: [...] }
+				const list = Array.isArray(entries) ? entries : (entries as { entries?: unknown[] } | null)?.entries;
+				setMessages(parseEntries(list));
 				setLoadError(null);
 			} catch (err) {
 				if (!alive) return;
@@ -183,13 +185,13 @@ export default function App() {
 
 	/** Send one message (event handler, not an effect). */
 	const handleSend = useCallback(
-		(text: string) => {
+		(text: string, images: string[] = []) => {
 			if (pending) return;
 			const generation = generationRef.current;
 			const controller = new AbortController();
 			abortRef.current = controller;
 
-			setMessages((prev) => [...prev, { id: nextId(), role: "user", text }]);
+			setMessages((prev) => [...prev, { id: nextId(), role: "user", text: text || "（图片）", images: images.length ? images : undefined }]);
 			setPending(true);
 			setElapsed(0);
 
@@ -217,6 +219,7 @@ export default function App() {
 					await api.streamChat(
 						text,
 						sessionId,
+						images,
 						(event) => {
 							if (generationRef.current !== generation) return;
 							if (event.type === "text") {

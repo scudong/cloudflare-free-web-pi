@@ -7,7 +7,7 @@ export interface ToolCallInfo {
 
 /** Message list entry. notice = system hint (stopped / reset failed...); tool = orphan tool activity row. */
 export type ChatMessage =
-	| { id: string; role: "user"; text: string }
+	| { id: string; role: "user"; text: string; images?: string[] }
 	| { id: string; role: "assistant"; text: string; tools?: ToolCallInfo[]; error?: boolean }
 	| { id: string; role: "tool"; tools: ToolCallInfo[] }
 	| { id: string; role: "notice"; text: string };

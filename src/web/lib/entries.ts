@@ -17,7 +17,12 @@ export function truncateOneLine(text: string, max: number): string {
  */
 function textOf(value: unknown): string {
 	if (typeof value === "string") return value;
-	if (Array.isArray(value)) return value.map((part) => textOf(part)).join("");
+	if (Array.isArray(value)) {
+		return value
+			.filter((part) => !(part && typeof part === "object" && (part as { type?: unknown }).type === "image"))
+			.map((part) => textOf(part))
+			.join("");
+	}
 	if (value !== null && typeof value === "object") {
 		const o = value as Record<string, unknown>;
 		for (const key of ["text", "content", "output", "result", "summary", "message"]) {
@@ -25,6 +30,28 @@ function textOf(value: unknown): string {
 		}
 	}
 	return "";
+}
+
+/** 从条目内容块里收集图片，转成可直接渲染的 data URL。 */
+function imagesOf(value: unknown): string[] {
+	const found: string[] = [];
+	const walk = (node: unknown) => {
+		if (Array.isArray(node)) {
+			for (const item of node) walk(item);
+			return;
+		}
+		if (!node || typeof node !== "object") return;
+		const o = node as Record<string, unknown>;
+		if (o.type === "image" && typeof o.data === "string") {
+			found.push(`data:${typeof o.mimeType === "string" ? o.mimeType : "image/png"};base64,${o.data}`);
+			return;
+		}
+		for (const key of ["content", "model", "message", "parts"]) {
+			if (o[key] !== undefined) walk(o[key]);
+		}
+	};
+	walk(value);
+	return found;
 }
 
 function pickString(o: Record<string, unknown>, keys: string[]): string {
@@ -57,22 +84,38 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 	for (const raw of list) {
 		if (raw === null || typeof raw !== "object") continue;
 		const entry = raw as Record<string, unknown>;
-		const kind = pickString(entry, ["kind", "type"]);
+		// 后端条目 kind 形如 pi.user / pi.assistant / pi.tool-result，这里统一去掉前缀。
+		const kind = pickString(entry, ["kind", "type"]).replace(/^pi\./, "");
 
 		if (kind === "user") {
-			const text = textOf(entry.content ?? entry.text).trim();
-			if (!text) continue;
+			const body = entry.model ?? entry.content ?? entry.text;
+			const text = textOf(body).trim();
+			const images = imagesOf(body);
+			if (!text && images.length === 0) continue;
 			flushStandaloneTools();
-			messages.push({ id: `u${seq++}`, role: "user", text });
+			messages.push({ id: `u${seq++}`, role: "user", text: text || "（图片）", ...(images.length ? { images } : {}) });
 		} else if (kind === "assistant") {
-			const text = textOf(entry.content ?? entry.text).trim();
+			const text = textOf(entry.model ?? entry.content ?? entry.text).trim();
 			const tools = pendingTools;
 			pendingTools = [];
 			if (!text && tools.length === 0) continue;
 			messages.push({ id: `a${seq++}`, role: "assistant", text, tools: tools.length ? tools : undefined });
 		} else if (kind === "tool-result" || kind === "tool_result" || kind === "toolResult") {
-			const name = pickString(entry, ["name", "toolName", "tool", "tool_name"]) || "工具";
-			const rawSummary = textOf(entry.summary ?? entry.output ?? entry.content ?? entry.result ?? entry.text);
+			// 后端把工具结果放在 model[0]：{ toolName, content: [{type:"text",text}] }
+			const firstModel = Array.isArray(entry.model) ? (entry.model[0] as Record<string, unknown> | undefined) : undefined;
+			const name =
+				pickString(entry, ["name", "toolName", "tool", "tool_name"]) ||
+				(firstModel ? pickString(firstModel, ["toolName", "name"]) : "") ||
+				"工具";
+			const rawSummary = textOf(
+				entry.summary ??
+					entry.output ??
+					entry.content ??
+					entry.result ??
+					entry.text ??
+					firstModel?.content ??
+					firstModel?.output,
+			);
 			const failed = entry.isError === true || entry.is_error === true || entry.error === true;
 			const prefix = failed ? "失败：" : "";
 			const summary = truncateOneLine(rawSummary, TOOL_SUMMARY_MAX);

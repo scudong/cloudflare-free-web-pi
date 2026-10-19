@@ -161,6 +161,25 @@ const spikeExtension = defineExtension({
 		}),
 	],
 });
+/** 把 data URL 解析成 pi-ai 的图片块；不合法的丢弃。 */
+function toImageBlocks(images: string[] | undefined): { type: "image"; data: string; mimeType: string }[] {
+	if (!images?.length) return [];
+	const blocks: { type: "image"; data: string; mimeType: string }[] = [];
+	for (const url of images.slice(0, 4)) {
+		const match = /^data:(image\/(?:png|jpe?g|webp));base64,(.+)$/.exec(url);
+		if (!match) continue;
+		blocks.push({ type: "image", data: match[2]!, mimeType: match[1]! });
+	}
+	return blocks;
+}
+
+/** 用户输入：有图片时用内容块数组，否则纯文本。 */
+function userContent(message: string, images: string[] | undefined): string | { type: string; [key: string]: unknown }[] {
+	const blocks = toImageBlocks(images);
+	if (!blocks.length) return message;
+	return [{ type: "text", text: message || "（图片）" }, ...blocks];
+}
+
 /** 可选模型（pi-ai deepseek provider 的目录）。 */
 const AVAILABLE_MODELS = ["deepseek-flash", "deepseek-v4-pro"];
 const DEFAULT_MODEL_ID = "deepseek-flash";
@@ -252,7 +271,11 @@ export class SpikeAgent extends DurableObject {
 		return this.harness;
 	}
 
-	async chat(message: string, sessionId?: string): Promise<{ answer: string; tools: { name: string; summary: string }[] }> {
+	async chat(
+		message: string,
+		sessionId?: string,
+		images?: string[],
+	): Promise<{ answer: string; tools: { name: string; summary: string }[] }> {
 		const harness = await this.open();
 		const root = await this.conversationFor(harness, sessionId);
 		// 会话首次创建后 agent 选择会固化在 pi.agent 文档里；幂等重设，保证新扩展开关对老会话也生效。
@@ -271,7 +294,7 @@ export class SpikeAgent extends DurableObject {
 		// 记录本轮起点：之后只把新增条目里的工具结果算作本轮工具活动。
 		const before = await root.entries({}, 1, undefined, ctx);
 		const beforeId = (before.items[0] as unknown as { id?: number } | undefined)?.id ?? 0;
-		const submission = await root.submit({ type: "input", content: message }, ctx);
+		const submission = await root.submit({ type: "input", content: userContent(message, images) as never }, ctx);
 		const settled = await submission.wait(ctx);
 		if (settled.status !== "done" || settled.type !== "input") {
 			throw new Error(`run failed: ${JSON.stringify(settled).slice(0, 300)}`);
@@ -679,7 +702,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 	}
 
 	/** 流式聊天：SSE 推送 text delta / 工具开始结束 / 最终 done。 */
-	async chatStream(message: string, sessionId?: string): Promise<Response> {
+	async chatStream(message: string, sessionId?: string, images?: string[]): Promise<Response> {
 		const harness = await this.open();
 		const root = await this.conversationFor(harness, sessionId);
 		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
@@ -726,7 +749,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				}
 			});
 			try {
-				const submission = await root.submit({ type: "input", content: message }, ctx);
+				const submission = await root.submit({ type: "input", content: userContent(message, images) as never }, ctx);
 				const settled = await submission.wait(ctx);
 				const page2 = await root.entries({}, 60, undefined, ctx);
 				const lastId = Number((page2.items[0] as unknown as { id?: number } | undefined)?.id ?? 0);
@@ -807,12 +830,20 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 			// 所有路由都先确保 DO 初始化（sqlFacade/表/Harness 就绪），幂等。
 			if (url.pathname !== "/") await this.open();
 			if (request.method === "POST" && url.pathname === "/chat/stream") {
-				const { message, sessionId } = (await request.json()) as { message: string; sessionId?: string };
-				return await this.chatStream(message, sessionId);
+				const { message, sessionId, images } = (await request.json()) as {
+					message: string;
+					sessionId?: string;
+					images?: string[];
+				};
+				return await this.chatStream(message, sessionId, images);
 			}
 			if (request.method === "POST" && url.pathname === "/chat") {
-				const { message, sessionId } = (await request.json()) as { message: string; sessionId?: string };
-				return Response.json(await this.chat(message, sessionId));
+				const { message, sessionId, images } = (await request.json()) as {
+					message: string;
+					sessionId?: string;
+					images?: string[];
+				};
+				return Response.json(await this.chat(message, sessionId, images));
 			}
 			if (request.method === "GET" && url.pathname === "/debug/agent") {
 				const harness = await this.open();
