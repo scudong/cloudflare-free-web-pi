@@ -55,6 +55,7 @@ Cloudflare Worker（静态前端 + API 入口）
 
 ```bash
 npm install
+npm test                     # 金标回归（单元 + 接口），约 3 秒
 
 # 本地开发（.dev.vars 里放密钥）
 echo "DEEPSEEK_API_KEY=sk-..." >> .dev.vars
@@ -133,6 +134,7 @@ src/
     lib/                 #   api 客户端、SSE 解析、Markdown 渲染、宽容解析器
 wrangler.jsonc           # Worker + DO + 静态资源绑定
 .github/workflows/deploy.yml
+tests/                   # 金标用例（unit 纯函数 / api 接口），见 tests/README.md
 CHANGELOG.md             # 逐版本更新记录
 ```
 
@@ -142,7 +144,7 @@ CHANGELOG.md             # 逐版本更新记录
 
 完整记录见 [CHANGELOG.md](./CHANGELOG.md)。里程碑：
 
-`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏 · `v0.22` 思考/计划/轨迹 · `v0.23` 输入框调用技能 · `v0.24` 四套主题 · `v0.25` Arco 色卡 · `v0.26` 设置分 tab · `v0.27` 模型供应商
+`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏 · `v0.22` 思考/计划/轨迹 · `v0.23` 输入框调用技能 · `v0.24` 四套主题 · `v0.25` Arco 色卡 · `v0.26` 设置分 tab · `v0.27` 模型供应商 · `v0.28` 金标回归
 
 ## 致谢
 

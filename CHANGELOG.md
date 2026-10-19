@@ -2,6 +2,20 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（金标回归测试体系）
+
+### 每个功能配金标用例，CI 卡门禁（v0.28.0）
+- 引入 **Vitest**，新增 44 条确定性用例，`npm test` 一条命令全跑（约 3 秒）
+- **单元金标**（30 条，纯函数，毫秒级）：
+  - `rich.test.tsx`：Markdown 标题/表格（含「分隔行不入数据行」）/ 任务列表 / 嵌套列表 / 代码块 props / HTML 与 `javascript:` 链接的 XSS 防护 / 行内格式
+  - `entries.test.ts`：转录倒序自动反转、思考块提取、工具归属、`write_file` 文件产出、空输入与未知 kind 容错
+  - `theme.test.ts`：四套主题注册表、`isThemeId`、无 DOM 环境下安全降级
+  - `format.test.ts`：文件大小与时间格式化
+- **接口金标**（14 条，自动 `wrangler dev --persist-to tests/.tmp-state`，用完即清）：访问控制、会话增删改查、思考档位读写、**模型供应商全链路**（新增/掩码/启用/模型跟随/切回默认/删除/404/缺密钥 400）、技能、记忆一键清空、备份键完整性、恢复、导出、版本
+- **CI 门禁**：`.github/workflows/deploy.yml` 在 `wrangler deploy` 前插入 `npm test`，用例不过不部署
+- 文档：`tests/README.md` 写明「一个功能至少一条用例」的约定、目录结构、启动方式与已知未覆盖项
+- 顺带修了用例暴露出的两个真实问题：`applyTheme` 在无 DOM 环境会抛错；文件产出原先挂到上一条助手消息，改为与工具 pill 一致挂到下一条
+
 ## 2026-10-19（LLM 供应商管理）
 
 ### 设置新增「模型」tab：CCswitch 式供应商切换（v0.27.0）

@@ -45,11 +45,15 @@ export function readTheme(): ThemeId {
 /** 应用主题：切换 html 上的 theme-* 类 + 更新 meta + 记住选择。 */
 export function applyTheme(id: ThemeId): void {
 	const meta = THEMES.find((t) => t.id === id) ?? THEMES[0]!;
-	const root = document.documentElement;
-	for (const cls of THEME_CLASSES) root.classList.remove(cls);
-	if (meta.id !== "dark") root.classList.add(`theme-${meta.id}`);
-	document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", meta.scheme);
-	document.querySelector('meta[name="theme-color"]')?.setAttribute("content", meta.color);
+	try {
+		const root = document.documentElement;
+		for (const cls of THEME_CLASSES) root.classList.remove(cls);
+		if (meta.id !== "dark") root.classList.add(`theme-${meta.id}`);
+		document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", meta.scheme);
+		document.querySelector('meta[name="theme-color"]')?.setAttribute("content", meta.color);
+	} catch {
+		// 无 DOM（测试 / SSR）时只跳过视觉部分
+	}
 	try {
 		localStorage.setItem(THEME_KEY, meta.id);
 	} catch {

@@ -4,9 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
     "dev:web": "vite src/web",
-    "build:web": "vite build src/web --outDir ../../dist-web"
+    "build:web": "vite build src/web --outDir ../../dist-web",
+    "test:unit": "vitest run tests/unit",
+    "test:api": "vitest run tests/api"
   },
   "keywords": [],
   "author": "",
@@ -28,6 +30,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
+    "vitest": "^5.0.5",
     "wrangler": "^4.151.0"
   }
 }

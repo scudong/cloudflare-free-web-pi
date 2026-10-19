@@ -130,6 +130,8 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 	const list = isDescending(raw) ? [...raw].reverse() : raw;
 	const messages: ChatMessage[] = [];
 	let pendingTools: ToolCallInfo[] = [];
+	/** 待挂到下一条助手消息的文件产出。 */
+	let pendingFiles: { name: string; size?: number }[] = [];
 	let seq = 0;
 
 	const flushStandaloneTools = () => {
@@ -157,12 +159,15 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			const tools = pendingTools;
 			pendingTools = [];
 			if (!text && tools.length === 0 && !thinking) continue;
+			const files = pendingFiles;
+			pendingFiles = [];
 			messages.push({
 				id: `a${seq++}`,
 				role: "assistant",
 				text,
 				tools: tools.length ? tools : undefined,
 				thinking: thinking || undefined,
+				files: files.length ? files : undefined,
 			});
 		} else if (kind === "tool-result" || kind === "tool_result" || kind === "toolResult") {
 			// 后端把工具结果放在 model[0]：{ toolName, content: [{type:"text",text}] }
@@ -185,14 +190,8 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			const summary = truncateOneLine(rawSummary, TOOL_SUMMARY_MAX);
 			// Keep the untruncated original so the pill can expand to the full output
 			pendingTools.push({ name, summary: prefix + summary, full: prefix + rawSummary });
-			// 文件产出：挂到最近一条助手消息上（v0.22.0）
-			const files = artifactsOf(name, rawSummary);
-			if (files.length) {
-				const last = messages[messages.length - 1];
-				if (last && last.role === "assistant") {
-					last.files = [...(last.files ?? []), ...files];
-				}
-			}
+			// 文件产出：留到下一条助手消息一起渲染（v0.25.2 修正归属）
+			pendingFiles.push(...artifactsOf(name, rawSummary));
 		}
 		// 其他 kind：宽容跳过
 	}
