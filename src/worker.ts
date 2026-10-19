@@ -543,6 +543,9 @@ export class SpikeAgent extends DurableObject {
 	): Promise<{ answer: string; tools: { name: string; summary: string }[] }> {
 		const harness = await this.open();
 		const root = await this.conversationFor(harness, sessionId);
+		// 显式技能调用（v0.23.0）：/技能名 命中后把技能正文注入本轮 instructions
+		const inv = this.skillInvocation(message);
+		const effectiveMessage = inv ? inv.rest || `请按技能「${inv.name}」执行。` : message;
 		// 会话首次创建后 agent 选择会固化在 pi.agent 文档里；幂等重设，保证新扩展开关对老会话也生效。
 		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
 		await root.configure(
@@ -553,9 +556,7 @@ export class SpikeAgent extends DurableObject {
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
 					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
 					: [spikeExtension, codemodeExtension, toolSearchExtension],
-				instructions: this.instructionsWithSkills(
-					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
-				),
+				instructions: this.buildInstructions(inv),
 			},
 			ctx,
 		);
@@ -564,6 +565,7 @@ export class SpikeAgent extends DurableObject {
 		// 记录本轮起点：之后只把新增条目里的工具结果算作本轮工具活动。
 		const before = await root.entries({}, 1, undefined, ctx);
 		const beforeId = (before.items[0] as unknown as { id?: number } | undefined)?.id ?? 0;
+		// 转录里保留「/技能名」原文（与气泡一致），技能正文只进本轮 instructions
 		const submission = await root.submit({ type: "input", content: userContent(message, images) as never }, ctx);
 		const settled = await submission.wait(ctx);
 		if (settled.status !== "done" || settled.type !== "input") {
@@ -583,7 +585,7 @@ export class SpikeAgent extends DurableObject {
 			if (!title || title === "新会话" || /^会话 \d+$/.test(title)) {
 				sqlFacade!.exec(
 					"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at",
-					id, message.slice(0, 24), now, now,
+					id, effectiveMessage.slice(0, 24), now, now,
 				);
 			} else {
 				sqlFacade!.exec("UPDATE sessions_meta SET updated_at = ? WHERE id = ?", now, id);
@@ -591,8 +593,7 @@ export class SpikeAgent extends DurableObject {
 		} catch (e) {
 			console.warn("session meta update failed", e);
 		}
-		const page2 = await root.entries({}, 60, undefined, ctx);
-		const lastId = Number((page2.items[0] as unknown as { id?: number } | undefined)?.id ?? 0);
+		const page2 = await root.entries({}, 60, undefined, ctx);		const lastId = Number((page2.items[0] as unknown as { id?: number } | undefined)?.id ?? 0);
 		this.ctx.waitUntil(this.maybeReflect(root as never, lastId));
 		const tools: { name: string; summary: string }[] = [];
 		for (const e of page2.items as unknown as Record<string, unknown>[]) {
@@ -684,6 +685,33 @@ export class SpikeAgent extends DurableObject {
 			rows.push({ id, title: id === String(root.id) ? "默认会话" : `会话 ${id}`, created_at: now, updated_at: now });
 		}
 		return { sessions: rows };
+	}
+
+	/** 识别消息开头的「/技能名」（v0.23.0）：命中已安装技能时返回技能正文与去掉前缀的正文。 */
+	private skillInvocation(message: string): { name: string; content: string; rest: string } | null {
+		const trimmed = message.trimStart();
+		if (!trimmed.startsWith("/")) return null;
+		const match = /^\/(\S{1,60})(?:\s+([\s\S]*))?$/.exec(trimmed);
+		if (!match) return null;
+		try {
+			const rows = sqlFacade!.exec("SELECT name, content FROM skills WHERE name = ?", match[1]!).toArray() as {
+				name: string;
+				content: string;
+			}[];
+			if (!rows[0]) return null;
+			return { name: rows[0].name, content: rows[0].content, rest: (match[2] ?? "").trim() };
+		} catch {
+			return null;
+		}
+	}
+
+	/** 组装本轮 instructions：基础规则 + 技能索引 + 可选显式技能正文。 */
+	private buildInstructions(inv: { name: string; content: string } | null): string {
+		const base =
+			"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。";
+		const withSkills = this.instructionsWithSkills(base);
+		if (!inv) return withSkills;
+		return `${withSkills}\n\n## 用户显式调用的技能：${inv.name}\n下面是该技能的完整说明，请严格按照它执行，不要声称找不到该技能：\n\n${inv.content}`;
 	}
 
 	/** 会话存储出错后重建 Harness（pi-durable 要求 close + reopen）。 */
@@ -1154,6 +1182,8 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 	private async runChatStream(message: string, sessionId?: string, images?: string[]): Promise<Response> {
 		const harness = await this.open();
 		const root = await this.conversationFor(harness, sessionId);
+		const inv = this.skillInvocation(message);
+		const effectiveMessage = inv ? inv.rest || `请按技能「${inv.name}」执行。` : message;
 		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
 		await root.configure(
 			{
@@ -1162,9 +1192,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
 					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
 					: [spikeExtension, codemodeExtension, toolSearchExtension],
-				instructions: this.instructionsWithSkills(
-					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
-				),
+				instructions: this.buildInstructions(inv),
 			},
 			ctx,
 		);
@@ -1255,7 +1283,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 					if (!title || title === "新会话" || /^会话 \d+$/.test(title)) {
 						sqlFacade!.exec(
 							"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at",
-							id, message.slice(0, 24), now, now,
+							id, effectiveMessage.slice(0, 24), now, now,
 						);
 					} else {
 						sqlFacade!.exec("UPDATE sessions_meta SET updated_at = ? WHERE id = ?", now, id);

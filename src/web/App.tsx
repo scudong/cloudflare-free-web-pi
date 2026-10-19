@@ -1045,7 +1045,7 @@ export default function App() {
 							files={files}
 							onOpenFile={handleOpenFileFromChat}
 						/>
-						<Composer pending={pending} onSend={handleSend} onStop={handleStop} />
+						<Composer pending={pending} onSend={handleSend} onStop={handleStop} skills={skills} />
 					</section>
 				)}
 
