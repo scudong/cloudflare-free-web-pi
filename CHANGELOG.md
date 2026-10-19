@@ -2,6 +2,14 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（工具搜索）
+
+### 工具搜索与延迟披露（v0.13.0）
+- 安装 `createToolSearchExtension()`：模型可用 `tool_search` 搜索尚未披露的工具并按需加载
+- MCP 工具总数 **≥ 6** 时标记为 `deferred`（不进模型工具列表），避免工具过多撑爆上下文；少于阈值时直接可用
+- 与 codemode 并存：脚本内 `searchTools()` 也能发现被延迟的工具（两条发现路径）
+- 验证：阈值调为 1 时 deepwiki 三个工具进入 `deferred`，模型经搜索后成功调用并拿到真实回答
+
 ## 2026-10-19（图片输入 + 历史修复）
 
 ### 图片输入（v0.12.0）

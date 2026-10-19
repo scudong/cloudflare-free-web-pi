@@ -14,6 +14,7 @@ import {
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { watchEvents } from "@earendil-works/pi-durable";
+import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
 import { McpClient, StreamableHttpTransport, toLlmContent } from "@earendil-works/pi-mcp";
 import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
 
@@ -180,6 +181,11 @@ function userContent(message: string, images: string[] | undefined): string | { 
 	return [{ type: "text", text: message || "（图片）" }, ...blocks];
 }
 
+/** 工具搜索扩展：模型先搜再加载被延迟的工具（v0.13.0）。 */
+const toolSearchExtension = createToolSearchExtension();
+/** MCP 工具总数达到该阈值时改为延迟披露，避免工具列表撑爆上下文。 */
+const DEFER_MCP_THRESHOLD = 6;
+
 /** 可选模型（pi-ai deepseek provider 的目录）。 */
 const AVAILABLE_MODELS = ["deepseek-flash", "deepseek-v4-pro"];
 const DEFAULT_MODEL_ID = "deepseek-flash";
@@ -202,7 +208,9 @@ async function buildMcpExtension(sql: { exec(q: string, ...b: unknown[]): { toAr
 		headers: string;
 	}[];
 	if (!servers.length) return null;
-	const tools = [];
+
+	// 第一遍：连接所有服务器并拿到工具清单（已缓存的直接复用）。
+	const connected: { server: { id: string; name: string }; entry: { client: McpClient; tools: { name: string; description?: string; inputSchema?: unknown }[] } }[] = [];
 	for (const server of servers) {
 		try {
 			let entry = mcpCache.get(server.id);
@@ -214,27 +222,35 @@ async function buildMcpExtension(sql: { exec(q: string, ...b: unknown[]): { toAr
 				entry = { client, tools: listed as never };
 				mcpCache.set(server.id, entry);
 			}
-			for (const tool of entry.tools) {
-				const jsName = `mcp__${server.id}__${tool.name}`.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 60);
-				tools.push(
-					defineTool({
-						name: jsName,
-						description: `[${server.name}] ${tool.description ?? tool.name}`.slice(0, 400),
-						parameters: Type.Unsafe((tool.inputSchema as object) ?? { type: "object", properties: {} }),
-						execute: async (args: unknown) => {
-							const res = await entry!.client.callTool(tool.name, (args ?? {}) as Record<string, unknown>);
-							const content = toLlmContent(res as never) as { type: string; text?: string }[];
-							const text = content.map((c) => c.text ?? "").join("\n").slice(0, 8000);
-							return { output: [{ type: "text", text: text || "(空结果)" }] };
-						},
-					}),
-				);
-			}
+			connected.push({ server, entry });
 		} catch (err) {
 			console.warn(`MCP server ${server.name} unavailable`, String(err));
 		}
 	}
-	// 每个会话每次只用一个扩展名，内部工具数量随配置变化。
+	const total = connected.reduce((n, item) => n + item.entry.tools.length, 0);
+	// 工具多时改为延迟披露：模型先用 tool_search 搜索，再按需加载。
+	const defer = total >= DEFER_MCP_THRESHOLD;
+
+	const tools = [];
+	for (const { server, entry } of connected) {
+		for (const tool of entry.tools) {
+			const jsName = `mcp__${server.id}__${tool.name}`.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 60);
+			tools.push(
+				defineTool({
+					name: jsName,
+					...(defer ? { deferred: true as const } : {}),
+					description: `[${server.name}] ${tool.description ?? tool.name}`.slice(0, 400),
+					parameters: Type.Unsafe((tool.inputSchema as object) ?? { type: "object", properties: {} }),
+					execute: async (args: unknown) => {
+						const res = await entry.client.callTool(tool.name, (args ?? {}) as Record<string, unknown>);
+						const content = toLlmContent(res as never) as { type: string; text?: string }[];
+						const text = content.map((c) => c.text ?? "").join("\n").slice(0, 8000);
+						return { output: [{ type: "text", text: text || "(空结果)" }] };
+					},
+				}),
+			);
+		}
+	}
 	return defineExtension({ name: "mcp", tools });
 }
 
@@ -257,6 +273,7 @@ export class SpikeAgent extends DurableObject {
 			registry.install(spikeExtension);
 			// Code mode：模型写 JS 调 tools.<name>()，QuickJS WASM 沙箱内执行（workerd 原生支持）。
 			registry.install(codemodeExtension);
+			registry.install(toolSearchExtension);
 			// Durable Object SQLite: conversations survive DO restarts and redeploys.
 			const storage = await openDurableObjectSqliteStorage(this.ctx.storage);
 			ensureTables(this.ctx.storage.sql);
@@ -283,7 +300,9 @@ export class SpikeAgent extends DurableObject {
 		await root.configure(
 			{
 				model: { provider: "deepseek", modelId: this.modelFor(sessionId) },
-				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0 ? [spikeExtension, codemodeExtension, mcpExt as never] : [spikeExtension, codemodeExtension],
+				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
+					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
+					: [spikeExtension, codemodeExtension, toolSearchExtension],
 				instructions:
 					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
 			},
@@ -709,7 +728,9 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 		await root.configure(
 			{
 				model: { provider: "deepseek", modelId: this.modelFor(sessionId) },
-				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0 ? [spikeExtension, codemodeExtension, mcpExt as never] : [spikeExtension, codemodeExtension],
+				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
+					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
+					: [spikeExtension, codemodeExtension, toolSearchExtension],
 				instructions:
 					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
 			},
