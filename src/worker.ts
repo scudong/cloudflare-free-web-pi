@@ -1048,6 +1048,9 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				sqlFacade!.exec("DELETE FROM pi_mem WHERE id = ?", Number(url.searchParams.get("id") ?? 0));
 				return Response.json({ ok: true });
 			}
+			if (request.method === "GET" && url.pathname === "/version") {
+				return Response.json({ do: "v0.12.1", images: true });
+			}
 			if (request.method === "GET" && url.pathname === "/session") {
 				return Response.json({ ok: true, name: "pi-harness-spike" });
 			}
