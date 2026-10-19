@@ -2,6 +2,15 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（定时任务）
+
+### 定时任务（v0.8.0）
+- `automations` 表 + `GET/POST/PATCH/DELETE /api/automations`
+- 调度基于 **Durable Object alarm**（pi-durable 不含 cron）：每次变更重算最早 `next_run_at` 并 `setAlarm`
+- 支持「每天 HH:MM（UTC+8）」与「每隔 N 分钟」；到点在指定会话里自动执行提示词，执行完自动排下一次
+- 工作台新增「定时」tab：创建 / 暂停启用 / 删除，显示调度说明与下次执行时间
+- 验证：建 1 分钟间隔任务，到点自动在会话里调用 `now` 工具并回报时间
+
 ## 2026-10-19（对话导出）
 
 ### 会话导出 Markdown（v0.7.0）

@@ -45,6 +45,7 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 		// 列已存在
 	}
 	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS automations (id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_run_at INTEGER, next_run_at INTEGER NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS reflect_state (conversation_id TEXT PRIMARY KEY, last_entry_id INTEGER NOT NULL, updated_at TEXT NOT NULL)`);
 	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
@@ -391,6 +392,71 @@ export class SpikeAgent extends DurableObject {
 		return { sessions: rows };
 	}
 
+	/** 下一次闹钟时间：所有启用的定时任务里最早的一个。 */
+	private async scheduleNextAlarm(): Promise<void> {
+		try {
+			const rows = sqlFacade!.exec("SELECT MIN(next_run_at) AS next FROM automations WHERE enabled = 1").toArray() as { next: number | null }[];
+			const next = rows[0]?.next;
+			if (typeof next === "number" && Number.isFinite(next)) {
+				const at = Math.max(Date.now() + 5_000, next);
+				await this.ctx.storage.setAlarm(at);
+			} else {
+				await this.ctx.storage.deleteAlarm();
+			}
+		} catch (err) {
+			console.warn("scheduleNextAlarm failed", err);
+		}
+	}
+
+	/** 计算下一次执行时间（毫秒）。 */
+	private nextRunAt(schedule: { kind: string; time?: string; minutes?: number }, now = Date.now()): number {
+		if (schedule.kind === "interval") {
+			const minutes = Math.max(1, Math.floor(Number(schedule.minutes ?? 60)));
+			return now + minutes * 60_000;
+		}
+		// daily：按 UTC+8 的 HH:MM 计算下一次
+		const [hh, mm] = String(schedule.time ?? "09:00").split(":").map((v) => Number(v) || 0);
+		const offsetMs = 8 * 3600_000;
+		const local = new Date(now + offsetMs);
+		const target = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), hh, mm, 0));
+		let at = target.getTime() - offsetMs;
+		if (at <= now) at += 24 * 3600_000;
+		return at;
+	}
+
+	/** DO alarm：执行到点的定时任务。 */
+	async alarm(): Promise<void> {
+		try {
+			await this.open();
+			const now = Date.now();
+			const due = sqlFacade!.exec(
+				"SELECT id, prompt, session_id, schedule FROM automations WHERE enabled = 1 AND next_run_at <= ?",
+				now,
+			).toArray() as { id: string; prompt: string; session_id: string; schedule: string }[];
+			for (const job of due) {
+				try {
+					await this.chat(job.prompt, job.session_id || undefined);
+				} catch (err) {
+					console.warn(`automation ${job.id} failed`, err);
+				}
+				let schedule: { kind: string; time?: string; minutes?: number } = { kind: "daily", time: "09:00" };
+				try {
+					schedule = JSON.parse(job.schedule) as typeof schedule;
+				} catch {
+					// 保持默认
+				}
+				sqlFacade!.exec(
+					"UPDATE automations SET last_run_at = ?, next_run_at = ? WHERE id = ?",
+					now, this.nextRunAt(schedule, Date.now()), job.id,
+				);
+			}
+			if (due.length) sqlFacade!.exec("UPDATE automations SET next_run_at = ? WHERE enabled = 1 AND next_run_at <= ?", now + 60_000, now);
+		} catch (err) {
+			console.warn("alarm failed", err);
+		}
+		await this.scheduleNextAlarm();
+	}
+
 	/** 导出会话为 Markdown（含工具调用摘要）。 */
 	async exportMarkdown(sessionId?: string): Promise<{ markdown: string; title: string; sessionId: string }> {
 		const harness = await this.open();
@@ -722,6 +788,53 @@ export class SpikeAgent extends DurableObject {
 			if (url.pathname === "/files" && request.method === "DELETE") {
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
+				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/automations" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const rows = sqlFacade!.exec(
+					"SELECT id, name, prompt, session_id, schedule, enabled, last_run_at, next_run_at FROM automations ORDER BY created_at DESC",
+				).toArray();
+				return Response.json({ automations: rows });
+			}
+			if (url.pathname === "/automations" && request.method === "POST") {
+				const body = (await request.json()) as {
+					name?: string;
+					prompt?: string;
+					sessionId?: string;
+					schedule?: { kind?: string; time?: string; minutes?: number };
+				};
+				const name = (body.name ?? "").trim().slice(0, 40);
+				const prompt = (body.prompt ?? "").trim().slice(0, 2000);
+				if (!name || !prompt) return Response.json({ error: "需要名称与提示词" }, { status: 400 });
+				const schedule = body.schedule?.kind === "interval"
+					? { kind: "interval", minutes: Math.max(1, Math.floor(Number(body.schedule.minutes ?? 60))) }
+					: { kind: "daily", time: /^\d{1,2}:\d{2}$/.test(body.schedule?.time ?? "") ? body.schedule!.time! : "09:00" };
+				ensureTables(sqlFacade!);
+				const id = `a${Date.now().toString(36)}`;
+				sqlFacade!.exec(
+					"INSERT INTO automations (id, name, prompt, session_id, schedule, enabled, created_at, next_run_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+					id, name, prompt, body.sessionId ?? "", JSON.stringify(schedule), new Date().toISOString(), this.nextRunAt(schedule),
+				);
+				await this.scheduleNextAlarm();
+				return Response.json({ ok: true, id, nextRunAt: this.nextRunAt(schedule) });
+			}
+			if (url.pathname === "/automations" && request.method === "PATCH") {
+				const body = (await request.json()) as { id?: string; enabled?: boolean };
+				if (!body.id) return Response.json({ error: "缺少 id" }, { status: 400 });
+				const enabled = body.enabled ? 1 : 0;
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec(
+					"UPDATE automations SET enabled = ?, next_run_at = CASE WHEN ? = 1 THEN ? ELSE next_run_at END WHERE id = ?",
+					enabled, enabled, Date.now() + 60_000, body.id,
+				);
+				await this.scheduleNextAlarm();
+				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/automations" && request.method === "DELETE") {
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec("DELETE FROM automations WHERE id = ?", url.searchParams.get("id") ?? "");
+				await this.scheduleNextAlarm();
 				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/export" && request.method === "GET") {

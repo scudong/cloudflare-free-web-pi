@@ -42,3 +42,14 @@ export interface McpServerInfo {
 	url: string;
 	created_at?: string;
 }
+
+/** A scheduled prompt that runs on its own (v0.8.0). */
+export interface AutomationInfo {
+	id: string;
+	name: string;
+	prompt: string;
+	/** 人类可读的调度说明，由解析器生成。 */
+	scheduleLabel: string;
+	nextLabel?: string;
+	enabled: boolean;
+}

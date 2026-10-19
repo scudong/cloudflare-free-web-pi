@@ -8,10 +8,10 @@ import { Workbench } from "./components/Workbench";
 import type { WorkbenchTab } from "./components/Workbench";
 import { api } from "./lib/api";
 import { parseEntries, truncateOneLine } from "./lib/entries";
-import { parseFiles, parseMemories, parseSessions } from "./lib/collections";
+import { parseAutomations, parseFiles, parseMemories, parseSessions } from "./lib/collections";
 import { loadBool, saveBool } from "./lib/localStore";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { ChatMessage, FileInfo, McpServerInfo, MemoryInfo, SessionListItem, ToolCallInfo } from "./types";
+import type { AutomationInfo, ChatMessage, FileInfo, McpServerInfo, MemoryInfo, SessionListItem, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -51,6 +51,9 @@ export default function App() {
 	const [models, setModels] = useState<string[]>([]);
 	const [model, setModel] = useState("deepseek-flash");
 	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
+	const [automations, setAutomations] = useState<AutomationInfo[]>([]);
+	const [automationsLoading, setAutomationsLoading] = useState(true);
+	const [automationsError, setAutomationsError] = useState<string | null>(null);
 	const [mcpLoading, setMcpLoading] = useState(true);
 	const [mcpError, setMcpError] = useState<string | null>(null);
 	const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -301,6 +304,61 @@ export default function App() {
 		},
 		[sessionId],
 	);
+
+	// 定时任务列表（全局，随 panelTick 刷新）
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.automations();
+				if (alive) {
+					setAutomations(parseAutomations(data.automations));
+					setAutomationsError(null);
+				}
+			} catch {
+				if (alive) setAutomationsError("加载定时任务失败。");
+			} finally {
+				if (alive) setAutomationsLoading(false);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [panelTick]);
+
+	const handleAddAutomation = useCallback(
+		async (name: string, prompt: string, schedule: { kind: string; time?: string; minutes?: number }) => {
+			try {
+				await api.addAutomation(name, prompt, sessionId, schedule);
+				setPanelTick((tick) => tick + 1);
+				return true;
+			} catch {
+				setAutomationsError("创建失败。");
+				return false;
+			}
+		},
+		[sessionId],
+	);
+
+	const handleToggleAutomation = useCallback(async (id: string, enabled: boolean) => {
+		try {
+			await api.toggleAutomation(id, enabled);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			return false;
+		}
+	}, []);
+
+	const handleDeleteAutomation = useCallback(async (id: string) => {
+		try {
+			await api.deleteAutomation(id);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			return false;
+		}
+	}, []);
 
 	// MCP 服务器列表（全局，随 panelTick 刷新）
 	useEffect(() => {
@@ -583,6 +641,12 @@ export default function App() {
 							mcpError={mcpError}
 							onAddMcp={handleAddMcp}
 							onDeleteMcp={handleDeleteMcp}
+							automations={automations}
+							automationsLoading={automationsLoading}
+							automationsError={automationsError}
+							onAddAutomation={handleAddAutomation}
+							onToggleAutomation={handleToggleAutomation}
+							onDeleteAutomation={handleDeleteAutomation}
 						/>
 					</div>
 				)}

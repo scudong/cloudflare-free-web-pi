@@ -140,6 +140,20 @@ export const api = {
 	setModel: (sessionId: string, modelId: string) =>
 		requestJson<{ ok?: boolean }>("/api/model", jsonPost({ sessionId, modelId })),
 
+	automations: () => requestJson<{ automations?: unknown[] }>("/api/automations"),
+
+	addAutomation: (name: string, prompt: string, sessionId: string, schedule: { kind: string; time?: string; minutes?: number }) =>
+		requestJson<{ ok?: boolean; id?: string }>("/api/automations", jsonPost({ name, prompt, sessionId, schedule })),
+
+	toggleAutomation: (id: string, enabled: boolean) =>
+		requestJson<{ ok?: boolean }>("/api/automations", {
+			method: "PATCH",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ id, enabled }),
+		}),
+
+	deleteAutomation: (id: string) => requestJson<{ ok?: boolean }>(withQuery("/api/automations", { id }), { method: "DELETE" }),
+
 	mcpServers: () => requestJson<{ servers?: unknown[] }>("/api/mcp"),
 
 	addMcp: (name: string, url: string) =>
