@@ -45,6 +45,7 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 		// 列已存在
 	}
 	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS shares (token TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS automations (id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_run_at INTEGER, next_run_at INTEGER NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS reflect_state (conversation_id TEXT PRIMARY KEY, last_entry_id INTEGER NOT NULL, updated_at TEXT NOT NULL)`);
@@ -457,6 +458,93 @@ export class SpikeAgent extends DurableObject {
 		await this.scheduleNextAlarm();
 	}
 
+	/** 生成分享链接（只读）。token 为随机串，记录在 shares 表。 */
+	async createShare(sessionId: string | undefined, kind: "conversation" | "file", name?: string): Promise<{ token: string }> {
+		await this.open();
+		const conversation = await this.conversationFor(await this.open(), sessionId);
+		const bytes = crypto.getRandomValues(new Uint8Array(12));
+		const token = [...bytes].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("");
+		sqlFacade!.exec(
+			"INSERT INTO shares (token, kind, session_id, name, created_at) VALUES (?, ?, ?, ?, ?)",
+			token, kind, String(conversation.id), name ?? "", new Date().toISOString(),
+		);
+		return { token };
+	}
+
+	/** 分享页 HTML（服务端渲染，只读）。 */
+	async renderShare(token: string): Promise<string | null> {
+		await this.open();
+		const rows = sqlFacade!.exec("SELECT kind, session_id, name FROM shares WHERE token = ?", token).toArray() as {
+			kind: string;
+			session_id: string;
+			name: string;
+		}[];
+		const share = rows[0];
+		if (!share) return null;
+		const escape = (t: string) =>
+			t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+		const inline = (t: string) =>
+			escape(t)
+				.replace(/`([^`]+)`/g, "<code>$1</code>")
+				.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+				.replace(/(^|\n)#{1,3} (.+)/g, "$1<strong>$2</strong>");
+		let title = "分享内容";
+		let body = "";
+		if (share.kind === "file") {
+			const file = sqlFacade!.exec("SELECT content FROM vfs_v2 WHERE conversation_id = ? AND name = ?", share.session_id, share.name).toArray() as { content: string }[];
+			title = share.name || "文件";
+			body = `<article class="md">${inline(file[0]?.content ?? "（文件已删除）")}</article>`;
+		} else {
+			const conversation = await (await this.open()).conversation(Number(share.session_id) as never, ctx);
+			const page = conversation ? ((await conversation.entries({}, 500, undefined, ctx)) as { items: readonly Record<string, unknown>[] }) : { items: [] };
+			const meta = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", share.session_id).toArray() as { title: string }[];
+			title = meta[0]?.title ?? "对话";
+			const textOf = (model: unknown): string => {
+				const blocks = Array.isArray(model) ? (model as { content?: unknown }[]) : [];
+				for (const block of blocks) {
+					const content = block?.content;
+					if (typeof content === "string") return content;
+					if (Array.isArray(content)) {
+						return content.map((c) => (typeof c === "object" && c && "text" in c ? String((c as { text?: unknown }).text ?? "") : "")).join("");
+					}
+				}
+				return "";
+			};
+			const parts: string[] = [];
+			for (const entry of [...page.items].reverse()) {
+				const kind = String(entry.kind ?? "");
+				const text = textOf(entry.model).trim();
+				if (!text) continue;
+				if (kind === "pi.user") parts.push(`<div class="msg user"><div class="who">用户</div><div class="md">${inline(text)}</div></div>`);
+				else if (kind === "pi.assistant") parts.push(`<div class="msg bot"><div class="who">助手</div><div class="md">${inline(text)}</div></div>`);
+			}
+			body = parts.join("") || "<p class='empty'>（暂无内容）</p>";
+		}
+		return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · 分享</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0b1120;color:#e2e8f0;font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+header{position:sticky;top:0;display:flex;align-items:center;gap:.6rem;padding:.9rem 1.2rem;background:rgba(15,23,42,.9);border-bottom:1px solid #1e293b;backdrop-filter:blur(8px)}
+header .badge{font-size:12px;color:#7dd3fc;border:1px solid rgba(125,211,252,.3);background:rgba(125,211,252,.1);padding:2px 8px;border-radius:6px}
+header h1{font-size:14px;margin:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+main{max-width:820px;margin:0 auto;padding:1.5rem 1.2rem 4rem}
+.msg{margin:1.1rem 0;padding:.9rem 1rem;border-radius:14px}
+.msg.user{background:#0c4a6e33;border:1px solid #0c4a6e}
+.msg.bot{background:#1e293b66;border:1px solid #1e293b}
+.who{font-size:11px;color:#94a3b8;margin-bottom:.35rem}
+.md{white-space:pre-wrap;word-break:break-word}
+.md code{background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:1px 5px;font-size:.9em}
+.empty{color:#64748b;text-align:center}
+footer{text-align:center;color:#475569;font-size:12px;padding:1rem}
+article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;padding:1.2rem}
+</style></head><body>
+<header><span class="badge">只读分享</span><h1>${escape(title)}</h1></header>
+<main>${body}</main>
+<footer>由 π Harness 生成 · 只读视图</footer>
+</body></html>`;
+	}
+
 	/** 导出会话为 Markdown（含工具调用摘要）。 */
 	async exportMarkdown(sessionId?: string): Promise<{ markdown: string; title: string; sessionId: string }> {
 		const harness = await this.open();
@@ -790,6 +878,16 @@ export class SpikeAgent extends DurableObject {
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
 			}
+			if (url.pathname === "/share" && request.method === "POST") {
+				const body = (await request.json()) as { sessionId?: string; kind?: "conversation" | "file"; name?: string };
+				const { token } = await this.createShare(body.sessionId, body.kind === "file" ? "file" : "conversation", body.name);
+				return Response.json({ ok: true, token, url: `/s/${token}` });
+			}
+			if (url.pathname.startsWith("/s/") && request.method === "GET") {
+				const html = await this.renderShare(url.pathname.slice(3));
+				if (!html) return new Response("分享链接不存在或已失效", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
+				return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+			}
 			if (url.pathname === "/automations" && request.method === "GET") {
 				ensureTables(sqlFacade!);
 				const rows = sqlFacade!.exec(
@@ -939,7 +1037,7 @@ export class SpikeAgent extends DurableObject {
 export default {
 	fetch(request: Request, env: { SpikeAgent: DurableObjectNamespace }): Response | Promise<Response> {
 		const url = new URL(request.url);
-		if (url.pathname.startsWith("/agent/") || url.pathname.startsWith("/api/")) {
+		if (url.pathname.startsWith("/agent/") || url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/")) {
 			const stub = env.SpikeAgent.get(env.SpikeAgent.idFromName("spike"));
 			const inner = new URL(request.url);
 			inner.pathname = url.pathname.replace(/^\/(agent|api)/, "") || "/";

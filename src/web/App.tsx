@@ -447,6 +447,25 @@ export default function App() {
 		[sessionId],
 	);
 
+	/** 分享：生成只读链接并复制到剪贴板。 */
+	const handleShare = useCallback(() => {
+		void (async () => {
+			try {
+				const data = await api.share(sessionId);
+				if (!data.url) throw new Error("no url");
+				const absolute = `${window.location.origin}${data.url}`;
+				try {
+					await navigator.clipboard.writeText(absolute);
+					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `只读分享链接已复制：${absolute}` }]);
+				} catch {
+					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `只读分享链接：${absolute}` }]);
+				}
+			} catch {
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "生成分享链接失败。" }]);
+			}
+		})();
+	}, [sessionId, nextId]);
+
 	/** 导出当前会话：直接下载 Markdown 文件。 */
 	const handleExport = useCallback(() => {
 		const url = `/api/export?format=md&sessionId=${encodeURIComponent(sessionId)}`;
@@ -594,6 +613,7 @@ export default function App() {
 				onToggleRight={toggleRight}
 				onOpenDrawer={() => setDrawerOpen(true)}
 				onExport={handleExport}
+				onShare={handleShare}
 			/>
 
 			<div className="flex min-h-0 flex-1">

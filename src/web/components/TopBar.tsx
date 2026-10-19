@@ -8,6 +8,8 @@ interface TopBarProps {
 	onOpenDrawer: () => void;
 	/** 导出当前会话为 Markdown（v0.7.0）。 */
 	onExport: () => void;
+	/** 生成只读分享链接（v0.9.0）。 */
+	onShare: () => void;
 }
 
 /** Collapsed/expanded state icon for a side panel (filled inner bar = expanded). */
@@ -44,7 +46,7 @@ function MenuIcon() {
 const panelButton =
 	"hidden h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 aria-pressed:border-slate-700 aria-pressed:bg-slate-800 aria-pressed:text-sky-300 md:inline-flex";
 
-export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft, onToggleRight, onOpenDrawer, onExport }: TopBarProps) {
+export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft, onToggleRight, onOpenDrawer, onExport, onShare }: TopBarProps) {
 	return (
 		<header className="z-20 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/80 px-3 backdrop-blur">
 			<div className="flex min-w-0 items-center gap-2.5">
@@ -73,6 +75,20 @@ export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft
 				{sessionLabel && <span className="hidden min-w-0 truncate text-xs text-slate-500 lg:inline">{sessionLabel}</span>}
 			</div>
 			<div className="flex shrink-0 items-center gap-1">
+				<button
+					type="button"
+					onClick={onShare}
+					title="生成只读分享链接"
+					aria-label="分享会话"
+					className={panelButton}
+				>
+					<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+						<circle cx="15" cy="5" r="2.2" />
+						<circle cx="5" cy="10" r="2.2" />
+						<circle cx="15" cy="15" r="2.2" />
+						<path d="M7 9 13 6M7 11l6 3" strokeLinecap="round" />
+					</svg>
+				</button>
 				<button
 					type="button"
 					onClick={onExport}

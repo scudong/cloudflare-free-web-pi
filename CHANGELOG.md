@@ -2,6 +2,14 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（只读分享）
+
+### 只读分享链接（v0.9.0）
+- `POST /api/share {sessionId, kind}` → 随机 token；`GET /s/<token>` 返回服务端渲染的只读页（深色、移动端友好）
+- `shares` 表记录 token；`wrangler.jsonc` 的 `run_worker_first` 增加 `/s/*`
+- 顶栏分享按钮：生成链接并自动复制到剪贴板
+- 注意：当前整套服务没有登录鉴权，分享链接的意义是「只读视图」而非访问控制；token 不可猜测（12 位随机）
+
 ## 2026-10-19（定时任务）
 
 ### 定时任务（v0.8.0）
