@@ -171,6 +171,12 @@ export const api = {
 	setModel: (sessionId: string, modelId: string) =>
 		requestJson<{ ok?: boolean }>("/api/model", jsonPost({ sessionId, modelId })),
 
+	/** 全局设置（v0.20.0）：目前只有网页搜索开关。 */
+	settings: () => requestJson<{ webSearch?: boolean }>("/api/settings"),
+
+	setSettings: (patch: { webSearch?: boolean }) =>
+		requestJson<{ ok?: boolean; webSearch?: boolean }>("/api/settings", jsonPost(patch)),
+
 	share: (sessionId: string) =>
 		requestJson<{ ok?: boolean; token?: string; url?: string }>("/api/share", jsonPost({ sessionId, kind: "conversation" })),
 

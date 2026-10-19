@@ -1,43 +1,9 @@
-import { useRef } from "react";
-
 interface TopBarProps {
 	online: boolean;
 	sessionLabel: string;
-	leftOpen: boolean;
-	rightOpen: boolean;
-	onToggleLeft: () => void;
-	onToggleRight: () => void;
 	onOpenDrawer: () => void;
-	/** 导出当前会话为 Markdown（v0.7.0）。 */
-	onExport: () => void;
-	/** 生成只读分享链接（v0.9.0）。 */
-	onShare: () => void;
-	/** 备份/恢复（v0.14.0）。 */
-	onBackup: () => void;
-	onRestore: (file: File) => void;
-	/** 当前是否浅色主题（v0.11.0）。 */
-	light: boolean;
-	onToggleTheme: () => void;
-}
-
-/** Collapsed/expanded state icon for a side panel (filled inner bar = expanded). */
-function PanelIcon({ side, active }: { side: "left" | "right"; active: boolean }) {
-	return (
-		<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-			<rect x="2.75" y="3.75" width="14.5" height="12.5" rx="2" />
-			{side === "left" ? (
-				<>
-					<line x1="7.5" y1="3.75" x2="7.5" y2="16.25" />
-					{active && <rect x="3.75" y="4.75" width="2.75" height="10.5" rx="1" fill="currentColor" stroke="none" opacity="0.55" />}
-				</>
-			) : (
-				<>
-					<line x1="12.5" y1="3.75" x2="12.5" y2="16.25" />
-					{active && <rect x="13.5" y="4.75" width="2.75" height="10.5" rx="1" fill="currentColor" stroke="none" opacity="0.55" />}
-				</>
-			)}
-		</svg>
-	);
+	/** 打开设置弹窗（v0.20.0：主题/分享/导出/备份/恢复/面板开关全部移入设置）。 */
+	onOpenSettings: () => void;
 }
 
 /** Hamburger icon for opening the session drawer on mobile. */
@@ -51,11 +17,19 @@ function MenuIcon() {
 	);
 }
 
-const panelButton =
-	"hidden h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 aria-pressed:border-slate-700 aria-pressed:bg-slate-800 aria-pressed:text-sky-300 md:inline-flex";
+/** Sliders icon for the settings entry. */
+function SettingsIcon() {
+	return (
+		<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+			<line x1="3" y1="6.5" x2="17" y2="6.5" />
+			<circle cx="12.5" cy="6.5" r="2.2" />
+			<line x1="3" y1="13.5" x2="17" y2="13.5" />
+			<circle cx="7.5" cy="13.5" r="2.2" />
+		</svg>
+	);
+}
 
-export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft, onToggleRight, onOpenDrawer, onExport, onShare, onBackup, onRestore, light, onToggleTheme }: TopBarProps) {
-	const restoreRef = useRef<HTMLInputElement>(null);
+export function TopBar({ online, sessionLabel, onOpenDrawer, onOpenSettings }: TopBarProps) {
 	return (
 		<header className="z-20 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/80 px-3 backdrop-blur">
 			<div className="flex min-w-0 items-center gap-2.5">
@@ -86,104 +60,12 @@ export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft
 			<div className="flex shrink-0 items-center gap-1">
 				<button
 					type="button"
-					onClick={onBackup}
-					title="备份全部数据（JSON）"
-					aria-label="备份数据"
-					className={panelButton}
+					onClick={onOpenSettings}
+					title="设置"
+					aria-label="打开设置"
+					className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
 				>
-					<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-						<ellipse cx="10" cy="5.5" rx="5.5" ry="2" />
-						<path d="M4.5 5.5v4c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-4" />
-						<path d="M4.5 9.5v4c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-4" />
-					</svg>
-				</button>
-				<button
-					type="button"
-					onClick={() => restoreRef.current?.click()}
-					title="从备份恢复"
-					aria-label="恢复数据"
-					className={panelButton}
-				>
-					<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-						<path d="M10 16v-9m0 0 3 3m-3-3L7 10" strokeLinecap="round" strokeLinejoin="round" />
-						<path d="M4 6V4.75c0-.41.34-.75.75-.75h10.5c.41 0 .75.34.75.75V6" strokeLinecap="round" />
-					</svg>
-				</button>
-				<input
-					ref={restoreRef}
-					type="file"
-					accept="application/json,.json"
-					hidden
-					onChange={(event) => {
-						const file = event.target.files?.[0];
-						if (file) onRestore(file);
-						event.target.value = "";
-					}}
-				/>
-				<button
-					type="button"
-					onClick={onToggleTheme}
-					title={light ? "切换到深色" : "切换到浅色"}
-					aria-label={light ? "切换到深色主题" : "切换到浅色主题"}
-					aria-pressed={light}
-					className={panelButton}
-				>
-					{light ? (
-						<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-							<path d="M16 12.2A6.5 6.5 0 0 1 7.8 4a6.5 6.5 0 1 0 8.2 8.2Z" strokeLinejoin="round" />
-						</svg>
-					) : (
-						<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-							<circle cx="10" cy="10" r="3.6" />
-							<path d="M10 2v1.6M10 16.4V18M2 10h1.6M16.4 10H18M4.3 4.3l1.1 1.1M14.6 14.6l1.1 1.1M15.7 4.3l-1.1 1.1M5.4 14.6l-1.1 1.1" strokeLinecap="round" />
-						</svg>
-					)}
-				</button>
-				<button
-					type="button"
-					onClick={onShare}
-					title="生成只读分享链接"
-					aria-label="分享会话"
-					className={panelButton}
-				>
-					<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-						<circle cx="15" cy="5" r="2.2" />
-						<circle cx="5" cy="10" r="2.2" />
-						<circle cx="15" cy="15" r="2.2" />
-						<path d="M7 9 13 6M7 11l6 3" strokeLinecap="round" />
-					</svg>
-				</button>
-				<button
-					type="button"
-					onClick={onExport}
-					title="导出当前会话为 Markdown"
-					aria-label="导出会话"
-					className={panelButton}
-				>
-					<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-						<path d="M10 3v9m0 0 3-3m-3 3L7 9" strokeLinecap="round" strokeLinejoin="round" />
-						<path d="M4 14v2.25c0 .41.34.75.75.75h10.5c.41 0 .75-.34.75-.75V14" strokeLinecap="round" />
-					</svg>
-				</button>
-				<button
-					type="button"
-					onClick={onToggleLeft}
-					aria-pressed={leftOpen}
-					aria-label={leftOpen ? "收起会话栏" : "展开会话栏"}
-					title={leftOpen ? "收起会话栏" : "展开会话栏"}
-					className={panelButton}
-				>
-					<PanelIcon side="left" active={leftOpen} />
-				</button>
-				<button
-					type="button"
-					onClick={onToggleRight}
-					aria-pressed={rightOpen}
-					aria-label={rightOpen ? "收起工作台" : "展开工作台"}
-					title={rightOpen ? "收起工作台" : "展开工作台"}
-					className={panelButton}
-				>
-					<PanelIcon side="right" active={rightOpen} />
+					<SettingsIcon />
 				</button>
 			</div>
 		</header>

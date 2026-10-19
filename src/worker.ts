@@ -51,6 +51,7 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	sql.exec(`CREATE TABLE IF NOT EXISTS automations (id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_run_at INTEGER, next_run_at INTEGER NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS reflect_state (conversation_id TEXT PRIMARY KEY, last_entry_id INTEGER NOT NULL, updated_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
 	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
 	try {
 		sql.exec(`ALTER TABLE pi_mem ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`);
@@ -58,6 +59,23 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 		// 列已存在
 	}
 };
+
+/** DEEPSEEK_API_KEY（open() 时从 env 注入；模块级定义的工具拿不到 this.env）。 */
+let apiKeyRef: string | null = null;
+
+/** 全局设置读写（app_settings 表）：目前只有网页搜索开关 web_search。 */
+function getSetting(key: string, fallback: string): string {
+	try {
+		const rows = sqlFacade!.exec("SELECT value FROM app_settings WHERE key = ?", key).toArray() as { value: string }[];
+		return rows[0]?.value ?? fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+function setSetting(key: string, value: string): void {
+	sqlFacade!.exec("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+}
 
 const stripHtml = (html: string) =>
 	html
@@ -143,6 +161,81 @@ const spikeExtension = defineExtension({
 					const resp = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (pi-harness)" }, redirect: "follow" });
 					if (!resp.ok) return { output: [{ type: "text", text: `HTTP ${resp.status}` }] };
 					return { output: [{ type: "text", text: stripHtml(await resp.text()) || "(空页面)" }] };
+				} catch (e) {
+					return { output: [{ type: "text", text: "抓取失败：" + String(e).slice(0, 200) }] };
+				}
+			},
+		}),
+		defineTool({
+			name: "web_search",
+			description:
+				"联网搜索（DeepSeek 搜索 API）。返回「标题+链接+摘要」列表；需要实时信息、事实核查、最新动态时使用。结果里的 URL 可再配合 web_fetch_page 抓取正文。",
+			parameters: Type.Object({
+				query: Type.String({ description: '搜索关键词（1–128 字符），支持 site:、"..."、lang:、after:、before: 等语法' }),
+				count: Type.Optional(Type.Number({ description: "返回条数 1–50，默认 8" })),
+			}),
+			execute: async (args) => {
+				const a = args as { query?: unknown; count?: unknown };
+				const query = String(a.query ?? "").trim().slice(0, 128);
+				if (!query) return { output: [{ type: "text", text: "搜索关键词不能为空。" }] };
+				if (getSetting("web_search", "1") !== "1") {
+					return { output: [{ type: "text", text: "网页搜索当前未开启。请告诉用户：在 设置 → 网页搜索 中开启后即可联网搜索。" }] };
+				}
+				if (!apiKeyRef) return { output: [{ type: "text", text: "未配置 DEEPSEEK_API_KEY，无法联网搜索。" }] };
+				const count = Math.min(50, Math.max(1, Math.floor(Number(a.count ?? 8) || 8)));
+				try {
+					const resp = await fetch("https://api.deepseek.com/v1/tools/search", {
+						method: "POST",
+						headers: { "content-type": "application/json", authorization: `Bearer ${apiKeyRef}` },
+						body: JSON.stringify({ query, count, need_content: false }),
+					});
+					const data = (await resp.json().catch(() => null)) as { results?: unknown; error?: { message?: string } } | null;
+					if (!resp.ok) {
+						const msg = data?.error?.message ?? `HTTP ${resp.status}`;
+						return { output: [{ type: "text", text: `搜索失败：${msg}` }] };
+					}
+					const results = Array.isArray(data?.results) ? (data!.results as Record<string, unknown>[]) : [];
+					if (!results.length) return { output: [{ type: "text", text: "没有搜索结果，试试换关键词。" }] };
+					const lines = results.map((r, i) => {
+						const title = String(r.title ?? "").trim() || "(无标题)";
+						const url2 = String(r.url ?? "");
+						const snippet = String(r.summary || r.snippet || "").trim().slice(0, 400);
+						const date = typeof r.date === "string" ? ` · ${r.date.slice(0, 10)}` : "";
+						return `${i + 1}. ${title}${date}\n   ${url2}\n   ${snippet}`;
+					});
+					return { output: [{ type: "text", text: lines.join("\n\n") }] };
+				} catch (e) {
+					return { output: [{ type: "text", text: "搜索失败：" + String(e).slice(0, 200) }] };
+				}
+			},
+		}),
+		defineTool({
+			name: "web_fetch_page",
+			description:
+				"抓取网页并返回干净的 Markdown 正文（DeepSeek Fetch API，可处理部分反爬站点）。http_fetch 抓到的是 HTML 乱码或空内容时改用本工具。",
+			parameters: Type.Object({ url: Type.String({ description: "完整的 http(s) URL" }) }),
+			execute: async (args) => {
+				const url = String((args as { url?: unknown }).url ?? "").trim();
+				if (!/^https?:\/\//.test(url)) return { output: [{ type: "text", text: "URL 必须以 http(s):// 开头。" }] };
+				if (getSetting("web_search", "1") !== "1") {
+					return { output: [{ type: "text", text: "网页搜索当前未开启。请告诉用户：在 设置 → 网页搜索 中开启后即可抓取网页。" }] };
+				}
+				if (!apiKeyRef) return { output: [{ type: "text", text: "未配置 DEEPSEEK_API_KEY，无法抓取网页。" }] };
+				try {
+					const resp = await fetch("https://api.deepseek.com/v1/tools/fetch", {
+						method: "POST",
+						headers: { "content-type": "application/json", authorization: `Bearer ${apiKeyRef}` },
+						body: JSON.stringify({ url }),
+					});
+					const data = (await resp.json().catch(() => null)) as { title?: string; content?: string; error?: { message?: string } } | null;
+					if (!resp.ok) {
+						const msg = data?.error?.message ?? `HTTP ${resp.status}`;
+						return { output: [{ type: "text", text: `抓取失败：${msg}` }] };
+					}
+					const title = String(data?.title ?? "").trim();
+					const content = String(data?.content ?? "").trim();
+					if (!content) return { output: [{ type: "text", text: "页面没有可提取的正文。" }] };
+					return { output: [{ type: "text", text: (title ? `# ${title}\n\n` : "") + content.slice(0, 8000) }] };
 				} catch (e) {
 					return { output: [{ type: "text", text: "抓取失败：" + String(e).slice(0, 200) }] };
 				}
@@ -339,6 +432,7 @@ export class SpikeAgent extends DurableObject {
 		if (!this.harness) {
 			const models = createModels();
 			models.setProvider(deepseekProvider()); // reads DEEPSEEK_API_KEY
+			apiKeyRef = (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null;
 			const registry = createRegistry();
 			this.registryRef = registry as unknown as typeof this.registryRef;
 			registry.install(spikeExtension);
@@ -619,10 +713,17 @@ export class SpikeAgent extends DurableObject {
 
 	/** 技能索引注入到 instructions：模型知道有哪些技能，按需 load_skill。 */
 	private instructionsWithSkills(base: string): string {
+		let out = base;
 		const index = this.skillIndex();
-		if (!index.length) return base;
-		const lines = index.map((s) => `- ${s.name}：${s.description || "（无描述）"}`).join("\n");
-		return `${base}\n\n可用技能（需要时调用 load_skill 读取完整说明后再执行）：\n${lines}`;
+		if (index.length) {
+			const lines = index.map((s) => `- ${s.name}：${s.description || "（无描述）"}`).join("\n");
+			out = `${out}\n\n可用技能（需要时调用 load_skill 读取完整说明后再执行）：\n${lines}`;
+		}
+		// 网页搜索开启时才在提示词里引导模型使用；关闭时工具会返回开启指引。
+		if (getSetting("web_search", "1") === "1") {
+			out += "\n需要联网查资料时优先用 web_search 搜索、web_fetch_page 抓取正文（比 http_fetch 更干净）。";
+		}
+		return out;
 	}
 
 	/** 真正中止服务端生成（v0.19.0）：撤回排队输入并等待会话空闲。 */
@@ -648,6 +749,7 @@ export class SpikeAgent extends DurableObject {
 				sessions: q("SELECT id, title, created_at, updated_at, model FROM sessions_meta WHERE deleted = 0"),
 				shares: q("SELECT token, kind, session_id, name, created_at FROM shares"),
 				skills: q("SELECT name, description, content FROM skills ORDER BY name"),
+				settings: q("SELECT key, value FROM app_settings"),
 			},
 		};
 	}
@@ -715,6 +817,12 @@ export class SpikeAgent extends DurableObject {
 		if (rebuilt) {
 			this.mcpExt = rebuilt as never;
 			if (this.registryRef) this.registryRef.install(rebuilt);
+		}
+		for (const s of rows("settings")) {
+			const key = str(s.key).trim();
+			if (!key) continue;
+			setSetting(key, str(s.value));
+			counts.settings = (counts.settings ?? 0) + 1;
 		}
 		for (const s of rows("sessions")) {
 			const id = str(s.id);
@@ -1306,6 +1414,15 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 					});
 				}
 				return Response.json(data);
+			}
+			if (url.pathname === "/settings" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				return Response.json({ webSearch: getSetting("web_search", "1") === "1" });
+			}
+			if (url.pathname === "/settings" && request.method === "POST") {
+				const body = (await request.json()) as { webSearch?: boolean };
+				if (typeof body.webSearch === "boolean") setSetting("web_search", body.webSearch ? "1" : "0");
+				return Response.json({ ok: true, webSearch: getSetting("web_search", "1") === "1" });
 			}
 			if (url.pathname === "/models" && request.method === "GET") {
 				return Response.json({ models: AVAILABLE_MODELS, default: DEFAULT_MODEL_ID });

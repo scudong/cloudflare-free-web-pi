@@ -16,13 +16,13 @@
 | 会话 | 多会话隔离、自动标题、重命名、删除、**按会话选择模型**（`deepseek-flash` / `deepseek-v4-pro`） |
 | 对话 | SSE 流式逐字输出、工具调用实时 pill、图片输入（粘贴或上传，自动压缩 ≤1568px） |
 | 执行 | `codemode`：模型写 JavaScript 在 QuickJS 沙箱里跑，脚本内可 `await tools.<name>()` 调用其它工具 |
-| 网页 | `http_fetch` 抓正文；**Browserbase MCP** 云端浏览器（导航/点击/提取，无需本地 Chrome） |
+| 网页 | `web_search` 联网搜索 + `web_fetch_page` 抓取正文（DeepSeek 搜索 API，设置中可开关）；`http_fetch` 直接抓取；**Browserbase MCP** 云端浏览器（导航/点击/提取，无需本地 Chrome） |
 | 记忆 | `remember` / `recall` + 每 6 条自动 `reflect` 抽取长期事实（带去重） |
 | 文件 | 按会话隔离的虚拟文件系统（`write_file` / `read_file` / `list_files`），右栏可预览 Markdown 与 HTML |
 | 技能 | 自定义技能（`SKILL.md` 规范）+ 一键安装 `badlogic/pi-skills` 社区技能；模型按需 `load_skill` |
 | 扩展 | 任意 **MCP** 服务器（Streamable HTTP，支持自定义请求头） |
 | 定时 | Durable Object alarm 驱动的定时任务（每天 HH:MM / 每隔 N 分钟） |
-| 其他 | 只读分享链接、Markdown 导出、全量备份/恢复、浅色/深色主题、访问密码登录 |
+| 其他 | **设置页**（主题/布局/搜索/数据统一管理）、只读分享链接、Markdown 导出、全量备份/恢复、浅色/深色主题、访问密码登录 |
 
 ---
 
@@ -97,6 +97,7 @@ npx wrangler deploy
 | GET | `/api/skills/community` | 社区技能目录（badlogic/pi-skills） |
 | POST | `/api/skills/import` | `{url}` 从 GitHub/raw/任意 md 导入技能 |
 | GET / POST / DELETE | `/api/mcp` | MCP 服务器配置（支持 `headers`） |
+| GET / POST | `/api/settings` | 全局设置（目前：网页搜索开关 `webSearch`） |
 | GET / POST / PATCH / DELETE | `/api/automations` | 定时任务 |
 | POST | `/api/share` · GET `/s/<token>` | 只读分享 |
 | GET | `/api/export?format=md` | 导出 Markdown |
@@ -107,7 +108,7 @@ npx wrangler deploy
 
 ## 内置工具
 
-`now` · `remember` · `recall` · `list_skills` · `load_skill` · `http_fetch` · `write_file` · `read_file` · `list_files` · `codemode` · `tool_search`，以及所有已配置 MCP 服务器的工具（`mcp__<服务器>__<工具>`）。
+`now` · `remember` · `recall` · `list_skills` · `load_skill` · `web_search` · `web_fetch_page` · `http_fetch` · `write_file` · `read_file` · `list_files` · `codemode` · `tool_search`，以及所有已配置 MCP 服务器的工具（`mcp__<服务器>__<工具>`）。
 
 ---
 
@@ -126,7 +127,7 @@ npx wrangler deploy
 src/
   worker.ts              # Worker 入口 + Durable Object（API、工具、存储、调度）
   web/                   # React 前端
-    components/          #   Sidebar / ChatHeader / MessageList / Composer / Workbench / TopBar
+    components/          #   Sidebar / ChatHeader / MessageList / Composer / Workbench / TopBar / SettingsDialog
     lib/                 #   api 客户端、SSE 解析、Markdown 渲染、宽容解析器
 wrangler.jsonc           # Worker + DO + 静态资源绑定
 .github/workflows/deploy.yml
@@ -139,7 +140,7 @@ CHANGELOG.md             # 逐版本更新记录
 
 完整记录见 [CHANGELOG.md](./CHANGELOG.md)。里程碑：
 
-`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器
+`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索
 
 ## 致谢
 

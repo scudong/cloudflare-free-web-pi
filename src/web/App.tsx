@@ -5,11 +5,12 @@ import { MessageList } from "./components/MessageList";
 import { Composer } from "./components/Composer";
 import { Sidebar } from "./components/Sidebar";
 import { Workbench } from "./components/Workbench";
+import { SettingsDialog } from "./components/SettingsDialog";
 import type { WorkbenchTab } from "./components/Workbench";
 import { api } from "./lib/api";
 import { parseEntries, truncateOneLine } from "./lib/entries";
 import { parseAutomations, parseFiles, parseMemories, parseSessions, parseSkills } from "./lib/collections";
-import { loadBool, loadBoolOrNull, saveBool } from "./lib/localStore";
+import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { useMediaQuery } from "./lib/useMediaQuery";
 import type { AutomationInfo, ChatMessage, FileInfo, McpServerInfo, MemoryInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
 
@@ -53,6 +54,7 @@ export default function App() {
 	});
 	const [mobileTab, setMobileTab] = useState<MobileTab>("chat");
 	const [drawerOpen, setDrawerOpen] = useState(false);
+	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
 	// 右栏宽度（v0.16.0）：可拖拽分隔条、打开文档时自动加宽、可最大化阅读
 	const [rightWidth, setRightWidth] = useState(() => {
@@ -77,6 +79,8 @@ export default function App() {
 	const [loginError, setLoginError] = useState<string | null>(null);
 	const [models, setModels] = useState<string[]>([]);
 	const [model, setModel] = useState("deepseek-flash");
+	// 网页搜索开关（v0.20.0）：null 表示尚未读到后端设置
+	const [webSearch, setWebSearch] = useState<boolean | null>(null);
 	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
 	const [skills, setSkills] = useState<SkillInfo[]>([]);
 	const [skillsLoading, setSkillsLoading] = useState(true);
@@ -348,6 +352,22 @@ export default function App() {
 				if (data.default) setModel(data.default);
 			} catch {
 				// 保持默认
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, []);
+
+	// 网页搜索开关（一次；后端无该接口时保持默认开启）
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.settings();
+				if (alive) setWebSearch(data.webSearch !== false);
+			} catch {
+				if (alive) setWebSearch(true);
 			}
 		})();
 		return () => {
@@ -740,6 +760,31 @@ export default function App() {
 		});
 	}, []);
 
+	/** 网页搜索开关：乐观更新，失败回滚并提示。 */
+	const handleToggleWebSearch = useCallback(
+		(next: boolean) => {
+			setWebSearch(next);
+			void api.setSettings({ webSearch: next }).catch(() => {
+				setWebSearch(!next);
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "网页搜索设置保存失败。" }]);
+			});
+		},
+		[nextId],
+	);
+
+	/** 退出登录：清 cookie 并回到登录闸门。 */
+	const handleLogout = useCallback(() => {
+		setSettingsOpen(false);
+		void (async () => {
+			try {
+				await api.logout();
+			} catch {
+				// 忽略网络错误，本地同样回到登录页
+			}
+			setAuth({ required: true, authenticated: false });
+		})();
+	}, []);
+
 	/** Sidebar 记忆库 entry: reveal the workbench on the memories tab. */
 	const handleOpenMemories = useCallback(() => {
 		setDrawerOpen(false);
@@ -830,17 +875,8 @@ export default function App() {
 			<TopBar
 				online={online}
 				sessionLabel={sessionLabel}
-				leftOpen={leftOpen}
-				rightOpen={rightOpen}
-				onToggleLeft={toggleLeft}
-				onToggleRight={toggleRight}
 				onOpenDrawer={() => setDrawerOpen(true)}
-				onExport={handleExport}
-				onShare={handleShare}
-				onBackup={handleBackup}
-				onRestore={handleRestore}
-				light={light}
-				onToggleTheme={handleToggleTheme}
+				onOpenSettings={() => setSettingsOpen(true)}
 			/>
 
 			<div className="flex min-h-0 flex-1">
@@ -925,6 +961,26 @@ export default function App() {
 					</div>
 				)}
 			</div>
+
+			{/* 设置弹窗（v0.20.0）：顶栏菜单收纳于此 */}
+			<SettingsDialog
+				open={settingsOpen}
+				onClose={() => setSettingsOpen(false)}
+				light={light}
+				onToggleTheme={handleToggleTheme}
+				leftOpen={leftOpen}
+				rightOpen={rightOpen}
+				onToggleLeft={toggleLeft}
+				onToggleRight={toggleRight}
+				onExport={handleExport}
+				onShare={handleShare}
+				onBackup={handleBackup}
+				onRestore={handleRestore}
+				webSearch={webSearch}
+				onToggleWebSearch={handleToggleWebSearch}
+				authRequired={!!auth?.required}
+				onLogout={handleLogout}
+			/>
 
 			{/* Mobile drawer: the session sidebar slides over the chat */}
 			{!isDesktop && drawerOpen && (

@@ -2,6 +2,15 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（设置页 + 联网搜索）
+
+### 设置页与 DeepSeek 联网搜索（v0.20.0）
+- **设置页**（参照 Codex/Trae）：顶栏右侧按钮全部收进「设置」弹窗——主题、会话栏/工作台开关、分享、导出、备份、恢复，并新增「退出登录」；顶栏只保留品牌、状态与 ⚙ 入口
+- **DeepSeek 联网搜索**：新工具 `web_search`（`POST /v1/tools/search`，返回标题+链接+摘要列表）与 `web_fetch_page`（`POST /v1/tools/fetch`，返回干净 Markdown 正文），复用现有 `DEEPSEEK_API_KEY`
+- 搜索开关在 **设置 → 网页搜索**（默认开启；关闭后模型调用工具会得到「到设置中开启」的提示），按成功请求计费（约 ¥5/1000 次）
+- 设置持久化在 `app_settings` 表，随备份/恢复迁移；新增 `GET/POST /api/settings`
+- 实测：搜索「DeepSeek 最新模型」返回带日期的真实链接；抓取 `api-docs.deepseek.com` 指南页返回完整 Markdown
+
 ## 2026-10-19（真正的停止）
 
 ### 停止按钮改为服务端中止（v0.19.0）
