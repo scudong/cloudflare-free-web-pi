@@ -22,7 +22,7 @@
 | 技能 | 自定义技能（`SKILL.md` 规范）+ 一键安装 `badlogic/pi-skills` 社区技能；模型按需 `load_skill`，也可在输入框用 `/技能名` 显式调用 |
 | 扩展 | 任意 **MCP** 服务器（Streamable HTTP，支持自定义请求头） |
 | 定时 | Durable Object alarm 驱动的定时任务（每天 HH:MM / 每隔 N 分钟） |
-| 其他 | **左侧工具栏**（新会话/会话/连接/定时/技能/设置）、**设置页**（分 tab：通用/对话/记忆/数据，支持一键清空记忆）、只读分享链接、Markdown 导出、全量备份/恢复、四套主题（深色/浅色/米黄/午夜蓝，Arco 字节色卡）、访问密码登录 |
+| 其他 | **左侧工具栏**（新会话/会话/连接/定时/技能/设置）、**设置页**（分 tab：通用/对话/模型/记忆/数据）、**模型供应商管理**（任意 OpenAI 兼容端点，CCswitch 式切换）、一键清空记忆、只读分享链接、Markdown 导出、全量备份/恢复、四套主题（深色/浅色/米黄/午夜蓝，Arco 字节色卡）、访问密码登录 |
 
 ---
 
@@ -97,6 +97,7 @@ npx wrangler deploy
 | GET | `/api/skills/community` | 社区技能目录（badlogic/pi-skills） |
 | POST | `/api/skills/import` | `{url}` 从 GitHub/raw/任意 md 导入技能 |
 | GET / POST / DELETE | `/api/mcp` | MCP 服务器配置（支持 `headers`） |
+| GET / POST / DELETE | `/api/providers` · `/api/providers/activate` | LLM 供应商（自定义 OpenAI 兼容端点） |
 | GET / POST | `/api/settings` | 全局设置（网页搜索开关 `webSearch`、思考档位 `thinkingLevel`） |
 | GET | `/api/plan?sessionId=` | 当前会话的分步计划 |
 | GET / POST / PATCH / DELETE | `/api/automations` | 定时任务 |
@@ -141,7 +142,7 @@ CHANGELOG.md             # 逐版本更新记录
 
 完整记录见 [CHANGELOG.md](./CHANGELOG.md)。里程碑：
 
-`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏 · `v0.22` 思考/计划/轨迹 · `v0.23` 输入框调用技能 · `v0.24` 四套主题 · `v0.25` Arco 色卡 · `v0.26` 设置分 tab
+`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏 · `v0.22` 思考/计划/轨迹 · `v0.23` 输入框调用技能 · `v0.24` 四套主题 · `v0.25` Arco 色卡 · `v0.26` 设置分 tab · `v0.27` 模型供应商
 
 ## 致谢
 

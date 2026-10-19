@@ -2,7 +2,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "typebox";
-import { createModels } from "@earendil-works/pi-ai/models";
+import { createModels, createProvider } from "@earendil-works/pi-ai/models";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
 import {
 	AssistantEntry,
@@ -54,6 +55,8 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	sql.exec(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
 	// 分步计划（update_plan 工具写入）：每个会话一份最新计划（v0.22.0）
 	sql.exec(`CREATE TABLE IF NOT EXISTS plans (conversation_id TEXT PRIMARY KEY, steps TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	// LLM 供应商（v0.27.0）：CCswitch 式自定义 OpenAI 兼容端点
+	sql.exec(`CREATE TABLE IF NOT EXISTS providers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL, models TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
 	try {
 		sql.exec(`ALTER TABLE pi_mem ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`);
@@ -96,7 +99,7 @@ function savePlan(conversationId: string, steps: PlanStep[]): void {
 	);
 }
 
-function readPlan(conversationId: string): PlanStep[] {
+const readPlan = (conversationId: string): PlanStep[] => {
 	try {
 		const rows = sqlFacade!.exec("SELECT steps FROM plans WHERE conversation_id = ?", conversationId).toArray() as { steps: string }[];
 		const parsed = rows[0] ? (JSON.parse(rows[0].steps) as unknown) : [];
@@ -104,6 +107,71 @@ function readPlan(conversationId: string): PlanStep[] {
 	} catch {
 		return [];
 	}
+};
+
+/* ---------------- LLM 供应商（v0.27.0） ---------------- */
+
+/** 内置默认供应商（DeepSeek 官方，走 DEEPSEEK_API_KEY）。 */
+const DEFAULT_PROVIDER = { id: "deepseek", name: "DeepSeek 官方", models: ["deepseek-flash", "deepseek-v4-pro"] };
+
+type ProviderRow = { id: string; name: string; base_url: string; api_key: string; models: string };
+
+function listProviderRows(): ProviderRow[] {
+	try {
+		return sqlFacade!.exec("SELECT id, name, base_url, api_key, models FROM providers ORDER BY created_at ASC").toArray() as ProviderRow[];
+	} catch {
+		return [];
+	}
+}
+
+/** 当前启用的供应商 id；空串 = 默认 DeepSeek。 */
+const activeProviderId = (): string => getSetting("active_provider", "");
+
+function splitModels(raw: string): string[] {
+	return raw
+		.split(/[,，\s]+/)
+		.map((s) => s.trim())
+		.filter(Boolean)
+		.slice(0, 20);
+}
+
+/** 当前可用的模型 id 列表。 */
+function activeModelIds(): string[] {
+	const id = activeProviderId();
+	if (!id) return DEFAULT_PROVIDER.models;
+	const row = listProviderRows().find((r) => r.id === id);
+	const models = row ? splitModels(row.models) : [];
+	return models.length ? models : DEFAULT_PROVIDER.models;
+}
+
+/** 把一条供应商记录构造成 pi-ai 的 Provider（OpenAI 兼容端点）。 */
+function buildCustomProvider(row: ProviderRow): unknown {
+	const modelIds = splitModels(row.models);
+	return createProvider({
+		id: row.id,
+		name: row.name,
+		baseUrl: row.base_url,
+		auth: {
+			apiKey: {
+				name: `${row.name} API key`,
+				resolve: async () => ({ auth: { apiKey: row.api_key }, source: "已保存的密钥" }),
+			},
+		},
+		// 只填最少必要字段：成本置零、上下文按 128k 估、多模态保守关闭
+		models: (modelIds.length ? modelIds : DEFAULT_PROVIDER.models).map((mid) => ({
+			id: mid,
+			name: mid,
+			api: "openai-completions",
+			provider: row.id,
+			baseUrl: row.base_url,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			reasoning: false,
+			contextWindow: 128_000,
+			maxTokens: 16_384,
+		})),
+		api: openAICompletionsApi(),
+	} as never);
 }
 
 const stripHtml = (html: string) =>
@@ -497,7 +565,11 @@ export class SpikeAgent extends DurableObject {
 	private async open(): Promise<Harness> {
 		if (!this.harness) {
 			const models = createModels();
-			models.setProvider(deepseekProvider()); // reads DEEPSEEK_API_KEY
+			// v0.27.0：启用自定义供应商时用它，否则回落到 DeepSeek 官方（env DEEPSEEK_API_KEY）
+			const activeId = activeProviderId();
+			const providerRow = activeId ? listProviderRows().find((r) => r.id === activeId) : undefined;
+			if (providerRow) models.setProvider(buildCustomProvider(providerRow) as never);
+			else models.setProvider(deepseekProvider());
 			apiKeyRef = (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null;
 			const registry = createRegistry();
 			this.registryRef = registry as unknown as typeof this.registryRef;
@@ -550,7 +622,7 @@ export class SpikeAgent extends DurableObject {
 		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
 		await root.configure(
 			{
-				model: { provider: "deepseek", modelId: this.modelFor(sessionId) },
+				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 				// 思考档位（v0.22.0）：off 时不产生 thinking 事件，前端自然不显示思考块。
 				thinkingLevel: currentThinkingLevel(),
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
@@ -616,20 +688,30 @@ export class SpikeAgent extends DurableObject {
 
 	/** 取会话：有 id 用 id（不存在则退根会话），无 id 用根会话；并维护 sessions_meta。 */
 	/** 会话当前模型（未设置时用默认）。 */
+	private providerId(): string {
+		return activeProviderId() || DEFAULT_PROVIDER.id;
+	}
+
+	/** 当前供应商的第一个模型。 */
+	private defaultModelId(): string {
+		return activeModelIds()[0] ?? DEFAULT_MODEL_ID;
+	}
+
 	private modelFor(sessionId?: string): string {
-		if (!sessionId) return DEFAULT_MODEL_ID;
+		const available = activeModelIds();
+		if (!sessionId) return available[0] ?? DEFAULT_MODEL_ID;
 		try {
 			const row = sqlFacade!.exec("SELECT model FROM sessions_meta WHERE id = ?", sessionId).toArray() as { model?: string }[];
 			const model = row[0]?.model;
-			return model && AVAILABLE_MODELS.includes(model) ? model : DEFAULT_MODEL_ID;
+			return model && available.includes(model) ? model : (available[0] ?? DEFAULT_MODEL_ID);
 		} catch {
-			return DEFAULT_MODEL_ID;
+			return available[0] ?? DEFAULT_MODEL_ID;
 		}
 	}
 
 	private async conversationFor(harness: Awaited<ReturnType<typeof this.open>>, sessionId?: string) {
 		const agentChange = {
-			model: { provider: "deepseek", modelId: this.modelFor(sessionId) },
+			model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 			extensions: [spikeExtension, codemodeExtension],
 		};
 		if (sessionId) {
@@ -648,7 +730,7 @@ export class SpikeAgent extends DurableObject {
 		const conversation = await harness.createConversation(
 			{
 				ownership: { kind: "ownerless" },
-				agent: { model: { provider: "deepseek", modelId: DEFAULT_MODEL_ID }, extensions: [spikeExtension, codemodeExtension] },
+				agent: { model: { provider: this.providerId(), modelId: this.defaultModelId() }, extensions: [spikeExtension, codemodeExtension] },
 			},
 			ctx,
 		);
@@ -850,6 +932,7 @@ export class SpikeAgent extends DurableObject {
 				skills: q("SELECT name, description, content FROM skills ORDER BY name"),
 				settings: q("SELECT key, value FROM app_settings"),
 				plans: q("SELECT conversation_id, steps, updated_at FROM plans"),
+				providers: q("SELECT id, name, base_url, api_key, models FROM providers"),
 			},
 		};
 	}
@@ -923,6 +1006,15 @@ export class SpikeAgent extends DurableObject {
 			if (!key) continue;
 			setSetting(key, str(s.value));
 			counts.settings = (counts.settings ?? 0) + 1;
+		}
+		for (const p of rows("providers")) {
+			const pid = str(p.id).trim();
+			if (!pid) continue;
+			sqlFacade!.exec(
+				"INSERT INTO providers (id, name, base_url, api_key, models, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, base_url = excluded.base_url, api_key = excluded.api_key, models = excluded.models",
+				pid, str(p.name), str(p.base_url), str(p.api_key), str(p.models), new Date().toISOString(),
+			);
+			counts.providers = (counts.providers ?? 0) + 1;
 		}
 		for (const p of rows("plans")) {
 			const cid = str(p.conversation_id);
@@ -1187,7 +1279,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
 		await root.configure(
 			{
-				model: { provider: "deepseek", modelId: this.modelFor(sessionId) },
+				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 				thinkingLevel: currentThinkingLevel(),
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
 					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
@@ -1564,13 +1656,80 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				return Response.json({ steps: readPlan(sid) });
 			}
+			if (url.pathname === "/providers" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const active = activeProviderId();
+				const rows = listProviderRows().map((r) => ({
+					id: r.id,
+					name: r.name,
+					baseUrl: r.base_url,
+					models: splitModels(r.models),
+					hasKey: Boolean(r.api_key),
+					keyHint: r.api_key ? "••••" + r.api_key.slice(-4) : "",
+					active: r.id === active,
+				}));
+				return Response.json({ active, default: DEFAULT_PROVIDER, providers: rows });
+			}
+			if (url.pathname === "/providers" && request.method === "POST") {
+				const body = (await request.json()) as {
+					id?: string;
+					name?: string;
+					baseUrl?: string;
+					apiKey?: string;
+					models?: string | string[];
+				};
+				const name = (body.name ?? "").trim().slice(0, 40);
+				const baseUrl = (body.baseUrl ?? "").trim().replace(/\/+$/, "");
+				if (!name || !/^https?:\/\//.test(baseUrl)) {
+					return Response.json({ error: "需要名称与 http(s) 地址" }, { status: 400 });
+				}
+				const modelList = (Array.isArray(body.models) ? body.models : splitModels(String(body.models ?? "")))
+					.map((m) => String(m).trim())
+					.filter(Boolean)
+					.slice(0, 20);
+				ensureTables(sqlFacade!);
+				const id =
+					(body.id ?? "").trim() ||
+					baseUrl.replace(/^https?:\/\//, "").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase().slice(0, 24) ||
+					"p" + Date.now().toString(36);
+				const existing = listProviderRows().find((r) => r.id === id);
+				// 编辑时 apiKey 留空 = 保留原密钥
+				const apiKey = (body.apiKey ?? "").trim() || existing?.api_key || "";
+				if (!apiKey) return Response.json({ error: "需要 API Key" }, { status: 400 });
+				sqlFacade!.exec(
+					"INSERT INTO providers (id, name, base_url, api_key, models, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, base_url = excluded.base_url, api_key = excluded.api_key, models = excluded.models",
+					id, name, baseUrl, apiKey, modelList.join(","), new Date().toISOString(),
+				);
+				if (activeProviderId() === id) await this.recoverSession();
+				return Response.json({ ok: true, id, models: modelList });
+			}
+			if (url.pathname === "/providers" && request.method === "DELETE") {
+				const id = url.searchParams.get("id") ?? "";
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec("DELETE FROM providers WHERE id = ?", id);
+				if (activeProviderId() === id) setSetting("active_provider", "");
+				await this.recoverSession();
+				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/providers/activate" && request.method === "POST") {
+				const body = (await request.json()) as { id?: string };
+				const id = (body.id ?? "").trim();
+				ensureTables(sqlFacade!);
+				if (id && !listProviderRows().some((r) => r.id === id)) {
+					return Response.json({ error: "供应商不存在" }, { status: 404 });
+				}
+				setSetting("active_provider", id);
+				await this.recoverSession();
+				return Response.json({ ok: true, active: id, provider: this.providerId(), models: activeModelIds() });
+			}
 			if (url.pathname === "/models" && request.method === "GET") {
-				return Response.json({ models: AVAILABLE_MODELS, default: DEFAULT_MODEL_ID });
+				const available = activeModelIds();
+				return Response.json({ models: available, default: available[0] ?? DEFAULT_MODEL_ID, provider: this.providerId() });
 			}
 			if (url.pathname === "/model" && request.method === "POST") {
 				const body = (await request.json()) as { sessionId?: string; modelId?: string };
 				const modelId = body.modelId ?? "";
-				if (!AVAILABLE_MODELS.includes(modelId)) {
+				if (!activeModelIds().includes(modelId)) {
 					return Response.json({ error: "不支持的模型" }, { status: 400 });
 				}
 				if (!body.sessionId) return Response.json({ error: "缺少 sessionId" }, { status: 400 });

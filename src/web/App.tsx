@@ -62,6 +62,8 @@ export default function App() {
 	const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean } | null>(null);
 	const [loginError, setLoginError] = useState<string | null>(null);
 	const [models, setModels] = useState<string[]>([]);
+	/** 供应商变更后重新拉取模型列表（v0.27.0）。 */
+	const [modelsTick, setModelsTick] = useState(0);
 	const [model, setModel] = useState("deepseek-flash");
 	// 网页搜索开关（v0.20.0）：null 表示尚未读到后端设置
 	const [webSearch, setWebSearch] = useState<boolean | null>(null);
@@ -408,7 +410,7 @@ export default function App() {
 		return () => {
 			alive = false;
 		};
-	}, []);
+	}, [modelsTick]);
 
 	// 网页搜索开关（一次；后端无该接口时保持默认开启）
 	useEffect(() => {
@@ -1107,6 +1109,7 @@ export default function App() {
 				memoriesError={memoriesError}
 				onDeleteMemory={handleDeleteMemory}
 				onClearMemories={handleClearMemories}
+				onModelsChanged={() => setModelsTick((t) => t + 1)}
 				authRequired={!!auth?.required}
 				onLogout={handleLogout}
 			/>

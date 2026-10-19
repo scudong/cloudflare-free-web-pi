@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { api } from "../lib/api";
 import { formatTime } from "../lib/format";
 import { THEMES, type ThemeId } from "../lib/theme";
 import type { MemoryInfo } from "../types";
 
-type SettingsTab = "general" | "chat" | "memory" | "data";
+type ProviderInfo = {
+	id: string;
+	name: string;
+	baseUrl: string;
+	models: string[];
+	keyHint?: string;
+	active?: boolean;
+};
+
+type SettingsTab = "general" | "chat" | "model" | "memory" | "data";
 
 interface SettingsDialogProps {
 	open: boolean;
@@ -32,6 +42,8 @@ interface SettingsDialogProps {
 	onDeleteMemory: (id: number) => Promise<boolean>;
 	/** 一键清空记忆库（v0.26.0）。 */
 	onClearMemories: () => Promise<number | null>;
+	/** 供应商变更后刷新模型列表（v0.27.0）。 */
+	onModelsChanged?: () => void;
 	/** 设置了访问密码才显示登出。 */
 	authRequired: boolean;
 	onLogout: () => void;
@@ -70,6 +82,7 @@ const actionButton =
 const TABS: { key: SettingsTab; label: string; icon: string }[] = [
 	{ key: "general", label: "通用", icon: "⚙️" },
 	{ key: "chat", label: "对话", icon: "💬" },
+	{ key: "model", label: "模型", icon: "🧩" },
 	{ key: "memory", label: "记忆", icon: "🧠" },
 	{ key: "data", label: "数据", icon: "💾" },
 ];
@@ -97,12 +110,91 @@ export function SettingsDialog({
 	memoriesError,
 	onDeleteMemory,
 	onClearMemories,
+	onModelsChanged,
 	authRequired,
 	onLogout,
 }: SettingsDialogProps) {
 	const restoreRef = useRef<HTMLInputElement>(null);
 	const [tab, setTab] = useState<SettingsTab>("general");
 	const [clearing, setClearing] = useState(false);
+
+	// 供应商（v0.27.0）
+	const [providers, setProviders] = useState<ProviderInfo[]>([]);
+	const [defaultProvider, setDefaultProvider] = useState<{ id: string; name: string; models: string[] } | null>(null);
+	const [activeProvider, setActiveProvider] = useState("");
+	const [providersLoading, setProvidersLoading] = useState(false);
+	const [providerError, setProviderError] = useState<string | null>(null);
+	const [providerBusy, setProviderBusy] = useState(false);
+	const [form, setForm] = useState<{ id?: string; name: string; baseUrl: string; apiKey: string; models: string } | null>(null);
+
+	const loadProviders = async () => {
+		setProvidersLoading(true);
+		try {
+			const data = await api.providers();
+			setProviders(Array.isArray(data.providers) ? data.providers : []);
+			setDefaultProvider(data.default ?? null);
+			setActiveProvider(data.active ?? "");
+			setProviderError(null);
+		} catch (err) {
+			setProviderError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setProvidersLoading(false);
+		}
+	};
+
+	useEffect(() => {
+		if (open && tab === "model") void loadProviders();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [open, tab]);
+
+	const activateProvider = async (id: string) => {
+		if (providerBusy) return;
+		setProviderBusy(true);
+		try {
+			await api.activateProvider(id);
+			await loadProviders();
+			onModelsChanged?.();
+		} catch (err) {
+			setProviderError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setProviderBusy(false);
+		}
+	};
+
+	const saveProvider = async () => {
+		if (!form || providerBusy) return;
+		setProviderBusy(true);
+		try {
+			await api.saveProvider({
+				id: form.id,
+				name: form.name,
+				baseUrl: form.baseUrl,
+				apiKey: form.apiKey,
+				models: form.models,
+			});
+			setForm(null);
+			await loadProviders();
+			onModelsChanged?.();
+		} catch (err) {
+			setProviderError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setProviderBusy(false);
+		}
+	};
+
+	const removeProvider = async (id: string, name: string) => {
+		if (!window.confirm(`删除供应商「${name}」？`)) return;
+		setProviderBusy(true);
+		try {
+			await api.deleteProvider(id);
+			await loadProviders();
+			onModelsChanged?.();
+		} catch (err) {
+			setProviderError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setProviderBusy(false);
+		}
+	};
 
 	useEffect(() => {
 		if (!open) return;
@@ -269,6 +361,163 @@ export function SettingsDialog({
 									<Switch checked={webSearch === true} onChange={onToggleWebSearch} label="启用网页搜索" />
 								</div>
 								{webSearch === null && <p className="mt-2 text-xs text-slate-500">正在读取设置…</p>}
+							</Section>
+						</>
+					)}
+
+					{tab === "model" && (
+						<>
+							<Section title="LLM 供应商">
+								<p className="mb-2 text-xs leading-relaxed text-slate-500">
+									任意 OpenAI 兼容端点都可接入。切换后对<strong>新对话</strong>生效；已开会话需要重新选模型。
+								</p>
+								{providerError && <p className="mb-2 text-xs text-rose-300">{providerError}</p>}
+								<ul className="space-y-2">
+									{/* 内置默认供应商 */}
+									<li
+										className={`rounded-lg border px-3 py-2 ${
+											activeProvider === ""
+												? "border-sky-500/60 bg-sky-500/10"
+												: "border-slate-700 bg-slate-800/40"
+										}`}
+									>
+										<div className="flex items-center gap-2">
+											<span aria-hidden>🌐</span>
+											<span className="min-w-0 flex-1">
+												<span className="block truncate text-[13px] font-medium text-slate-100">
+													{defaultProvider?.name ?? "DeepSeek 官方"}
+													{activeProvider === "" && <span className="ml-1.5 text-[11px] text-sky-300">使用中</span>}
+												</span>
+												<span className="block truncate text-[11px] text-slate-500">
+													api.deepseek.com · {(defaultProvider?.models ?? []).join(" / ")}
+												</span>
+											</span>
+											{activeProvider !== "" && (
+												<button
+													type="button"
+													onClick={() => void activateProvider("")}
+													disabled={providerBusy}
+													className="shrink-0 rounded-md border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:border-sky-500/60 hover:text-sky-300 disabled:opacity-40"
+												>
+													启用
+												</button>
+											)}
+										</div>
+									</li>
+
+									{providers.map((item) => (
+										<li
+											key={item.id}
+											className={`rounded-lg border px-3 py-2 ${
+												item.active ? "border-sky-500/60 bg-sky-500/10" : "border-slate-700 bg-slate-800/40"
+											}`}
+										>
+											<div className="flex items-center gap-2">
+												<span aria-hidden>🧩</span>
+												<span className="min-w-0 flex-1">
+													<span className="block truncate text-[13px] font-medium text-slate-100">
+														{item.name}
+														{item.active && <span className="ml-1.5 text-[11px] text-sky-300">使用中</span>}
+													</span>
+													<span className="block truncate text-[11px] text-slate-500">
+														{item.baseUrl.replace(/^https?:\/\//, "")}
+														{item.keyHint ? ` · ${item.keyHint}` : ""} · {item.models.join(" / ")}
+													</span>
+												</span>
+												{!item.active && (
+													<button
+														type="button"
+														onClick={() => void activateProvider(item.id)}
+														disabled={providerBusy}
+														className="shrink-0 rounded-md border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:border-sky-500/60 hover:text-sky-300 disabled:opacity-40"
+													>
+														启用
+													</button>
+												)}
+												<button
+													type="button"
+													onClick={() =>
+														setForm({
+															id: item.id,
+															name: item.name,
+															baseUrl: item.baseUrl,
+															apiKey: "",
+															models: item.models.join(", "),
+														})
+													}
+													className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-slate-400 hover:bg-slate-700 hover:text-slate-100"
+												>
+													编辑
+												</button>
+												<button
+													type="button"
+													onClick={() => void removeProvider(item.id, item.name)}
+													disabled={providerBusy}
+													className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-slate-400 hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-40"
+												>
+													删除
+												</button>
+											</div>
+										</li>
+									))}
+								</ul>
+								{providersLoading && <p className="mt-2 text-xs text-slate-500">正在加载…</p>}
+
+								{form ? (
+									<div className="mt-3 space-y-1.5 rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+										<p className="text-xs font-medium text-slate-300">{form.id ? "编辑供应商" : "新增供应商"}</p>
+										<input
+											value={form.name}
+											onChange={(e) => setForm({ ...form, name: e.target.value })}
+											placeholder="名称，如 月之暗面"
+											className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+										/>
+										<input
+											value={form.baseUrl}
+											onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+											placeholder="https://api.example.com/v1"
+											className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+										/>
+										<input
+											value={form.apiKey}
+											onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+											placeholder={form.id ? "API Key（留空则保持不变）" : "API Key"}
+											type="password"
+											className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+										/>
+										<input
+											value={form.models}
+											onChange={(e) => setForm({ ...form, models: e.target.value })}
+											placeholder="模型 ID，逗号分隔，如 kimi-k2, kimi-k1.5"
+											className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+										/>
+										<div className="flex gap-1.5 pt-0.5">
+											<button
+												type="button"
+												onClick={() => void saveProvider()}
+												disabled={providerBusy || !form.name.trim() || !form.baseUrl.trim() || !form.models.trim()}
+												className="rounded-md bg-sky-600 px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+											>
+												{providerBusy ? "保存中…" : "保存"}
+											</button>
+											<button
+												type="button"
+												onClick={() => setForm(null)}
+												className="rounded-md border border-slate-600 px-2.5 py-1.5 text-xs text-slate-300"
+											>
+												取消
+											</button>
+										</div>
+									</div>
+								) : (
+									<button
+										type="button"
+										onClick={() => setForm({ name: "", baseUrl: "", apiKey: "", models: "" })}
+										className="mt-3 w-full rounded-lg border border-dashed border-slate-600 px-3 py-2 text-xs text-slate-300 transition-colors hover:border-sky-500/60 hover:text-sky-300"
+									>
+										＋ 新增供应商
+									</button>
+								)}
 							</Section>
 						</>
 					)}

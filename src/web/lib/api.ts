@@ -171,7 +171,27 @@ export const api = {
 	restore: (payload: unknown) =>
 		requestJson<{ ok?: boolean; counts?: Record<string, number>; error?: string }>("/api/restore", jsonPost(payload)),
 
-	models: () => requestJson<{ models?: string[]; default?: string }>("/api/models"),
+	models: () => requestJson<{ models?: string[]; default?: string; provider?: string }>("/api/models"),
+
+	/** LLM 供应商（v0.27.0，CCswitch 式）。 */
+	providers: () =>
+		requestJson<{
+			active?: string;
+			default?: { id: string; name: string; models: string[] };
+			providers?: { id: string; name: string; baseUrl: string; models: string[]; keyHint?: string; active?: boolean }[];
+		}>("/api/providers"),
+
+	saveProvider: (body: { id?: string; name: string; baseUrl: string; apiKey?: string; models: string }) =>
+		requestJson<{ ok?: boolean; id?: string; models?: string[]; error?: string }>("/api/providers", jsonPost(body)),
+
+	deleteProvider: (id: string) =>
+		requestJson<{ ok?: boolean }>(withQuery("/api/providers", { id }), { method: "DELETE" }),
+
+	activateProvider: (id: string) =>
+		requestJson<{ ok?: boolean; active?: string; models?: string[]; error?: string }>(
+			"/api/providers/activate",
+			jsonPost({ id }),
+		),
 
 	setModel: (sessionId: string, modelId: string) =>
 		requestJson<{ ok?: boolean }>("/api/model", jsonPost({ sessionId, modelId })),

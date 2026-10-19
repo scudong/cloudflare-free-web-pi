@@ -2,6 +2,19 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（LLM 供应商管理）
+
+### 设置新增「模型」tab：CCswitch 式供应商切换（v0.27.0）
+- 新增 **LLM 供应商** 管理，任意 OpenAI 兼容端点都能接入：
+  - 字段：名称 / Base URL / API Key / 模型 ID 列表（逗号分隔）
+  - 列表里显示当前生效项（`使用中` 高亮）+ 密钥掩码（`••••1234`）
+  - 每项可 **启用 / 编辑 / 删除**；编辑时 API Key 留空 = 保持原值
+  - 内置「DeepSeek 官方」作为默认项，随时可切回
+- 切换后：`/api/models` 返回新供应商的模型，聊天顶栏的模型选择器立即更新；已开会话需要重新选模型
+- 后端用 pi-ai 的 `createProvider` + `openAICompletionsApi()` 动态构造 Provider，供应商配置存 DO（`providers` 表），随备份/恢复迁移
+- 新增接口：`GET/POST/DELETE /api/providers`、`POST /api/providers/activate`
+- 实测：新增 Moonshot（kimi-k2 / kimi-k1.5）→ 启用 → 模型选择器变 `kimi-k2` → 切回默认恢复 `deepseek-flash`
+
 ## 2026-10-19（设置分 tab + 记忆清空）
 
 ### 设置弹窗按子功能分 tab（v0.26.0）
