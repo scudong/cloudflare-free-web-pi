@@ -35,6 +35,9 @@ interface SettingsDialogProps {
 	/** 思考档位（v0.22.0）：off / low / high。 */
 	thinkingLevel: string;
 	onChangeThinkingLevel: (next: string) => void;
+	/** 上下文压缩策略（v0.30.0）。 */
+	compaction: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number } | null;
+	onChangeCompaction: (patch: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>) => void;
 	/** 记忆库（v0.21.0 从工作台移入设置）。 */
 	memories: MemoryInfo[];
 	memoriesLoading: boolean;
@@ -105,6 +108,8 @@ export function SettingsDialog({
 	onToggleWebSearch,
 	thinkingLevel,
 	onChangeThinkingLevel,
+	compaction,
+	onChangeCompaction,
 	memories,
 	memoriesLoading,
 	memoriesError,
@@ -347,6 +352,46 @@ export function SettingsDialog({
 											{option.label}
 										</button>
 									))}
+								</div>
+							</Section>
+
+							<Section title="上下文压缩">
+								<div className="flex items-start justify-between gap-4">
+									<div className="min-w-0">
+										<p className="text-sm text-slate-200">自动压缩长对话</p>
+										<p className="mt-1 text-xs leading-relaxed text-slate-500">
+											接近上下文上限时，把较早的内容摘要成一条记录，保留最近 {compaction?.keepRecentTokens ?? 20000} tokens 原文。
+										</p>
+									</div>
+									<Switch
+										checked={compaction?.enabled !== false}
+										onChange={(next) => onChangeCompaction({ enabled: next })}
+										label="启用自动压缩"
+									/>
+								</div>
+								<div className="mt-3 grid grid-cols-2 gap-2">
+									<label className="text-xs text-slate-400">
+										保留原文 tokens
+										<input
+											type="number"
+											min={0}
+											step={1000}
+											value={compaction?.keepRecentTokens ?? 20000}
+											onChange={(e) => onChangeCompaction({ keepRecentTokens: Number(e.target.value) })}
+											className="mt-1 w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100"
+										/>
+									</label>
+									<label className="text-xs text-slate-400">
+										预留回答 tokens
+										<input
+											type="number"
+											min={1024}
+											step={1024}
+											value={compaction?.reserveTokens ?? 16384}
+											onChange={(e) => onChangeCompaction({ reserveTokens: Number(e.target.value) })}
+											className="mt-1 w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100"
+										/>
+									</label>
 								</div>
 							</Section>
 

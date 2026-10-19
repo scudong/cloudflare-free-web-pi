@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { renderMarkdown } from "../lib/rich";
-import type { AutomationInfo, McpServerInfo, SkillInfo } from "../types";
+import type { AutomationInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
 
 function PanelHeader({ title, count }: { title: string; count?: number }) {
 	return (
@@ -284,6 +284,13 @@ export function SkillPanel({
 	onAdd,
 	onDelete,
 	onImport,
+	prompts,
+	rules,
+	onAddPrompt,
+	onDeletePrompt,
+	onAddRule,
+	onToggleRule,
+	onDeleteRule,
 }: {
 	items: SkillInfo[];
 	loading: boolean;
@@ -291,6 +298,14 @@ export function SkillPanel({
 	onAdd: (name: string, description: string, content: string) => Promise<boolean>;
 	onDelete: (name: string) => Promise<boolean>;
 	onImport: (url: string) => Promise<boolean>;
+	/** 提示模板与规则（v0.31.0）。 */
+	prompts: PromptInfo[];
+	rules: RuleInfo[];
+	onAddPrompt: (name: string, description: string, content: string) => Promise<boolean>;
+	onDeletePrompt: (name: string) => Promise<boolean>;
+	onAddRule: (name: string, content: string) => Promise<boolean>;
+	onToggleRule: (name: string, enabled: boolean) => Promise<boolean>;
+	onDeleteRule: (name: string) => Promise<boolean>;
 }) {
 	const [name, setName] = useState("");
 	const [importUrl, setImportUrl] = useState("");
@@ -470,7 +485,172 @@ export function SkillPanel({
 						))}
 					</ul>
 				</div>
+
+				{/* 提示模板（v0.31.0） */}
+				<details className="border-t border-slate-800/70 p-3">
+					<summary className="cursor-pointer text-xs font-medium text-slate-300">
+						📝 提示模板 <span className="tabular-nums text-slate-500">{prompts.length}</span>
+					</summary>
+					<p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+						输入框打 <code className="rounded bg-slate-800 px-1">/</code> 即可选中，正文会填进输入框。
+					</p>
+					<PromptForm onAdd={onAddPrompt} />
+					<ul className="mt-2 space-y-1">
+						{prompts.map((prompt) => (
+							<li key={prompt.name} className="flex items-start gap-2 rounded-lg bg-slate-800/50 px-2.5 py-1.5">
+								<span className="min-w-0 flex-1">
+									<span className="block truncate text-[12.5px] text-slate-100">{prompt.name}</span>
+									{prompt.description && (
+										<span className="block truncate text-[11px] text-slate-500">{prompt.description}</span>
+									)}
+								</span>
+								<button
+									type="button"
+									title="删除"
+									aria-label={`删除模板 ${prompt.name}`}
+									onClick={() => {
+										if (window.confirm(`删除模板「${prompt.name}」？`)) void onDeletePrompt(prompt.name);
+									}}
+									className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
+								>
+									🗑
+								</button>
+							</li>
+						))}
+					</ul>
+				</details>
+
+				{/* 规则文件（v0.31.0） */}
+				<details className="border-t border-slate-800/70 p-3">
+					<summary className="cursor-pointer text-xs font-medium text-slate-300">
+						📏 规则 <span className="tabular-nums text-slate-500">{rules.filter((r) => r.enabled).length}/{rules.length}</span>
+					</summary>
+					<p className="mt-1 text-[11px] leading-relaxed text-slate-500">启用的规则会注入每一轮对话的提示词。</p>
+					<RuleForm onAdd={onAddRule} />
+					<ul className="mt-2 space-y-1">
+						{rules.map((rule) => (
+							<li key={rule.name} className="flex items-start gap-2 rounded-lg bg-slate-800/50 px-2.5 py-1.5">
+								<button
+									type="button"
+									onClick={() => void onToggleRule(rule.name, !rule.enabled)}
+									aria-pressed={rule.enabled}
+									aria-label={`${rule.enabled ? "停用" : "启用"}规则 ${rule.name}`}
+									className={`mt-0.5 shrink-0 rounded px-1 text-[11px] ${
+										rule.enabled ? "text-emerald-400" : "text-slate-600"
+									}`}
+								>
+									{rule.enabled ? "☑" : "☐"}
+								</button>
+								<span className="min-w-0 flex-1">
+									<span className="block truncate text-[12.5px] text-slate-100">{rule.name}</span>
+									<span className="block truncate text-[11px] text-slate-500">{rule.content}</span>
+								</span>
+								<button
+									type="button"
+									title="删除"
+									aria-label={`删除规则 ${rule.name}`}
+									onClick={() => {
+										if (window.confirm(`删除规则「${rule.name}」？`)) void onDeleteRule(rule.name);
+									}}
+									className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
+								>
+									🗑
+								</button>
+							</li>
+						))}
+					</ul>
+				</details>
 			</div>
+		</div>
+	);
+}
+
+/** 新增提示模板的小表单。 */
+function PromptForm({ onAdd }: { onAdd: (name: string, description: string, content: string) => Promise<boolean> }) {
+	const [name, setName] = useState("");
+	const [description, setDescription] = useState("");
+	const [content, setContent] = useState("");
+	const [busy, setBusy] = useState(false);
+	return (
+		<div className="mt-2 space-y-1.5">
+			<input
+				value={name}
+				onChange={(e) => setName(e.target.value)}
+				placeholder="模板名，如 研报摘要"
+				className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+			/>
+			<input
+				value={description}
+				onChange={(e) => setDescription(e.target.value)}
+				placeholder="一句话说明"
+				className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+			/>
+			<textarea
+				value={content}
+				onChange={(e) => setContent(e.target.value)}
+				placeholder="模板正文，可用 $1 / $ARGUMENTS 占位"
+				rows={2}
+				className="w-full resize-y rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+			/>
+			<button
+				type="button"
+				disabled={busy || !name.trim() || !content.trim()}
+				onClick={() => {
+					setBusy(true);
+					void onAdd(name.trim(), description.trim(), content.trim()).then((ok) => {
+						if (ok) {
+							setName("");
+							setDescription("");
+							setContent("");
+						}
+						setBusy(false);
+					});
+				}}
+				className="w-full rounded-md bg-sky-600 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+			>
+				{busy ? "保存中…" : "添加模板"}
+			</button>
+		</div>
+	);
+}
+
+/** 新增规则的小表单。 */
+function RuleForm({ onAdd }: { onAdd: (name: string, content: string) => Promise<boolean> }) {
+	const [name, setName] = useState("");
+	const [content, setContent] = useState("");
+	const [busy, setBusy] = useState(false);
+	return (
+		<div className="mt-2 space-y-1.5">
+			<input
+				value={name}
+				onChange={(e) => setName(e.target.value)}
+				placeholder="规则名，如 输出语言"
+				className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+			/>
+			<textarea
+				value={content}
+				onChange={(e) => setContent(e.target.value)}
+				placeholder="规则内容，如「始终用中文回答」"
+				rows={2}
+				className="w-full resize-y rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+			/>
+			<button
+				type="button"
+				disabled={busy || !name.trim() || !content.trim()}
+				onClick={() => {
+					setBusy(true);
+					void onAdd(name.trim(), content.trim()).then((ok) => {
+						if (ok) {
+							setName("");
+							setContent("");
+						}
+						setBusy(false);
+					});
+				}}
+				className="w-full rounded-md bg-sky-600 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+			>
+				{busy ? "保存中…" : "添加规则"}
+			</button>
 		</div>
 	);
 }

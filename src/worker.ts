@@ -61,6 +61,9 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	sql.exec(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
 	// 分步计划（update_plan 工具写入）：每个会话一份最新计划（v0.22.0）
 	sql.exec(`CREATE TABLE IF NOT EXISTS plans (conversation_id TEXT PRIMARY KEY, steps TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	// 提示模板与规则文件（v0.31.0）：纯数据能力，运行时加载
+	sql.exec(`CREATE TABLE IF NOT EXISTS prompts (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS rules (name TEXT PRIMARY KEY, content TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`);
 	// LLM 供应商（v0.27.0）：CCswitch 式自定义 OpenAI 兼容端点
 	sql.exec(`CREATE TABLE IF NOT EXISTS providers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL, models TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
@@ -116,6 +119,53 @@ const readPlan = (conversationId: string): PlanStep[] => {
 		return [];
 	}
 };
+
+/* ---------------- 提示模板与规则（v0.31.0） ---------------- */
+
+type RuleRow = { name: string; content: string; enabled: number };
+
+function listRules(): RuleRow[] {
+	try {
+		return sqlFacade!.exec("SELECT name, content, enabled FROM rules ORDER BY name").toArray() as RuleRow[];
+	} catch {
+		return [];
+	}
+}
+
+/** 启用的规则正文，按名称排序后注入 instructions。 */
+function enabledRules(): string[] {
+	return listRules().filter((r) => r.enabled).map((r) => r.content.trim()).filter(Boolean);
+}
+
+function listPrompts(): { name: string; description: string; content: string }[] {
+	try {
+		return sqlFacade!.exec("SELECT name, description, content FROM prompts ORDER BY name").toArray() as {
+			name: string;
+			description: string;
+			content: string;
+		}[];
+	} catch {
+		return [];
+	}
+}
+
+/* ---------------- 上下文压缩策略（v0.30.0） ---------------- */
+
+/** 与 pi-durable 内置默认一致，作为设置项的回落值。 */
+const DEFAULT_COMPACTION = { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000, backgroundTokens: 32768 };
+
+function compactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number } {
+	const num = (key: string, fallback: number, min: number) => {
+		const value = Number(getSetting(key, String(fallback)));
+		return Number.isFinite(value) && value >= min ? Math.floor(value) : fallback;
+	};
+	return {
+		enabled: getSetting("compaction_enabled", "1") === "1",
+		reserveTokens: num("compaction_reserve", DEFAULT_COMPACTION.reserveTokens, 1024),
+		keepRecentTokens: num("compaction_keep_recent", DEFAULT_COMPACTION.keepRecentTokens, 0),
+		backgroundTokens: num("compaction_background", DEFAULT_COMPACTION.backgroundTokens, 0),
+	};
+}
 
 /* ---------------- LLM 供应商（v0.27.0） ---------------- */
 
@@ -718,7 +768,7 @@ export class SpikeAgent extends DurableObject {
 			// MCP 扩展在表就绪后构建并安装；之后由 /api/mcp 变更时重建。
 			this.mcpExt = (await buildMcpExtension(sqlFacade)) as never;
 				if (this.mcpExt) registry.install(this.mcpExt);
-			this.harness = await Harness.open(storage, { models, registry }, ctx);
+			this.harness = await Harness.open(storage, { models, registry, settings: { compaction: compactionSettings() } }, ctx);
 			harnessRef = this.harness as never;
 			this.harness.resume();
 		}
@@ -1038,6 +1088,11 @@ export class SpikeAgent extends DurableObject {
 		// 分步计划（v0.22.0）：多步任务先 update_plan，用户在聊天里实时看到清单。
 		out +=
 			"\n任务需要 3 步以上（多次检索、多文件产出、先计算后写作等）时，先用 update_plan 列出步骤并在每完成一步后更新；单步问题不要调用它。";
+		// 规则文件（v0.31.0）：用户维护的项目约定，每轮注入
+		const rules = enabledRules();
+		if (rules.length) {
+			out += "\n\n## 项目规则（必须遵守）\n" + rules.map((r) => `- ${r}`).join("\n");
+		}
 		// 子代理（v0.29.0）：可并行的独立子任务交给它们
 		out +=
 			"\n当有 2–4 个**互不依赖**的子任务（如分别调研几个对象再做对比）时，用 dispatch_tasks 并行分派给子代理，比串行逐个做更快；子代理看不到主对话，每个 prompt 要自包含。";
@@ -1070,6 +1125,8 @@ export class SpikeAgent extends DurableObject {
 				settings: q("SELECT key, value FROM app_settings"),
 				plans: q("SELECT conversation_id, steps, updated_at FROM plans"),
 				providers: q("SELECT id, name, base_url, api_key, models FROM providers"),
+				prompts: q("SELECT name, description, content FROM prompts"),
+				rules: q("SELECT name, content, enabled FROM rules"),
 			},
 		};
 	}
@@ -1143,6 +1200,24 @@ export class SpikeAgent extends DurableObject {
 			if (!key) continue;
 			setSetting(key, str(s.value));
 			counts.settings = (counts.settings ?? 0) + 1;
+		}
+		for (const pr of rows("prompts")) {
+			const name = str(pr.name).trim();
+			if (!name) continue;
+			sqlFacade!.exec(
+				"INSERT INTO prompts (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
+				name, str(pr.description), str(pr.content), new Date().toISOString(),
+			);
+			counts.prompts = (counts.prompts ?? 0) + 1;
+		}
+		for (const rl of rows("rules")) {
+			const name = str(rl.name).trim();
+			if (!name) continue;
+			sqlFacade!.exec(
+				"INSERT INTO rules (name, content, enabled, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET content = excluded.content, enabled = excluded.enabled",
+				name, str(rl.content), num(rl.enabled) ? 1 : 0, new Date().toISOString(),
+			);
+			counts.rules = (counts.rules ?? 0) + 1;
 		}
 		for (const p of rows("providers")) {
 			const pid = str(p.id).trim();
@@ -1452,6 +1527,10 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 							else if (change.type === "thinking_start") await send("thinking_start", {});
 							else if (change.type === "text_delta" && change.delta) await send("text", { delta: change.delta });
 						}
+					} else if (e.type === "compaction_start") {
+						await send("compaction", { status: "start" });
+					} else if (e.type === "compaction_end") {
+						await send("compaction", { status: "end" });
 					} else if (e.type === "tool_execution_start") {
 						const call = e as unknown as { toolName?: string; toolCallId?: string; parentToolCallId?: string; args?: unknown };
 						await send("tool_start", {
@@ -1772,9 +1851,93 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				}
 				return Response.json(data);
 			}
+			/* ---- 提示模板（v0.31.0） ---- */
+			if (url.pathname === "/prompts" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				return Response.json({ prompts: listPrompts() });
+			}
+			if (url.pathname === "/prompts" && request.method === "POST") {
+				const body = (await request.json()) as { name?: string; description?: string; content?: string };
+				const name = (body.name ?? "").trim().slice(0, 40);
+				const content = (body.content ?? "").trim();
+				if (!name || !content) return Response.json({ error: "需要名称与内容" }, { status: 400 });
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec(
+					"INSERT INTO prompts (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
+					name, (body.description ?? "").trim().slice(0, 120), content, new Date().toISOString(),
+				);
+				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/prompts" && request.method === "DELETE") {
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec("DELETE FROM prompts WHERE name = ?", url.searchParams.get("name") ?? "");
+				return Response.json({ ok: true });
+			}
+			/* ---- 规则文件（v0.31.0） ---- */
+			if (url.pathname === "/rules" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				return Response.json({ rules: listRules().map((r) => ({ ...r, enabled: Boolean(r.enabled) })) });
+			}
+			if (url.pathname === "/rules" && request.method === "POST") {
+				const body = (await request.json()) as { name?: string; content?: string; enabled?: boolean };
+				const name = (body.name ?? "").trim().slice(0, 40);
+				const content = (body.content ?? "").trim();
+				if (!name || !content) return Response.json({ error: "需要名称与内容" }, { status: 400 });
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec(
+					"INSERT INTO rules (name, content, enabled, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET content = excluded.content",
+					name, content, body.enabled === false ? 0 : 1, new Date().toISOString(),
+				);
+				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/rules" && request.method === "PATCH") {
+				const body = (await request.json()) as { name?: string; enabled?: boolean };
+				if (!body.name) return Response.json({ error: "缺少 name" }, { status: 400 });
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec("UPDATE rules SET enabled = ? WHERE name = ?", body.enabled ? 1 : 0, body.name);
+				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/rules" && request.method === "DELETE") {
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec("DELETE FROM rules WHERE name = ?", url.searchParams.get("name") ?? "");
+				return Response.json({ ok: true });
+			}
+			/* ---- 能力注册表（v0.31.0）：把三类来源汇总成一张表 ---- */
+			if (url.pathname === "/capabilities" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const settings = compactionSettings();
+				const builtin = [
+					{ id: "codemode", name: "Code Mode", description: "QuickJS 沙箱里写 JS 调工具", enabled: true },
+					{ id: "tool_search", name: "工具搜索", description: "工具多时按需检索加载", enabled: true },
+					{ id: "compaction", name: "上下文压缩", description: "接近上下文上限时自动摘要旧内容", enabled: settings.enabled, detail: `保留 ${settings.keepRecentTokens} tokens / 预留 ${settings.reserveTokens}` },
+					{ id: "plan", name: "计划清单", description: "update_plan 维护分步计划", enabled: true },
+					{ id: "subagents", name: "子代理", description: "dispatch_tasks 并行分派子任务", enabled: true },
+					{ id: "web_search", name: "联网搜索", description: "web_search / web_fetch_page", enabled: getSetting("web_search", "1") === "1" },
+				];
+				const data = [
+					{ id: "skills", name: "技能", description: "SKILL.md 说明书，按需 load_skill", enabled: true, count: this.skillIndex().length },
+					{ id: "prompts", name: "提示模板", description: "输入 / 展开的常用指令", enabled: true, count: listPrompts().length },
+					{ id: "rules", name: "规则文件", description: "每轮注入的项目约定", enabled: true, count: listRules().filter((r) => r.enabled).length },
+				];
+				const protocol = [
+					{ id: "mcp", name: "MCP 服务器", description: "Streamable HTTP 工具接入", enabled: true, count: sqlFacade!.exec("SELECT COUNT(*) AS n FROM mcp_servers").toArray()[0] ? Number((sqlFacade!.exec("SELECT COUNT(*) AS n FROM mcp_servers").toArray()[0] as { n: number }).n) : 0 },
+					{ id: "providers", name: "模型供应商", description: "OpenAI 兼容端点", enabled: true, count: listProviderRows().length },
+				];
+				return Response.json({
+					groups: [
+						{ key: "builtin", label: "内置能力", items: builtin },
+						{ key: "data", label: "数据能力", items: data },
+						{ key: "protocol", label: "协议接入", items: protocol },
+					],
+				});
+			}
 			if (url.pathname === "/settings" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				return Response.json({ webSearch: getSetting("web_search", "1") === "1", thinkingLevel: currentThinkingLevel() });
+				return Response.json({
+					webSearch: getSetting("web_search", "1") === "1",
+					thinkingLevel: currentThinkingLevel(),
+					compaction: compactionSettings(),
+				});
 			}
 			if (url.pathname === "/settings" && request.method === "POST") {
 				const body = (await request.json()) as { webSearch?: boolean; thinkingLevel?: string };
@@ -1782,11 +1945,42 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				if (body.thinkingLevel === "off" || body.thinkingLevel === "low" || body.thinkingLevel === "high") {
 					setSetting("thinking_level", body.thinkingLevel);
 				}
+				const c = (body as { compaction?: Record<string, unknown> }).compaction;
+				let compactionChanged = false;
+				if (c && typeof c === "object") {
+					if (typeof c.enabled === "boolean") {
+						setSetting("compaction_enabled", c.enabled ? "1" : "0");
+						compactionChanged = true;
+					}
+					for (const [patchKey, settingKey, min] of [
+						["reserveTokens", "compaction_reserve", 1024],
+						["keepRecentTokens", "compaction_keep_recent", 0],
+						["backgroundTokens", "compaction_background", 0],
+					] as const) {
+						const raw = Number(c[patchKey]);
+						if (Number.isFinite(raw) && raw >= min) {
+							setSetting(settingKey, String(Math.floor(raw)));
+							compactionChanged = true;
+						}
+					}
+				}
+				// 压缩策略在 Harness.open 时读取，改了要重建
+				if (compactionChanged) await this.recoverSession();
 				return Response.json({
 					ok: true,
 					webSearch: getSetting("web_search", "1") === "1",
 					thinkingLevel: currentThinkingLevel(),
+					compaction: compactionSettings(),
 				});
+			}
+			if (url.pathname === "/compact" && request.method === "POST") {
+				const body = (await request.json().catch(() => ({}))) as { sessionId?: string; instructions?: string };
+				const harness = await this.open();
+				const conversation = await this.conversationFor(harness, body.sessionId);
+				const taskId = await (conversation as unknown as {
+					compact(instructions: string | undefined, c: unknown): Promise<unknown>;
+				}).compact(typeof body.instructions === "string" ? body.instructions : undefined, ctx);
+				return Response.json({ ok: true, taskId: String(taskId) });
 			}
 			if (url.pathname === "/plan" && request.method === "GET") {
 				ensureTables(sqlFacade!);

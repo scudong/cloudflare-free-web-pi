@@ -49,7 +49,7 @@ export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onO
 			{item("sessions", "会话", "💬")}
 			{item("mcp", "连接", "🔌")}
 			{item("automations", "定时", "⏰")}
-			{item("skills", "技能", "⚡")}
+			{item("skills", "能力", "⚡")}
 			<div aria-hidden className="flex-1" />
 			<button type="button" onClick={onOpenSettings} title="设置" aria-label="打开设置" className={railButton}>
 				<span aria-hidden className="text-base leading-none">

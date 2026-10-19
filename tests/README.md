@@ -64,3 +64,6 @@ tests/
 | 导出 / 版本 | `api/api.test.ts` · 导出与版本 |
 | **子代理编排** | `api/api.test.ts` · 工具注册（防回归）+ `unit/entries.test.ts` · 子任务标题反解 |
 | **工具注册表** | `api/api.test.ts` · 工具注册（防回归） |
+| **能力注册表** | `api/api.test.ts` · 能力注册表 |
+| **提示模板** | `unit/template.test.ts` + `api/api.test.ts` · 提示模板 |
+| **规则文件** | `api/api.test.ts` · 规则文件 |

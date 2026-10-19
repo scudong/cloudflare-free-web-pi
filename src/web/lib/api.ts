@@ -153,6 +153,34 @@ export const api = {
 
 	skills: () => requestJson<{ skills?: unknown[] }>("/api/skills"),
 
+	/** 提示模板（v0.31.0）。 */
+	prompts: () => requestJson<{ prompts?: unknown[] }>("/api/prompts"),
+	addPrompt: (name: string, description: string, content: string) =>
+		requestJson<{ ok?: boolean; error?: string }>("/api/prompts", jsonPost({ name, description, content })),
+	deletePrompt: (name: string) => requestJson<{ ok?: boolean }>(withQuery("/api/prompts", { name }), { method: "DELETE" }),
+
+	/** 规则文件（v0.31.0）：每轮注入 instructions。 */
+	rules: () => requestJson<{ rules?: unknown[] }>("/api/rules"),
+	addRule: (name: string, content: string, enabled = true) =>
+		requestJson<{ ok?: boolean; error?: string }>("/api/rules", jsonPost({ name, content, enabled })),
+	toggleRule: (name: string, enabled: boolean) =>
+		requestJson<{ ok?: boolean }>("/api/rules", {
+			method: "PATCH",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ name, enabled }),
+		}),
+	deleteRule: (name: string) => requestJson<{ ok?: boolean }>(withQuery("/api/rules", { name }), { method: "DELETE" }),
+
+	/** 能力注册表（v0.31.0）：内置 / 数据 / 协议三类汇总。 */
+	capabilities: () =>
+		requestJson<{
+			groups?: { key: string; label: string; items: { id: string; name: string; description: string; enabled: boolean; count?: number; detail?: string }[] }[];
+		}>("/api/capabilities"),
+
+	/** 手动压缩当前会话（v0.30.0）。 */
+	compact: (sessionId: string, instructions?: string) =>
+		requestJson<{ ok?: boolean; taskId?: string }>("/api/compact", jsonPost({ sessionId, instructions })),
+
 	communitySkills: () =>
 		requestJson<{ source?: string; skills?: { name: string; description: string; needsLocal?: boolean; url: string }[] }>(
 			"/api/skills/community",
@@ -197,10 +225,18 @@ export const api = {
 		requestJson<{ ok?: boolean }>("/api/model", jsonPost({ sessionId, modelId })),
 
 	/** 全局设置（v0.20.0 网页搜索；v0.22.0 增加思考档位）。 */
-	settings: () => requestJson<{ webSearch?: boolean; thinkingLevel?: string }>("/api/settings"),
+	settings: () =>
+		requestJson<{
+			webSearch?: boolean;
+			thinkingLevel?: string;
+			compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number };
+		}>("/api/settings"),
 
-	setSettings: (patch: { webSearch?: boolean; thinkingLevel?: string }) =>
-		requestJson<{ ok?: boolean; webSearch?: boolean; thinkingLevel?: string }>("/api/settings", jsonPost(patch)),
+	setSettings: (patch: {
+		webSearch?: boolean;
+		thinkingLevel?: string;
+		compaction?: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>;
+	}) => requestJson<{ ok?: boolean }>("/api/settings", jsonPost(patch)),
 
 	/** 当前会话的分步计划（v0.22.0）。 */
 	plan: (sessionId: string) =>

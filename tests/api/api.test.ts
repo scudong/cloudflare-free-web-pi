@@ -170,6 +170,69 @@ describe("技能", () => {
 	});
 });
 
+describe("提示模板", () => {
+	it("新增 → 列表 → 删除", async () => {
+		const created = await post("/api/prompts", { name: "golden-prompt", description: "回归用", content: "总结 $1" });
+		expect(created.json.ok).toBe(true);
+
+		const list = await api("/api/prompts");
+		const item = list.json.prompts.find((p: { name: string }) => p.name === "golden-prompt");
+		expect(item).toMatchObject({ description: "回归用", content: "总结 $1" });
+
+		await api("/api/prompts?name=golden-prompt", { method: "DELETE" });
+		const after = await api("/api/prompts");
+		expect(after.json.prompts.some((p: { name: string }) => p.name === "golden-prompt")).toBe(false);
+	});
+
+	it("缺内容被拒绝", async () => {
+		const res = await post("/api/prompts", { name: "bad" });
+		expect(res.status).toBe(400);
+	});
+});
+
+describe("规则文件", () => {
+	it("新增 → 启用/停用 → 删除", async () => {
+		await post("/api/rules", { name: "golden-rule", content: "始终用中文回答" });
+		const list1 = await api("/api/rules");
+		const rule = list1.json.rules.find((r: { name: string }) => r.name === "golden-rule");
+		expect(rule).toMatchObject({ enabled: true, content: "始终用中文回答" });
+
+		await api("/api/rules", {
+			method: "PATCH",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ name: "golden-rule", enabled: false }),
+		});
+		const list2 = await api("/api/rules");
+		expect(list2.json.rules.find((r: { name: string }) => r.name === "golden-rule")?.enabled).toBe(false);
+
+		await api("/api/rules?name=golden-rule", { method: "DELETE" });
+		const list3 = await api("/api/rules");
+		expect(list3.json.rules.some((r: { name: string }) => r.name === "golden-rule")).toBe(false);
+	});
+});
+
+describe("能力注册表", () => {
+	it("返回内置 / 数据 / 协议三组", async () => {
+		const { json } = await api("/api/capabilities");
+		const keys = (json.groups ?? []).map((g: { key: string }) => g.key);
+		expect(keys).toEqual(["builtin", "data", "protocol"]);
+
+		const builtinIds = json.groups[0].items.map((i: { id: string }) => i.id);
+		expect(builtinIds).toEqual(expect.arrayContaining(["codemode", "compaction", "plan", "subagents", "web_search"]));
+
+		const dataIds = json.groups[1].items.map((i: { id: string }) => i.id);
+		expect(dataIds).toEqual(["skills", "prompts", "rules"]);
+	});
+
+	it("计数随数据变化", async () => {
+		await post("/api/prompts", { name: "count-prompt", content: "x" });
+		const { json } = await api("/api/capabilities");
+		const promptsItem = json.groups[1].items.find((i: { id: string }) => i.id === "prompts");
+		expect(promptsItem.count).toBeGreaterThanOrEqual(1);
+		await api("/api/prompts?name=count-prompt", { method: "DELETE" });
+	});
+});
+
 describe("记忆库", () => {
 	it("恢复写入 → 一键清空", async () => {
 		await post("/api/restore", {
@@ -192,7 +255,7 @@ describe("备份与恢复", () => {
 	it("备份包含各类数据键", async () => {
 		const { json } = await api("/api/backup");
 		expect(json.version).toBe(1);
-		for (const key of ["memories", "files", "automations", "mcpServers", "sessions", "skills", "settings", "plans", "providers"]) {
+		for (const key of ["memories", "files", "automations", "mcpServers", "sessions", "skills", "settings", "plans", "providers", "prompts", "rules"]) {
 			expect(json.data).toHaveProperty(key);
 		}
 	});

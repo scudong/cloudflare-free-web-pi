@@ -1,4 +1,4 @@
-import type { AutomationInfo, FileInfo, MemoryInfo, SessionListItem, SkillInfo } from "../types";
+import type { AutomationInfo, FileInfo, MemoryInfo, PromptInfo, RuleInfo, SessionListItem, SkillInfo } from "../types";
 
 /**
  * Tolerant parsers for panel data (sessions / files / memories).
@@ -109,5 +109,25 @@ export function parseSkills(raw: unknown): SkillInfo[] {
 		name: pickString(entry, ["name"]) || "未命名技能",
 		description: pickString(entry, ["description"]),
 		content: pickString(entry, ["content"]),
+	}));
+}
+
+/** GET /api/prompts → 提示模板。 */
+export function parsePrompts(raw: unknown): PromptInfo[] {
+	const list = arrayOf(raw, ["prompts"]).filter(isObject);
+	return list.map((entry) => ({
+		name: pickString(entry, ["name"]) || "未命名模板",
+		description: pickString(entry, ["description"]),
+		content: pickString(entry, ["content"]),
+	}));
+}
+
+/** GET /api/rules → 规则文件。 */
+export function parseRules(raw: unknown): RuleInfo[] {
+	const list = arrayOf(raw, ["rules"]).filter(isObject);
+	return list.map((entry) => ({
+		name: pickString(entry, ["name"]) || "未命名规则",
+		content: pickString(entry, ["content"]),
+		enabled: entry.enabled !== 0 && entry.enabled !== false,
 	}));
 }

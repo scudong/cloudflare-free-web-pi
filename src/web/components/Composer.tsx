@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import type { SkillInfo } from "../types";
+import { expandTemplate } from "../lib/template";
+import type { PromptInfo, SkillInfo } from "../types";
 
 interface ComposerProps {
 	pending: boolean;
@@ -9,6 +10,8 @@ interface ComposerProps {
 	onStop: () => void;
 	/** 已安装技能（v0.23.0）：输入 / 唤起，选中后把「/技能名」写进输入框。 */
 	skills: SkillInfo[];
+	/** 提示模板（v0.31.0）：选中后把模板正文填进输入框。 */
+	prompts?: PromptInfo[];
 }
 
 const MAX_IMAGES = 4;
@@ -63,7 +66,7 @@ function detectSkillToken(value: string, caret: number): { start: number; query:
 	return { start: upto.lastIndexOf("/"), query: match[2] ?? "" };
 }
 
-export function Composer({ pending, onSend, onStop, skills }: ComposerProps) {
+export function Composer({ pending, onSend, onStop, skills, prompts = [] }: ComposerProps) {
 	const [text, setText] = useState("");
 	const [images, setImages] = useState<string[]>([]);
 	const [busy, setBusy] = useState(false);
@@ -74,29 +77,34 @@ export function Composer({ pending, onSend, onStop, skills }: ComposerProps) {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
 
+	type MenuItem = { kind: "skill" | "prompt"; name: string; description: string; content?: string };
+	const candidates: MenuItem[] = [
+		...skills.map((s) => ({ kind: "skill" as const, name: s.name, description: s.description ?? "" })),
+		...prompts.map((p) => ({ kind: "prompt" as const, name: p.name, description: p.description ?? "", content: p.content })),
+	];
 	const matches = skillMenu
-		? skills
-				.filter((s) => {
+		? candidates
+				.filter((item) => {
 					const q = skillMenu.query.toLowerCase();
 					if (!q) return true;
-					return s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q);
+					return item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q);
 				})
 				.slice(0, SKILL_MENU_LIMIT)
 		: [];
 	const menuOpen = skillMenu !== null && matches.length > 0;
 
-	/** 选中技能：把「/查询」替换成「/技能名 」，光标移到末尾。 */
-	const pickSkill = (name: string) => {
+	/** 选中条目：技能写「/技能名 」，提示模板把正文填进输入框。 */
+	const pickItem = (item: MenuItem) => {
 		const el = textareaRef.current;
 		const start = skillMenu?.start ?? 0;
 		const caret = el?.selectionStart ?? text.length;
-		const next = `${text.slice(0, start)}/${name} ${text.slice(caret)}`;
+		const replacement = item.kind === "skill" ? `/${item.name} ` : expandTemplate(item.content ?? "");
+		const next = `${text.slice(0, start)}${replacement}${text.slice(caret)}`;
 		setText(next);
 		setSkillMenu(null);
 		setSkillIndex(0);
-		// 下一帧把光标放到技能名之后
 		window.requestAnimationFrame(() => {
-			const pos = start + name.length + 2;
+			const pos = start + replacement.length;
 			el?.focus();
 			el?.setSelectionRange(pos, pos);
 		});
@@ -156,7 +164,7 @@ export function Composer({ pending, onSend, onStop, skills }: ComposerProps) {
 			}
 			if (event.key === "Enter" || event.key === "Tab") {
 				event.preventDefault();
-				pickSkill(matches[Math.min(skillIndex, matches.length - 1)]!.name);
+				pickItem(matches[Math.min(skillIndex, matches.length - 1)]!);
 				return;
 			}
 			if (event.key === "Escape") {
@@ -175,7 +183,7 @@ export function Composer({ pending, onSend, onStop, skills }: ComposerProps) {
 	/** 输入变化时判断是否要弹出技能菜单。 */
 	const handleChange = (value: string, caret: number) => {
 		setText(value);
-		if (!skills.length) {
+		if (!skills.length && !prompts.length) {
 			setSkillMenu(null);
 			return;
 		}
@@ -190,8 +198,8 @@ export function Composer({ pending, onSend, onStop, skills }: ComposerProps) {
 
 	/** 点 ⚡：在光标处插入「/」并展开菜单。 */
 	const openSkillMenu = () => {
-		if (!skills.length) {
-			setNotice("还没有安装技能，先在左侧 ⚡ 面板里添加。");
+		if (!skills.length && !prompts.length) {
+			setNotice("还没有技能或模板，先在左侧「能力」面板里添加。");
 			return;
 		}
 		const el = textareaRef.current;
@@ -236,32 +244,32 @@ export function Composer({ pending, onSend, onStop, skills }: ComposerProps) {
 				{menuOpen && (
 					<div
 						role="listbox"
-						aria-label="选择技能"
-						className="absolute bottom-full left-4 right-4 mb-1 max-h-64 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900/95 p-1 shadow-2xl backdrop-blur"
+						aria-label="选择技能或模板"
+						className="absolute bottom-full left-4 right-4 mb-1 max-h-64 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1 shadow-2xl"
 					>
-						<p className="px-2 py-1 text-[11px] text-slate-500">选择技能 · ↑↓ 选择，Enter 确认，Esc 取消</p>
-						{matches.map((skill, index) => (
+						<p className="px-2 py-1 text-[11px] text-slate-500">选择技能 / 模板 · ↑↓ 选择，Enter 确认，Esc 取消</p>
+						{matches.map((item, index) => (
 							<button
-								key={skill.name}
+								key={`${item.kind}-${item.name}`}
 								type="button"
 								role="option"
 								aria-selected={index === skillIndex}
 								onMouseEnter={() => setSkillIndex(index)}
 								onMouseDown={(e) => {
 									e.preventDefault();
-									pickSkill(skill.name);
+									pickItem(item);
 								}}
 								className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
 									index === skillIndex ? "bg-sky-600/20 text-sky-100" : "text-slate-300 hover:bg-slate-800"
 								}`}
 							>
 								<span aria-hidden className="mt-0.5 shrink-0 text-xs">
-									⚡
+									{item.kind === "skill" ? "⚡" : "📝"}
 								</span>
 								<span className="min-w-0 flex-1">
-									<span className="block truncate text-[13px] font-medium">{skill.name}</span>
-									{skill.description && (
-										<span className="block truncate text-[11px] text-slate-500">{skill.description}</span>
+									<span className="block truncate text-[13px] font-medium">{item.name}</span>
+									{item.description && (
+										<span className="block truncate text-[11px] text-slate-500">{item.description}</span>
 									)}
 								</span>
 							</button>
@@ -317,7 +325,7 @@ export function Composer({ pending, onSend, onStop, skills }: ComposerProps) {
 						}
 					}}
 					rows={1}
-					placeholder={pending ? "等待回复中…" : "输入消息，/ 调用技能，Enter 发送"}
+					placeholder={pending ? "等待回复中…" : "输入消息，/ 调用技能或模板，Enter 发送"}
 					aria-label="消息输入框"
 					className="min-h-[44px] flex-1 resize-none rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-[16px] leading-relaxed text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-sky-500/70 focus:ring-1 focus:ring-sky-500/40"
 				/>

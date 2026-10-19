@@ -87,6 +87,20 @@ export interface AutomationInfo {
 	enabled: boolean;
 }
 
+/** 提示模板（v0.31.0）：输入 / 选中后把正文填进输入框。 */
+export interface PromptInfo {
+	name: string;
+	description: string;
+	content: string;
+}
+
+/** 规则文件（v0.31.0）：启用后每轮注入 instructions。 */
+export interface RuleInfo {
+	name: string;
+	content: string;
+	enabled: boolean;
+}
+
 /** A named instruction the agent loads on demand (v0.15.0). */
 export interface SkillInfo {
 	name: string;

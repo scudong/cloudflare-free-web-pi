@@ -10,11 +10,11 @@ import { AutomationPanel, McpPanel, SkillPanel } from "./components/LeftPanels";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { api } from "./lib/api";
 import { parseEntries, truncateOneLine } from "./lib/entries";
-import { parseAutomations, parseFiles, parseMemories, parseSessions, parseSkills } from "./lib/collections";
+import { parseAutomations, parseFiles, parseMemories, parsePrompts, parseRules, parseSessions, parseSkills } from "./lib/collections";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { AutomationInfo, ChatMessage, FileArtifact, FileInfo, McpServerInfo, MemoryInfo, PlanStep, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
+import type { AutomationInfo, ChatMessage, FileArtifact, FileInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -69,12 +69,22 @@ export default function App() {
 	const [webSearch, setWebSearch] = useState<boolean | null>(null);
 	// 思考档位（v0.22.0）：off / low / high
 	const [thinkingLevel, setThinkingLevel] = useState<string>("low");
+	// 上下文压缩策略（v0.30.0）
+	const [compaction, setCompaction] = useState<{
+		enabled: boolean;
+		reserveTokens: number;
+		keepRecentTokens: number;
+		backgroundTokens: number;
+	} | null>(null);
 	// 当前会话的分步计划（v0.22.0）
 	const [plan, setPlan] = useState<PlanStep[]>([]);
 	/** 从聊天里的文件卡打开右栏预览（v0.22.0）。 */
 	const [fileRequest, setFileRequest] = useState<{ name: string; tick: number } | null>(null);
 	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
 	const [skills, setSkills] = useState<SkillInfo[]>([]);
+	// 提示模板与规则（v0.31.0）
+	const [prompts, setPrompts] = useState<PromptInfo[]>([]);
+	const [rules, setRules] = useState<RuleInfo[]>([]);
 	const [skillsLoading, setSkillsLoading] = useState(true);
 	const [skillsError, setSkillsError] = useState<string | null>(null);
 	const [automations, setAutomations] = useState<AutomationInfo[]>([]);
@@ -421,6 +431,7 @@ export default function App() {
 				if (alive) {
 					setWebSearch(data.webSearch !== false);
 					if (typeof data.thinkingLevel === "string") setThinkingLevel(data.thinkingLevel);
+					if (data.compaction) setCompaction(data.compaction);
 				}
 			} catch {
 				if (alive) setWebSearch(true);
@@ -467,6 +478,24 @@ export default function App() {
 		},
 		[sessionId],
 	);
+
+	// 提示模板与规则（全局，随 panelTick 刷新）
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const [p, r] = await Promise.all([api.prompts(), api.rules()]);
+				if (!alive) return;
+				setPrompts(parsePrompts(p.prompts));
+				setRules(parseRules(r.rules));
+			} catch {
+				// 接口不可用时保持为空
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [panelTick]);
 
 	// 技能列表（全局，随 panelTick 刷新）
 	useEffect(() => {
@@ -519,6 +548,56 @@ export default function App() {
 			return false;
 		}
 	}, [nextId]);
+
+	const handleAddPrompt = useCallback(async (name: string, description: string, content: string) => {
+		try {
+			await api.addPrompt(name, description, content);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			return false;
+		}
+	}, []);
+
+	const handleDeletePrompt = useCallback(async (name: string) => {
+		try {
+			await api.deletePrompt(name);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			return false;
+		}
+	}, []);
+
+	const handleAddRule = useCallback(async (name: string, content: string) => {
+		try {
+			await api.addRule(name, content);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			return false;
+		}
+	}, []);
+
+	const handleToggleRule = useCallback(async (name: string, enabled: boolean) => {
+		try {
+			await api.toggleRule(name, enabled);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			return false;
+		}
+	}, []);
+
+	const handleDeleteRule = useCallback(async (name: string) => {
+		try {
+			await api.deleteRule(name);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			return false;
+		}
+	}, []);
 
 	const handleDeleteSkill = useCallback(async (name: string) => {
 		try {
@@ -886,6 +965,22 @@ export default function App() {
 		}
 	}, [nextId]);
 
+	/** 压缩策略（v0.30.0）：改动后后端会重建 Harness，下一轮生效。 */
+	const handleChangeCompaction = useCallback(
+		(patch: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>) => {
+			setCompaction((prev) => ({
+				enabled: patch.enabled ?? prev?.enabled ?? true,
+				reserveTokens: patch.reserveTokens ?? prev?.reserveTokens ?? 16384,
+				keepRecentTokens: patch.keepRecentTokens ?? prev?.keepRecentTokens ?? 20000,
+				backgroundTokens: patch.backgroundTokens ?? prev?.backgroundTokens ?? 32768,
+			}));
+			void api.setSettings({ compaction: patch }).catch(() => {
+				setMessages((m) => [...m, { id: nextId(), role: "notice", text: "压缩设置保存失败。" }]);
+			});
+		},
+		[nextId],
+	);
+
 	/** 退出登录：清 cookie 并回到登录闸门。 */
 	const handleLogout = useCallback(() => {
 		setSettingsOpen(false);
@@ -995,6 +1090,13 @@ export default function App() {
 				onAdd={handleAddSkill}
 				onDelete={handleDeleteSkill}
 				onImport={handleImportSkill}
+				prompts={prompts}
+				rules={rules}
+				onAddPrompt={handleAddPrompt}
+				onDeletePrompt={handleDeletePrompt}
+				onAddRule={handleAddRule}
+				onToggleRule={handleToggleRule}
+				onDeleteRule={handleDeleteRule}
 			/>
 		);
 
@@ -1046,7 +1148,7 @@ export default function App() {
 							files={files}
 							onOpenFile={handleOpenFileFromChat}
 						/>
-						<Composer pending={pending} onSend={handleSend} onStop={handleStop} skills={skills} />
+						<Composer pending={pending} onSend={handleSend} onStop={handleStop} skills={skills} prompts={prompts} />
 					</section>
 				)}
 
@@ -1104,6 +1206,8 @@ export default function App() {
 				onToggleWebSearch={handleToggleWebSearch}
 				thinkingLevel={thinkingLevel}
 				onChangeThinkingLevel={handleChangeThinkingLevel}
+				compaction={compaction}
+				onChangeCompaction={handleChangeCompaction}
 				memories={memories}
 				memoriesLoading={memoriesState === "loading"}
 				memoriesError={memoriesError}
