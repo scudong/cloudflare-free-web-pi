@@ -80,6 +80,48 @@ export const api = {
 	/** POST /api/sessions — create a new conversation and return its id. */
 	createSession: () => requestJson<{ id?: string; title?: string }>("/api/sessions", { method: "POST" }),
 
+	/**
+	 * POST /api/chat/stream — SSE。onEvent 收到 {type:"text",delta} / {type:"tool_start",name}
+	 * / {type:"tool_end",name} / {type:"done",answer,tools} / {type:"error",message}。
+	 */
+	streamChat: async (
+		message: string,
+		sessionId: string,
+		onEvent: (event: { type: string; [key: string]: unknown }) => void,
+		signal?: AbortSignal,
+	): Promise<void> => {
+		const resp = await fetch("/api/chat/stream", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ message, sessionId }),
+			signal,
+		});
+		if (!resp.ok || !resp.body) throw new Error(`流式请求失败（HTTP ${resp.status}）`);
+		const reader = resp.body.getReader();
+		const decoder = new TextDecoder();
+		let buffer = "";
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			buffer += decoder.decode(value, { stream: true });
+			// SSE frames are separated by a blank line.
+			let cut = buffer.indexOf("\n\n");
+			while (cut >= 0) {
+				const frame = buffer.slice(0, cut);
+				buffer = buffer.slice(cut + 2);
+				const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
+				if (dataLine) {
+					try {
+						onEvent(JSON.parse(dataLine.slice(5).trim()));
+					} catch {
+						// Ignore malformed frames; the terminal done event still arrives.
+					}
+				}
+				cut = buffer.indexOf("\n\n");
+			}
+		}
+	},
+
 	chat: (message: string, sessionId: string, signal?: AbortSignal) =>
 		requestJson<ChatResult>("/api/chat", { ...jsonPost({ message, sessionId }), signal }),
 

@@ -177,22 +177,64 @@ export default function App() {
 			setElapsed(0);
 
 			void (async () => {
+				// Streaming bubble: created on first delta / tool event so an empty wait shows nothing.
+				const bubbleId = nextId();
+				let bubbleShown = false;
+				let buffered = "";
+				const toolNames: { name: string; summary: string }[] = [];
+				const ensureBubble = () => {
+					if (bubbleShown) return;
+					bubbleShown = true;
+					setMessages((prev) => [...prev, { id: bubbleId, role: "assistant", text: "", tools: [] }]);
+				};
+				const syncBubble = () => {
+					setMessages((prev) =>
+						prev.map((m) =>
+							m.id === bubbleId
+								? { ...m, text: buffered || " ", tools: toolNames.length ? toToolInfos(toolNames) : [] }
+								: m,
+						),
+					);
+				};
 				try {
-					const result = await api.chat(text, sessionId, controller.signal);
-					if (generationRef.current !== generation || controller.signal.aborted) return;
-					const tools = toToolInfos(result.tools);
-					const answer = typeof result.answer === "string" ? result.answer : "";
-					if (result.error) {
-						setMessages((prev) => [
-							...prev,
-							{ id: nextId(), role: "assistant", text: `出错了：${result.error}`, tools, error: true },
-						]);
-					} else {
-						setMessages((prev) => [
-							...prev,
-							{ id: nextId(), role: "assistant", text: answer || "（空回复）", tools },
-						]);
-					}
+					await api.streamChat(
+						text,
+						sessionId,
+						(event) => {
+							if (generationRef.current !== generation) return;
+							if (event.type === "text") {
+								buffered += typeof event.delta === "string" ? event.delta : "";
+								ensureBubble();
+								syncBubble();
+							} else if (event.type === "tool_start") {
+								toolNames.push({ name: typeof event.name === "string" ? event.name : "tool", summary: "执行中…" });
+								ensureBubble();
+								syncBubble();
+							} else if (event.type === "done") {
+								const answer = typeof event.answer === "string" ? event.answer : "";
+								const tools = Array.isArray(event.tools) ? (event.tools as { name: string; summary: string }[]) : toolNames;
+								if (!bubbleShown) {
+									ensureBubble();
+								}
+								setMessages((prev) => {
+									const next = prev.map((m) =>
+										m.id === bubbleId ? { ...m, text: answer || "（空回复）", tools: toToolInfos(tools) } : m,
+									);
+									return next;
+								});
+							} else if (event.type === "error") {
+								ensureBubble();
+								setMessages((prev) =>
+									prev.map((m) =>
+										m.id === bubbleId
+											? { ...m, text: `出错了：${String(event.message ?? "未知错误")}`, error: true }
+											: m,
+									),
+								);
+							}
+						},
+						controller.signal,
+					);
 				} catch (err) {
 					if (generationRef.current !== generation) return; // invalidated by 新会话 / session switch
 					if (controller.signal.aborted || (err instanceof DOMException && err.name === "AbortError")) {

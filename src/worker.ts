@@ -13,6 +13,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
+import { watchEvents } from "@earendil-works/pi-durable";
 import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -281,6 +282,115 @@ export class SpikeAgent extends DurableObject {
 	}
 
 	/** 重置一个会话的转录（工作台文件与记忆库保留）。 */
+	/** 流式聊天：SSE 推送 text delta / 工具开始结束 / 最终 done。 */
+	async chatStream(message: string, sessionId?: string): Promise<Response> {
+		const harness = await this.open();
+		const root = await this.conversationFor(harness, sessionId);
+		await root.configure(
+			{
+				extensions: [spikeExtension, codemodeExtension],
+				instructions:
+					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
+			},
+			ctx,
+		);
+		const before = await root.entries({}, 1, undefined, ctx);
+		const beforeId = (before.items[0] as unknown as { id?: number } | undefined)?.id ?? 0;
+
+		const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+		const writer = writable.getWriter();
+		const encoder = new TextEncoder();
+		let closed = false;
+		const send = async (event: string, data: unknown) => {
+			if (closed) return;
+			try {
+				await writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+			} catch {
+				closed = true;
+			}
+		};
+
+		const pump = (async () => {
+			const stream = await watchEvents(harness, root.id, ctx);
+			stream.start(async (events) => {
+				for (const e of events) {
+					if (e.type === "message_update") {
+						for (const change of e.changes) {
+							if (change.type === "text_delta" && change.delta) await send("text", { delta: change.delta });
+						}
+					} else if (e.type === "tool_execution_start") {
+						const call = e as unknown as { toolName?: string; args?: unknown };
+						await send("tool_start", { name: call.toolName ?? "tool" });
+					} else if (e.type === "tool_execution_end") {
+						const call = e as unknown as { toolName?: string };
+						await send("tool_end", { name: call.toolName ?? "tool" });
+					}
+				}
+			});
+			try {
+				const submission = await root.submit({ type: "input", content: message }, ctx);
+				const settled = await submission.wait(ctx);
+				const page2 = await root.entries({}, 60, undefined, ctx);
+				const tools: { name: string; summary: string }[] = [];
+				for (const e of page2.items as unknown as Record<string, unknown>[]) {
+					if ((e as { kind?: unknown }).kind !== "pi.tool-result") continue;
+					if (Number((e as { id?: unknown }).id ?? 0) <= beforeId) continue;
+					const model = (e as { model?: { toolName?: string; content?: { type: string; text?: string }[] }[] }).model;
+					const first = model?.[0];
+					const text = (first?.content ?? []).map((b) => b.text ?? "").join("");
+					if (first) tools.push({ name: first.toolName ?? "tool", summary: text.slice(0, 80) });
+				}
+				let answer = "";
+				if (settled.status === "done" && settled.type === "input") {
+					const entry = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), ctx);
+					const c = entry?.model?.[0]?.content;
+					answer =
+						typeof c === "string"
+							? c
+							: Array.isArray(c)
+								? c.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).join("")
+								: "";
+				} else {
+					await send("error", { message: `运行未完成：${JSON.stringify(settled).slice(0, 200)}` });
+				}
+				// 标题/时间维护
+				try {
+					const id = String(root.id);
+					const now = new Date().toISOString();
+					const meta = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", id).toArray() as { title: string }[];
+					const title = meta[0]?.title;
+					if (!title || title === "新会话" || /^会话 \d+$/.test(title)) {
+						sqlFacade!.exec(
+							"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at",
+							id, message.slice(0, 24), now, now,
+						);
+					} else {
+						sqlFacade!.exec("UPDATE sessions_meta SET updated_at = ? WHERE id = ?", now, id);
+					}
+				} catch (err) {
+					console.warn("session meta update failed", err);
+				}
+				await send("done", { answer, tools });
+			} catch (err) {
+				await send("error", { message: String(err).slice(0, 300) });
+			} finally {
+				await stream.stop().catch(() => {});
+				closed = true;
+				await writer.close().catch(() => {});
+			}
+		})();
+		this.ctx.waitUntil(pump);
+
+		return new Response(readable, {
+			headers: {
+				"content-type": "text/event-stream; charset=utf-8",
+				"cache-control": "no-cache, no-transform",
+				connection: "keep-alive",
+				"x-accel-buffering": "no",
+			},
+		});
+	}
+
 	async reset(sessionId?: string): Promise<{ ok: true }> {
 		const harness = await this.open();
 		const conversation = await this.conversationFor(harness, sessionId);
@@ -296,6 +406,10 @@ export class SpikeAgent extends DurableObject {
 		try {
 			// 所有路由都先确保 DO 初始化（sqlFacade/表/Harness 就绪），幂等。
 			if (url.pathname !== "/") await this.open();
+			if (request.method === "POST" && url.pathname === "/chat/stream") {
+				const { message, sessionId } = (await request.json()) as { message: string; sessionId?: string };
+				return await this.chatStream(message, sessionId);
+			}
 			if (request.method === "POST" && url.pathname === "/chat") {
 				const { message, sessionId } = (await request.json()) as { message: string; sessionId?: string };
 				return Response.json(await this.chat(message, sessionId));
