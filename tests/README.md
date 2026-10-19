@@ -62,3 +62,5 @@ tests/
 | 记忆库 / 一键清空 | `api/api.test.ts` · 记忆库 |
 | 备份 / 恢复 | `api/api.test.ts` · 备份与恢复 |
 | 导出 / 版本 | `api/api.test.ts` · 导出与版本 |
+| **子代理编排** | `api/api.test.ts` · 工具注册（防回归）+ `unit/entries.test.ts` · 子任务标题反解 |
+| **工具注册表** | `api/api.test.ts` · 工具注册（防回归） |

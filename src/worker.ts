@@ -46,6 +46,12 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	} catch {
 		// 列已存在
 	}
+	// v0.29.0：子代理会话不出现在侧栏
+	try {
+		sql.exec(`ALTER TABLE sessions_meta ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`);
+	} catch {
+		// 列已存在
+	}
 	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS skills (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS shares (token TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`);
@@ -67,6 +73,8 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 
 /** DEEPSEEK_API_KEY（open() 时从 env 注入；模块级定义的工具拿不到 this.env）。 */
 let apiKeyRef: string | null = null;
+/** Harness 全局引用：子代理工具需要它来创建会话（工具在模块级定义，拿不到 this）。 */
+let harnessRef: { createConversation(o: unknown, c: unknown): Promise<unknown>; conversation(id: unknown, c: unknown): Promise<unknown> } | null = null;
 
 /** 全局设置读写（app_settings 表）：目前只有网页搜索开关 web_search。 */
 function getSetting(key: string, fallback: string): string {
@@ -297,6 +305,131 @@ const spikeExtension = defineExtension({
 						type: "text",
 						text: `计划已更新：${steps.length} 步，完成 ${done} 步${current ? `，当前：${current.title}` : ""}。`,
 					}],
+				};
+			},
+		}),
+		defineTool({
+			name: "dispatch_tasks",
+			description:
+				"把若干**互不依赖**的子任务并行分派给子代理，各自独立完成后汇总。适合「同时调研 N 个对象」「对比 M 个方案」这类可并行的活。每个子代理看不到主对话，prompt 必须自包含。",
+			parameters: Type.Object({
+				tasks: Type.Array(
+					Type.Object({
+						title: Type.String({ description: "子任务标题，用于汇总展示（10 字以内）" }),
+						prompt: Type.String({ description: "交给子代理的完整指令，自包含，不依赖主对话上下文" }),
+					}),
+					{ description: "子任务列表，1–4 个", minItems: 1, maxItems: 4 },
+				),
+			}),
+			execute: async (args, api) => {
+				const harness = harnessRef as unknown as {
+					createConversation(o: unknown, c: unknown): Promise<{
+						id: unknown;
+						submit(i: unknown, c: unknown): Promise<{ wait(c: unknown): Promise<{ status: string; type?: string; answer?: unknown }> }>;
+						entries(q: object, limit: number, cursor: undefined, c: unknown): Promise<{ items: readonly unknown[] }>;
+					}>;
+					conversation(id: unknown, c: unknown): Promise<{ agent(c: unknown): Promise<{ model?: { provider: string; modelId: string } }> } | null>;
+				} | null;
+				if (!harness) return { output: [{ type: "text", text: "子代理不可用：harness 未就绪。" }] };
+
+				const list = Array.isArray((args as { tasks?: unknown }).tasks) ? ((args as { tasks: unknown[] }).tasks) : [];
+				const tasks = list
+					.slice(0, 4)
+					.map((t) => {
+						const o = (t ?? {}) as { title?: unknown; prompt?: unknown };
+						return { title: String(o.title ?? "").trim().slice(0, 40), prompt: String(o.prompt ?? "").trim() };
+					})
+					.filter((t) => t.prompt);
+				if (!tasks.length) return { output: [{ type: "text", text: "没有有效的子任务。" }] };
+
+				// 沿用父会话的模型；取不到就用当前供应商的第一个模型
+				let model = { provider: activeProviderId() || DEFAULT_PROVIDER.id, modelId: activeModelIds()[0] ?? DEFAULT_MODEL_ID };
+				try {
+					const parent = await harness.conversation(api.conversationId, ctx);
+					const agent = parent ? await parent.agent(ctx) : null;
+					if (agent?.model) model = { provider: agent.model.provider, modelId: agent.model.modelId };
+				} catch {
+					// 取不到就用默认
+				}
+
+				// 子代理只给只读类工具，避免并发写文件/记忆
+				const allTools = [
+					...((spikeExtension as unknown as { tools?: { name: string }[] }).tools ?? []),
+					...((codemodeExtension as unknown as { tools?: { name: string }[] }).tools ?? []),
+				];
+				const allowedNames = new Set(["now", "recall", "read_file", "list_files", "http_fetch", "web_search", "web_fetch_page", "codemode"]);
+				const modelTools = allTools.filter((t) => allowedNames.has(t.name));
+				const instructions =
+					"你是被主代理分派的子代理，只负责完成分配给你的那一个任务。\n" +
+					"- 直接给结果，不要寒暄、不要复述任务。\n" +
+					"- 需要检索就用 web_search / web_fetch_page；需要计算就用 codemode。\n" +
+					"- 结果控制在 800 字以内，结论先行。\n" +
+					"- 完成后不要再调用工具。";
+
+				const runOne = async (task: { title: string; prompt: string }, index: number) => {
+					const started = Date.now();
+					try {
+						const conv = await harness.createConversation(
+							{
+								ownership: { kind: "ownerless" },
+								agent: { model, extensions: [spikeExtension, codemodeExtension], instructions, modelTools },
+							},
+							ctx,
+						);
+						// 子代理会话标记为隐藏，不出现在侧栏
+						sqlFacade!.exec(
+							"INSERT INTO sessions_meta (id, title, created_at, updated_at, hidden) VALUES (?, ?, ?, ?, 1) ON CONFLICT(id) DO NOTHING",
+							String(conv.id), `子代理 ${index + 1}：${task.title || "未命名"}`, new Date().toISOString(), new Date().toISOString(),
+						);
+						const submission = await conv.submit({ type: "input", content: task.prompt }, ctx);
+						const settled = await submission.wait(ctx);
+						if (settled.status !== "done" || settled.type !== "input") {
+							return { title: task.title, ok: false, text: `（子任务未完成：${settled.status}）`, ms: Date.now() - started };
+						}
+						// settled.answer 可能只是这一轮的工具调用消息；改为读会话里最新一条含文本的助手条目
+						let text = "";
+						try {
+							const page = await conv.entries({}, 20, undefined, ctx);
+							for (const raw of page.items as Record<string, unknown>[]) {
+								if (raw.kind !== "pi.assistant") continue;
+								const blocks = (raw.model as { content?: unknown }[] | undefined)?.[0]?.content;
+								const joined = Array.isArray(blocks)
+									? blocks
+											.filter((b): b is { type: string; text?: string } => Boolean(b) && typeof b === "object")
+											.filter((b) => b.type === "text")
+											.map((b) => b.text ?? "")
+											.join("")
+											.trim()
+									: typeof blocks === "string"
+										? blocks.trim()
+										: "";
+								if (joined) {
+									text = joined;
+									break;
+								}
+							}
+						} catch {
+							// 读条目失败就退回 settled.answer
+							const blocks = (settled.answer as { content?: { type: string; text?: string }[] } | undefined)?.content ?? [];
+							text = blocks
+								.filter((b) => b.type === "text")
+								.map((b) => b.text ?? "")
+								.join("")
+								.trim();
+						}
+						return { title: task.title, ok: true, text: text.slice(0, 4000), ms: Date.now() - started };
+					} catch (err) {
+						return { title: task.title, ok: false, text: `（失败：${String(err).slice(0, 160)}）`, ms: Date.now() - started };
+					}
+				};
+
+				const results = await Promise.all(tasks.map(runOne));
+				const parts = results.map(
+					(r, i) => `## 子任务 ${i + 1}：${r.title || "未命名"}${r.ok ? "" : "（失败）"}\n\n${r.text || "（空）"}`,
+				);
+				const summary = results.map((r, i) => `${i + 1}. ${r.title} — ${r.ok ? "完成" : "失败"} · ${(r.ms / 1000).toFixed(1)}s`).join("\n");
+				return {
+					output: [{ type: "text", text: `已并行完成 ${results.filter((r) => r.ok).length}/${results.length} 个子任务：\n${summary}\n\n${parts.join("\n\n")}` }],
 				};
 			},
 		}),
@@ -586,6 +719,7 @@ export class SpikeAgent extends DurableObject {
 			this.mcpExt = (await buildMcpExtension(sqlFacade)) as never;
 				if (this.mcpExt) registry.install(this.mcpExt);
 			this.harness = await Harness.open(storage, { models, registry }, ctx);
+			harnessRef = this.harness as never;
 			this.harness.resume();
 		}
 		return this.harness;
@@ -747,7 +881,7 @@ export class SpikeAgent extends DurableObject {
 		ensureTables(sqlFacade!);
 		const harness = await this.open();
 		const root = await harness.root(ctx);
-		const rows = sqlFacade!.exec("SELECT id, title, created_at, updated_at, model FROM sessions_meta WHERE deleted = 0 ORDER BY updated_at DESC").toArray() as {
+		const rows = sqlFacade!.exec("SELECT id, title, created_at, updated_at, model FROM sessions_meta WHERE deleted = 0 AND hidden = 0 ORDER BY updated_at DESC").toArray() as {
 			id: string; title: string; created_at: string; updated_at: string; model?: string;
 		}[];
 		const known = new Set(rows.map((r) => r.id));
@@ -904,6 +1038,9 @@ export class SpikeAgent extends DurableObject {
 		// 分步计划（v0.22.0）：多步任务先 update_plan，用户在聊天里实时看到清单。
 		out +=
 			"\n任务需要 3 步以上（多次检索、多文件产出、先计算后写作等）时，先用 update_plan 列出步骤并在每完成一步后更新；单步问题不要调用它。";
+		// 子代理（v0.29.0）：可并行的独立子任务交给它们
+		out +=
+			"\n当有 2–4 个**互不依赖**的子任务（如分别调研几个对象再做对比）时，用 dispatch_tasks 并行分派给子代理，比串行逐个做更快；子代理看不到主对话，每个 prompt 要自包含。";
 		return out;
 	}
 

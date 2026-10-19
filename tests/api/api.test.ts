@@ -215,6 +215,24 @@ describe("备份与恢复", () => {
 	});
 });
 
+describe("工具注册（防回归）", () => {
+	it("关键工具都已注册给模型", async () => {
+		const { json } = await api("/api/debug/agent");
+		const tools: string[] = json.tools ?? [];
+		for (const name of ["dispatch_tasks", "update_plan", "web_search", "web_fetch_page", "write_file", "codemode", "remember", "recall"]) {
+			expect(tools).toContain(name);
+		}
+	});
+
+	it("子代理工具暴露可用工具清单", async () => {
+		const { json } = await api("/api/debug/agent");
+		const callable: string[] = json.callable ?? [];
+		// codemode 脚本能调用的工具（callers 含 tools）
+		expect(callable).toContain("web_search");
+		expect(callable).toContain("write_file");
+	});
+});
+
 describe("计划", () => {
 	it("空计划返回空数组", async () => {
 		const { json } = await api("/api/plan?sessionId=1");

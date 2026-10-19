@@ -188,8 +188,14 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			const failed = entry.isError === true || entry.is_error === true || entry.error === true;
 			const prefix = failed ? "失败：" : "";
 			const summary = truncateOneLine(rawSummary, TOOL_SUMMARY_MAX);
+			// dispatch_tasks：历史回放时没有 args，从结果首部的「1. 标题 — 完成 · 2.8s」反解子任务
+			let args: unknown;
+			if (name === "dispatch_tasks") {
+				const titles = [...rawSummary.matchAll(/^\d+\.\s+(.+?)\s+—\s+/gm)].map((m) => ({ title: m[1] ?? "" }));
+				if (titles.length) args = { tasks: titles };
+			}
 			// Keep the untruncated original so the pill can expand to the full output
-			pendingTools.push({ name, summary: prefix + summary, full: prefix + rawSummary });
+			pendingTools.push({ name, summary: prefix + summary, full: prefix + rawSummary, ...(args ? { args } : {}) });
 			// 文件产出：留到下一条助手消息一起渲染（v0.25.2 修正归属）
 			pendingFiles.push(...artifactsOf(name, rawSummary));
 		}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { renderMarkdown } from "../lib/rich";
 import type { ToolCallInfo } from "../types";
 
 /** 折叠态下省略的子调用数量提示。 */
@@ -15,6 +16,11 @@ function ToolPill({ tool, all }: { tool: ToolCallInfo; all: ToolCallInfo[] }) {
 	const [open, setOpen] = useState(false);
 	const full = (tool.full ?? "").trim() || tool.summary;
 	const children = childrenOf(tool, all);
+	// dispatch_tasks：展开时先列出被分派的子任务
+	const dispatched = (tool.args as { tasks?: { title?: unknown }[] } | undefined)?.tasks;
+	const taskTitles = Array.isArray(dispatched)
+		? dispatched.map((t) => String((t ?? {}).title ?? "").trim()).filter(Boolean)
+		: [];
 	const expandable = full !== tool.summary || children.length > 0;
 	const running = tool.status === "running";
 
@@ -40,6 +46,11 @@ function ToolPill({ tool, all }: { tool: ToolCallInfo; all: ToolCallInfo[] }) {
 				</span>
 				<span className="shrink-0 font-medium text-emerald-200">{tool.name}</span>
 				{tool.summary && <span className="min-w-0 truncate">· {tool.summary}</span>}
+				{taskTitles.length > 0 && (
+					<span className="shrink-0 rounded-full bg-emerald-500/20 px-1.5 text-[10px] tabular-nums text-emerald-300">
+						{taskTitles.length} 个子代理
+					</span>
+				)}
 				{children.length > 0 && (
 					<span className="shrink-0 rounded-full bg-emerald-500/20 px-1.5 text-[10px] tabular-nums text-emerald-300">
 						{children.length} 子调用
@@ -53,11 +64,27 @@ function ToolPill({ tool, all }: { tool: ToolCallInfo; all: ToolCallInfo[] }) {
 			</button>
 			{open && (
 				<div className="rounded-b-xl border-t border-emerald-500/20 px-3 py-1.5">
-					{full !== tool.summary && (
-						<div className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-emerald-100/80">
-							{full}
-						</div>
+					{taskTitles.length > 0 && (
+						<ul className="mb-1.5 space-y-0.5">
+							{taskTitles.map((title, index) => (
+								<li key={`${title}-${index}`} className="flex items-start gap-1.5 text-[11px] text-emerald-200/80">
+									<span aria-hidden className="shrink-0 text-emerald-400">
+										◈
+									</span>
+									<span className="min-w-0 flex-1">{title}</span>
+								</li>
+							))}
+						</ul>
 					)}
+					{full !== tool.summary &&
+						(taskTitles.length > 0 ? (
+							// 子代理结果是成篇的 Markdown，按正文渲染
+							<div className="md-prose text-[12.5px] leading-relaxed">{renderMarkdown(full)}</div>
+						) : (
+							<div className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-emerald-100/80">
+								{full}
+							</div>
+						))}
 					{children.length > 0 && (
 						<ul className="mt-1 space-y-0.5 border-l border-emerald-500/20 pl-2.5">
 							{children.map((child, index) => (

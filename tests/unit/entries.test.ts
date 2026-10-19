@@ -53,6 +53,23 @@ describe("parseEntries · 工具与产出", () => {
 		expect((assistant as { tools?: { name: string }[] }).tools?.[0]?.name).toBe("now");
 	});
 
+	it("dispatch_tasks 结果反解出子任务标题", () => {
+		const raw = [
+			entry(2, "pi.assistant", [{ content: [{ type: "text", text: "汇总完毕" }] }]),
+			entry(1, "pi.tool-result", [
+				{
+					toolName: "dispatch_tasks",
+					content: [{ type: "text", text: "已并行完成 2/2 个子任务：\n1. 查 Deno 版本 — 完成 · 2.8s\n2. 查 Bun 版本 — 完成 · 17.0s\n\n## 子任务 1：查 Deno 版本" }],
+				},
+			]),
+		];
+		const messages = parseEntries(raw);
+		const assistant = messages.find((m) => m.role === "assistant") as {
+			tools?: { name: string; args?: { tasks?: { title: string }[] } }[];
+		};
+		expect(assistant.tools?.[0]?.args?.tasks?.map((t) => t.title)).toEqual(["查 Deno 版本", "查 Bun 版本"]);
+	});
+
 	it("write_file 结果生成文件产出", () => {
 		const raw = [
 			entry(2, "pi.assistant", [{ content: [{ type: "text", text: "已写入" }] }]),

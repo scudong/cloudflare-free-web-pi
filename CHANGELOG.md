@@ -2,6 +2,17 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（子代理编排）
+
+### dispatch_tasks：可并行的子代理（v0.29.0）
+- 新工具 `dispatch_tasks`：把 2–4 个**互不依赖**的子任务并行分派给子代理，各自独立完成后汇总
+- 每个子代理是一个独立会话（不影响主对话上下文），只用**只读类工具**（now / recall / read_file / list_files / http_fetch / web_search / web_fetch_page / codemode），避免并发写文件或记忆
+- 子代理会话在 `sessions_meta.hidden = 1`，**不出现在侧栏**；标题形如「子代理 1：查 Deno 版本」，可在备份里看到
+- 提示词里告诉模型：有 2–4 个可并行的独立任务时优先用 `dispatch_tasks`
+- 聊天里渲染成一条绿色 pill：徽标显示「N 个子代理」，展开先列子任务标题，再按 Markdown 渲染汇总结果（历史回放同样生效——从结果首部反解标题）
+- 实测：两个子任务并行（2.8s / 17.0s）各自查到 Deno v2.9.7 与 Bun v1.4.3 并正确汇总
+- 同时补了 3 条金标：工具注册表防回归（`/api/debug/agent` 必须含 dispatch_tasks 等 8 个工具）、codemode 可调用工具清单、子任务标题反解
+
 ## 2026-10-19（金标回归测试体系）
 
 ### 每个功能配金标用例，CI 卡门禁（v0.28.0）
