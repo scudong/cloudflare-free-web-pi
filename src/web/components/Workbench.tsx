@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { renderMarkdown } from "../lib/rich";
-import type { AutomationInfo, FileInfo, McpServerInfo, MemoryInfo } from "../types";
+import type { AutomationInfo, FileInfo, McpServerInfo, MemoryInfo, SkillInfo } from "../types";
 
-export type WorkbenchTab = "files" | "memories" | "mcp" | "automations";
+export type WorkbenchTab = "files" | "memories" | "mcp" | "automations" | "skills";
 
 interface WorkbenchProps {
 	tab: WorkbenchTab;
@@ -16,6 +16,11 @@ interface WorkbenchProps {
 	memoriesLoading: boolean;
 	memoriesError: string | null;
 	mcpServers: McpServerInfo[];
+	skills: SkillInfo[];
+	skillsLoading: boolean;
+	skillsError: string | null;
+	onAddSkill: (name: string, description: string, content: string) => Promise<boolean>;
+	onDeleteSkill: (name: string) => Promise<boolean>;
 	automations: AutomationInfo[];
 	automationsLoading: boolean;
 	automationsError: string | null;
@@ -179,6 +184,8 @@ function FileView({
 	onDelete: (name: string) => void;
 }) {
 	const [mode, setMode] = useState<"preview" | "source">("preview");
+	// HTML 文件用 sandbox iframe 渲染，其余走 Markdown（v0.15.0）
+	const isHtml = /\.html?$/i.test(name);
 	const [content, setContent] = useState("");
 	const [state, setState] = useState<ContentState>("loading");
 	const [error, setError] = useState("");
@@ -246,12 +253,20 @@ function FileView({
 			<div className="min-h-0 flex-1 overflow-y-auto p-3">
 				{state === "loading" && <p className="text-xs text-slate-500">正在加载文件内容…</p>}
 				{state === "error" && <p className="text-xs text-red-300/90">加载失败：{error}</p>}
-				{state === "ready" &&
-					(mode === "preview" ? (
-						<article className="text-[13px] leading-relaxed text-slate-200">{renderMarkdown(content)}</article>
-					) : (
-						<pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-slate-300">{content}</pre>
-					))}
+				{state === "ready" && mode === "preview" && isHtml && (
+					<iframe
+						title={`${name} 预览`}
+						sandbox="allow-scripts"
+						srcDoc={content}
+						className="h-full min-h-[420px] w-full rounded-lg border border-slate-700 bg-white"
+					/>
+				)}
+				{state === "ready" && mode === "preview" && !isHtml && (
+					<article className="text-[13px] leading-relaxed text-slate-200">{renderMarkdown(content)}</article>
+				)}
+				{state === "ready" && mode === "source" && (
+					<pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-slate-300">{content}</pre>
+				)}
 			</div>
 		</div>
 	);
@@ -492,6 +507,120 @@ function AutomationList({
 	);
 }
 
+/** The "技能" tab: named instructions the agent loads on demand (v0.15.0). */
+function SkillList({
+	items,
+	loading,
+	error,
+	onAdd,
+	onDelete,
+}: {
+	items: SkillInfo[];
+	loading: boolean;
+	error: string | null;
+	onAdd: (name: string, description: string, content: string) => Promise<boolean>;
+	onDelete: (name: string) => Promise<boolean>;
+}) {
+	const [name, setName] = useState("");
+	const [description, setDescription] = useState("");
+	const [content, setContent] = useState("");
+	const [openName, setOpenName] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+
+	const submit = () => {
+		if (!name.trim() || !content.trim() || busy) return;
+		setBusy(true);
+		void (async () => {
+			const ok = await onAdd(name.trim(), description.trim(), content.trim());
+			if (ok) {
+				setName("");
+				setDescription("");
+				setContent("");
+			}
+			setBusy(false);
+		})();
+	};
+
+	return (
+		<div className="flex min-h-0 flex-1 flex-col">
+			<div className="shrink-0 space-y-1.5 border-b border-slate-800/70 p-3">
+				<input
+					value={name}
+					onChange={(e) => setName(e.target.value)}
+					placeholder="技能名称，如 债券研报摘要"
+					aria-label="技能名称"
+					className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+				/>
+				<input
+					value={description}
+					onChange={(e) => setDescription(e.target.value)}
+					placeholder="一句话说明何时使用"
+					aria-label="技能描述"
+					className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+				/>
+				<textarea
+					value={content}
+					onChange={(e) => setContent(e.target.value)}
+					placeholder="技能正文（Markdown）：步骤、模板、约束"
+					aria-label="技能内容"
+					rows={3}
+					className="w-full resize-y rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+				/>
+				<button
+					type="button"
+					onClick={submit}
+					disabled={busy || !name.trim() || !content.trim()}
+					className="w-full rounded-md bg-sky-600 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+				>
+					{busy ? "保存中…" : "添加 / 更新技能"}
+				</button>
+			</div>
+			<div className="min-h-0 flex-1 overflow-y-auto p-2">
+				{loading && items.length === 0 && <p className="px-1 py-2 text-xs text-slate-500">正在加载…</p>}
+				{error && <p className="px-1 py-2 text-xs text-rose-300">{error}</p>}
+				{!loading && items.length === 0 && !error && (
+					<p className="px-1 py-2 text-xs text-slate-500">
+						还没有技能。技能是「按需加载的说明书」：模型从索引里看到名称与用途，需要时用 load_skill 读取完整正文。
+					</p>
+				)}
+				<ul className="space-y-1">
+					{items.map((skill) => (
+						<li key={skill.name} className="rounded-lg bg-slate-800/50 px-2.5 py-2">
+							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									onClick={() => setOpenName(openName === skill.name ? null : skill.name)}
+									aria-expanded={openName === skill.name}
+									className="min-w-0 flex-1 truncate text-left text-[13px] text-slate-100"
+								>
+									{openName === skill.name ? "▾" : "▸"} {skill.name}
+								</button>
+								<button
+									type="button"
+									title="删除"
+									aria-label={`删除 ${skill.name}`}
+									onClick={() => {
+										if (window.confirm(`删除技能「${skill.name}」？`)) void onDelete(skill.name);
+									}}
+									className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
+								>
+									🗑
+								</button>
+							</div>
+							{skill.description && <p className="mt-0.5 text-[11px] text-slate-500">{skill.description}</p>}
+							{openName === skill.name && (
+								<div className="mt-1 max-h-64 overflow-y-auto rounded-md border border-slate-700 bg-slate-950/50 p-2 text-[12px] leading-relaxed">
+									{renderMarkdown(skill.content)}
+								</div>
+							)}
+						</li>
+					))}
+				</ul>
+			</div>
+		</div>
+	);
+}
+
 /** Right column: workbench with 文件 / 记忆 tabs, switching to a file view on click. */
 export function Workbench({
 	tab,
@@ -506,6 +635,11 @@ export function Workbench({
 	mcpServers,
 	mcpLoading,
 	mcpError,
+	skills,
+	skillsLoading,
+	skillsError,
+	onAddSkill,
+	onDeleteSkill,
 	automations,
 	automationsLoading,
 	automationsError,
@@ -545,7 +679,7 @@ export function Workbench({
 			type="button"
 			onClick={() => onTabChange(value)}
 			aria-pressed={tab === value}
-			className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-3 py-2 text-[13px] font-medium transition-colors ${
+			className={`flex shrink-0 items-center justify-center gap-1 whitespace-nowrap border-b-2 px-2.5 py-2 text-[12.5px] font-medium transition-colors ${
 				tab === value
 					? "border-sky-400 text-sky-300"
 					: "border-transparent text-slate-400 hover:border-slate-700 hover:text-slate-200"
@@ -568,11 +702,12 @@ export function Workbench({
 				/>
 			) : (
 				<>
-					<div className="flex shrink-0 items-stretch border-b border-slate-800/70" role="tablist">
+					<div className="flex shrink-0 items-stretch overflow-x-auto border-b border-slate-800/70" role="tablist">
 						{tabButton("files", "文件", files.length)}
 						{tabButton("memories", "记忆", memories.length)}
 						{tabButton("mcp", "连接", mcpServers.length)}
 						{tabButton("automations", "定时", automations.length)}
+						{tabButton("skills", "技能", skills.length)}
 					</div>
 					{tab === "files" ? (
 						<FileList
@@ -586,7 +721,7 @@ export function Workbench({
 						<MemoryList memories={memories} loading={memoriesLoading} error={memoriesError} onDelete={handleDeleteMemory} />
 					) : tab === "mcp" ? (
 						<McpList servers={mcpServers} loading={mcpLoading} error={mcpError} onAdd={onAddMcp} onDelete={onDeleteMcp} />
-					) : (
+					) : tab === "automations" ? (
 						<AutomationList
 							items={automations}
 							loading={automationsLoading}
@@ -594,6 +729,14 @@ export function Workbench({
 							onAdd={onAddAutomation}
 							onToggle={onToggleAutomation}
 							onDelete={onDeleteAutomation}
+						/>
+					) : (
+						<SkillList
+							items={skills}
+							loading={skillsLoading}
+							error={skillsError}
+							onAdd={onAddSkill}
+							onDelete={onDeleteSkill}
 						/>
 					)}
 				</>

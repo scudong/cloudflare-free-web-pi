@@ -53,3 +53,10 @@ export interface AutomationInfo {
 	nextLabel?: string;
 	enabled: boolean;
 }
+
+/** A named instruction the agent loads on demand (v0.15.0). */
+export interface SkillInfo {
+	name: string;
+	description: string;
+	content: string;
+}

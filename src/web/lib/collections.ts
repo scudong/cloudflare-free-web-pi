@@ -1,4 +1,4 @@
-import type { AutomationInfo, FileInfo, MemoryInfo, SessionListItem } from "../types";
+import type { AutomationInfo, FileInfo, MemoryInfo, SessionListItem, SkillInfo } from "../types";
 
 /**
  * Tolerant parsers for panel data (sessions / files / memories).
@@ -99,4 +99,14 @@ export function parseAutomations(raw: unknown): AutomationInfo[] {
 			enabled: entry.enabled !== 0 && entry.enabled !== false,
 		};
 	});
+}
+
+/** GET /api/skills → skill list. */
+export function parseSkills(raw: unknown): SkillInfo[] {
+	const list = arrayOf(raw, ["skills"]).filter(isObject);
+	return list.map((entry) => ({
+		name: pickString(entry, ["name"]) || "未命名技能",
+		description: pickString(entry, ["description"]),
+		content: pickString(entry, ["content"]),
+	}));
 }

@@ -21,3 +21,14 @@ export function saveBool(key: string, value: boolean): void {
 		// storage unavailable — ignore
 	}
 }
+
+/** 读取布尔值；从未设置过返回 null（用于区分「未设置」与「设置为 false」）。 */
+export function loadBoolOrNull(key: string): boolean | null {
+	try {
+		const raw = localStorage.getItem(key);
+		if (raw === null) return null;
+		return raw === "1" || raw === "true";
+	} catch {
+		return null;
+	}
+}

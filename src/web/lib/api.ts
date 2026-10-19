@@ -144,6 +144,13 @@ export const api = {
 
 	logout: () => requestJson<{ ok?: boolean }>("/api/logout", { method: "POST" }),
 
+	skills: () => requestJson<{ skills?: unknown[] }>("/api/skills"),
+
+	addSkill: (name: string, description: string, content: string) =>
+		requestJson<{ ok?: boolean }>("/api/skills", jsonPost({ name, description, content })),
+
+	deleteSkill: (name: string) => requestJson<{ ok?: boolean }>(withQuery("/api/skills", { name }), { method: "DELETE" }),
+
 	backup: () => requestJson<unknown>("/api/backup"),
 
 	restore: (payload: unknown) =>

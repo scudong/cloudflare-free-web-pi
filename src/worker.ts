@@ -46,6 +46,7 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 		// 列已存在
 	}
 	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS skills (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS shares (token TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS automations (id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_run_at INTEGER, next_run_at INTEGER NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)`);
@@ -106,6 +107,29 @@ const spikeExtension = defineExtension({
 						? "没有匹配的记忆。最近几条：\n" + rows.slice(0, 5).map((r) => "· " + r.content).join("\n")
 						: "记忆库还是空的。";
 				return { output: [{ type: "text", text }] };
+			},
+		}),
+		defineTool({
+			name: "list_skills",
+			description: "列出已安装的技能（名称与用途）",
+			parameters: Type.Object({}),
+			execute: async () => {
+				const rows = sqlFacade!.exec("SELECT name, description FROM skills ORDER BY name").toArray() as {
+					name: string;
+					description: string;
+				}[];
+				const text = rows.length ? rows.map((r) => `- ${r.name}：${r.description || "（无描述）"}`).join("\n") : "还没有安装任何技能。";
+				return { output: [{ type: "text", text }] };
+			},
+		}),
+		defineTool({
+			name: "load_skill",
+			description: "读取某个技能的完整说明（步骤/模板/约束），按说明完成任务",
+			parameters: Type.Object({ name: Type.String({ description: "技能名称" }) }),
+			execute: async (args) => {
+				const name = String((args as { name?: unknown }).name ?? "").trim();
+				const rows = sqlFacade!.exec("SELECT content FROM skills WHERE name = ?", name).toArray() as { content: string }[];
+				return { output: [{ type: "text", text: rows[0]?.content ?? `技能「${name}」不存在，可用 list_skills 查看。` }] };
 			},
 		}),
 		defineTool({
@@ -303,8 +327,9 @@ export class SpikeAgent extends DurableObject {
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
 					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
 					: [spikeExtension, codemodeExtension, toolSearchExtension],
-				instructions:
+				instructions: this.instructionsWithSkills(
 					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
+				),
 			},
 			ctx,
 		);
@@ -500,6 +525,26 @@ export class SpikeAgent extends DurableObject {
 		await this.scheduleNextAlarm();
 	}
 
+	/** 已安装技能清单（name + description），供提示词索引与工具使用。 */
+	private skillIndex(): { name: string; description: string }[] {
+		try {
+			return sqlFacade!.exec("SELECT name, description FROM skills ORDER BY name").toArray() as {
+				name: string;
+				description: string;
+			}[];
+		} catch {
+			return [];
+		}
+	}
+
+	/** 技能索引注入到 instructions：模型知道有哪些技能，按需 load_skill。 */
+	private instructionsWithSkills(base: string): string {
+		const index = this.skillIndex();
+		if (!index.length) return base;
+		const lines = index.map((s) => `- ${s.name}：${s.description || "（无描述）"}`).join("\n");
+		return `${base}\n\n可用技能（需要时调用 load_skill 读取完整说明后再执行）：\n${lines}`;
+	}
+
 	/** 全量备份：记忆、文件、定时任务、MCP 配置、会话元数据（不含对话正文，正文走 /api/export）。 */
 	async backup(): Promise<{ version: number; exportedAt: string; data: Record<string, unknown> }> {
 		await this.open();
@@ -514,6 +559,7 @@ export class SpikeAgent extends DurableObject {
 				mcpServers: q("SELECT id, name, url, headers FROM mcp_servers"),
 				sessions: q("SELECT id, title, created_at, updated_at, model FROM sessions_meta WHERE deleted = 0"),
 				shares: q("SELECT token, kind, session_id, name, created_at FROM shares"),
+				skills: q("SELECT name, description, content FROM skills ORDER BY name"),
 			},
 		};
 	}
@@ -557,6 +603,15 @@ export class SpikeAgent extends DurableObject {
 				num(a.enabled) ? 1 : 0, new Date().toISOString(), num(a.next_run_at) || Date.now() + 60_000,
 			);
 			counts.automations = (counts.automations ?? 0) + 1;
+		}
+		for (const k of rows("skills")) {
+			const name = str(k.name).trim();
+			if (!name) continue;
+			sqlFacade!.exec(
+				"INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
+				name, str(k.description), str(k.content), new Date().toISOString(),
+			);
+			counts.skills = (counts.skills ?? 0) + 1;
 		}
 		for (const s of rows("mcpServers")) {
 			const id = str(s.id);
@@ -816,8 +871,9 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
 					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
 					: [spikeExtension, codemodeExtension, toolSearchExtension],
-				instructions:
+				instructions: this.instructionsWithSkills(
 					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
+				),
 			},
 			ctx,
 		);
@@ -1013,6 +1069,28 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 			if (url.pathname === "/files" && request.method === "DELETE") {
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
+				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/skills" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const rows = sqlFacade!.exec("SELECT name, description, content, created_at FROM skills ORDER BY name").toArray();
+				return Response.json({ skills: rows });
+			}
+			if (url.pathname === "/skills" && request.method === "POST") {
+				const body = (await request.json()) as { name?: string; description?: string; content?: string };
+				const name = (body.name ?? "").trim().slice(0, 40);
+				const content = (body.content ?? "").trim();
+				if (!name || !content) return Response.json({ error: "需要名称与内容" }, { status: 400 });
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec(
+					"INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
+					name, (body.description ?? "").trim().slice(0, 120), content, new Date().toISOString(),
+				);
+				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/skills" && request.method === "DELETE") {
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec("DELETE FROM skills WHERE name = ?", url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/backup" && request.method === "GET") {

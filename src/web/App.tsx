@@ -8,10 +8,10 @@ import { Workbench } from "./components/Workbench";
 import type { WorkbenchTab } from "./components/Workbench";
 import { api } from "./lib/api";
 import { parseEntries, truncateOneLine } from "./lib/entries";
-import { parseAutomations, parseFiles, parseMemories, parseSessions } from "./lib/collections";
-import { loadBool, saveBool } from "./lib/localStore";
+import { parseAutomations, parseFiles, parseMemories, parseSessions, parseSkills } from "./lib/collections";
+import { loadBool, loadBoolOrNull, saveBool } from "./lib/localStore";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { AutomationInfo, ChatMessage, FileInfo, McpServerInfo, MemoryInfo, SessionListItem, ToolCallInfo } from "./types";
+import type { AutomationInfo, ChatMessage, FileInfo, McpServerInfo, MemoryInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -39,8 +39,18 @@ export default function App() {
 	const isDesktop = useMediaQuery(DESKTOP_QUERY);
 
 	// Layout: persisted panel toggles (desktop), mobile tab + drawer
-	const [leftOpen, setLeftOpen] = useState(() => loadBool(LEFT_OPEN_KEY, true));
-	const [rightOpen, setRightOpen] = useState(() => loadBool(RIGHT_OPEN_KEY, true));
+	// 自动扩展（v0.15.0）：首次进入按视口宽度决定两栏默认展开；
+	// 用户手动切换后写入 localStorage，此后以用户选择为准。
+	const [leftOpen, setLeftOpen] = useState(() => {
+		const saved = loadBoolOrNull(LEFT_OPEN_KEY);
+		if (saved !== null) return saved;
+		return typeof window === "undefined" ? true : window.innerWidth >= 1024;
+	});
+	const [rightOpen, setRightOpen] = useState(() => {
+		const saved = loadBoolOrNull(RIGHT_OPEN_KEY);
+		if (saved !== null) return saved;
+		return typeof window === "undefined" ? true : window.innerWidth >= 1280;
+	});
 	const [mobileTab, setMobileTab] = useState<MobileTab>("chat");
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
@@ -60,6 +70,9 @@ export default function App() {
 	const [models, setModels] = useState<string[]>([]);
 	const [model, setModel] = useState("deepseek-flash");
 	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
+	const [skills, setSkills] = useState<SkillInfo[]>([]);
+	const [skillsLoading, setSkillsLoading] = useState(true);
+	const [skillsError, setSkillsError] = useState<string | null>(null);
 	const [automations, setAutomations] = useState<AutomationInfo[]>([]);
 	const [automationsLoading, setAutomationsLoading] = useState(true);
 	const [automationsError, setAutomationsError] = useState<string | null>(null);
@@ -346,6 +359,48 @@ export default function App() {
 		},
 		[sessionId],
 	);
+
+	// 技能列表（全局，随 panelTick 刷新）
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.skills();
+				if (alive) {
+					setSkills(parseSkills(data.skills));
+					setSkillsError(null);
+				}
+			} catch {
+				if (alive) setSkillsError("加载技能失败。");
+			} finally {
+				if (alive) setSkillsLoading(false);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [panelTick]);
+
+	const handleAddSkill = useCallback(async (name: string, description: string, content: string) => {
+		try {
+			await api.addSkill(name, description, content);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			setSkillsError("保存技能失败。");
+			return false;
+		}
+	}, []);
+
+	const handleDeleteSkill = useCallback(async (name: string) => {
+		try {
+			await api.deleteSkill(name);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			return false;
+		}
+	}, []);
 
 	// 定时任务列表（全局，随 panelTick 刷新）
 	useEffect(() => {
@@ -636,6 +691,16 @@ export default function App() {
 		}
 	}, [isDesktop]);
 
+	// 窗口尺寸跨越断点时自动展开/收起（用户手动设置过则不干预）
+	useEffect(() => {
+		const onResize = () => {
+			if (loadBoolOrNull(LEFT_OPEN_KEY) === null) setLeftOpen(window.innerWidth >= 1024);
+			if (loadBoolOrNull(RIGHT_OPEN_KEY) === null) setRightOpen(window.innerWidth >= 1280);
+		};
+		window.addEventListener("resize", onResize);
+		return () => window.removeEventListener("resize", onResize);
+	}, []);
+
 	const handleDeleteFile = useCallback(
 		async (name: string): Promise<boolean> => {
 			try {
@@ -761,6 +826,11 @@ export default function App() {
 							mcpError={mcpError}
 							onAddMcp={handleAddMcp}
 							onDeleteMcp={handleDeleteMcp}
+							skills={skills}
+							skillsLoading={skillsLoading}
+							skillsError={skillsError}
+							onAddSkill={handleAddSkill}
+							onDeleteSkill={handleDeleteSkill}
 							automations={automations}
 							automationsLoading={automationsLoading}
 							automationsError={automationsError}
