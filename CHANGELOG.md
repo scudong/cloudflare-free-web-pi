@@ -2,6 +2,13 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（对话导出）
+
+### 会话导出 Markdown（v0.7.0）
+- `GET /api/export?sessionId=&format=md` 返回完整转录（用户/助手消息 + 工具调用摘要），带 `Content-Disposition` 文件名
+- 顶栏新增下载按钮，一键导出当前会话
+- 条目按 id 倒序存储，导出时反转成时间正序
+
 ## 2026-10-19（多模型切换）
 
 ### 按会话选择模型（v0.6.0）

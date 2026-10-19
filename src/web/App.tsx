@@ -389,6 +389,17 @@ export default function App() {
 		[sessionId],
 	);
 
+	/** 导出当前会话：直接下载 Markdown 文件。 */
+	const handleExport = useCallback(() => {
+		const url = `/api/export?format=md&sessionId=${encodeURIComponent(sessionId)}`;
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = `session-${sessionId}.md`;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+	}, [sessionId]);
+
 	/** 重命名会话：乐观更新侧栏，失败回滚由下一次刷新兜底。 */
 	const handleRenameSession = useCallback(
 		(id: string, title: string) => {
@@ -524,6 +535,7 @@ export default function App() {
 				onToggleLeft={toggleLeft}
 				onToggleRight={toggleRight}
 				onOpenDrawer={() => setDrawerOpen(true)}
+				onExport={handleExport}
 			/>
 
 			<div className="flex min-h-0 flex-1">

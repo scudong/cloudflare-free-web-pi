@@ -391,6 +391,52 @@ export class SpikeAgent extends DurableObject {
 		return { sessions: rows };
 	}
 
+	/** 导出会话为 Markdown（含工具调用摘要）。 */
+	async exportMarkdown(sessionId?: string): Promise<{ markdown: string; title: string; sessionId: string }> {
+		const harness = await this.open();
+		const conversation = await this.conversationFor(harness, sessionId);
+		const page = (await conversation.entries({}, 1000, undefined, ctx)) as { items: readonly Record<string, unknown>[] };
+		const id = String(conversation.id);
+		let title = `会话 ${id}`;
+		try {
+			const row = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", id).toArray() as { title: string }[];
+			if (row[0]?.title) title = row[0].title;
+		} catch {
+			// 元数据缺失时用默认标题
+		}
+		const lines: string[] = [`# ${title}`, "", `> 导出时间：${new Date().toISOString()}　·　会话 #${id}`, ""];
+		const textOf = (model: unknown): string => {
+			const blocks = Array.isArray(model) ? (model as { content?: unknown }[]) : [];
+			for (const block of blocks) {
+				const content = block?.content;
+				if (typeof content === "string") return content;
+				if (Array.isArray(content)) {
+					const text = content
+						.map((c) => (typeof c === "object" && c && "text" in c ? String((c as { text?: unknown }).text ?? "") : ""))
+						.join("");
+					if (text) return text;
+				}
+			}
+			return "";
+		};
+		// 条目按 id 倒序返回，导出时按时间正序。
+		for (const entry of [...page.items].reverse()) {
+			const kind = String(entry.kind ?? "");
+			const text = textOf(entry.model);
+			if (kind === "pi.user" && text.trim()) {
+				lines.push(`## 用户`, "", text.trim(), "");
+			} else if (kind === "pi.assistant" && text.trim()) {
+				lines.push(`## 助手`, "", text.trim(), "");
+			} else if (kind === "pi.tool-result") {
+				const blocks = Array.isArray(entry.model) ? (entry.model as { toolName?: string; content?: { text?: string }[] }[]) : [];
+				const first = blocks[0];
+				const summary = (first?.content ?? []).map((c) => c.text ?? "").join("").trim().slice(0, 200);
+				if (first?.toolName) lines.push(`> 🔧 ${first.toolName}${summary ? `：${summary}` : ""}`, "");
+			}
+		}
+		return { markdown: lines.join("\n"), title, sessionId: id };
+	}
+
 	/** 重置一个会话的转录（工作台文件与记忆库保留）。 */
 	/**
 	 * reflect：把一段对话里值得长期记住的事实抽出来入库（对齐本地 pi memory 插件的 reflect）。
@@ -677,6 +723,18 @@ export class SpikeAgent extends DurableObject {
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/export" && request.method === "GET") {
+				const data = await this.exportMarkdown(url.searchParams.get("sessionId") ?? undefined);
+				if (url.searchParams.get("format") === "md") {
+					return new Response(data.markdown, {
+						headers: {
+							"content-type": "text/markdown; charset=utf-8",
+							"content-disposition": `attachment; filename="session-${data.sessionId}.md"; filename*=UTF-8''${encodeURIComponent(data.title)}.md`,
+						},
+					});
+				}
+				return Response.json(data);
 			}
 			if (url.pathname === "/models" && request.method === "GET") {
 				return Response.json({ models: AVAILABLE_MODELS, default: DEFAULT_MODEL_ID });

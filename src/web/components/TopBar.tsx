@@ -6,6 +6,8 @@ interface TopBarProps {
 	onToggleLeft: () => void;
 	onToggleRight: () => void;
 	onOpenDrawer: () => void;
+	/** 导出当前会话为 Markdown（v0.7.0）。 */
+	onExport: () => void;
 }
 
 /** Collapsed/expanded state icon for a side panel (filled inner bar = expanded). */
@@ -42,7 +44,7 @@ function MenuIcon() {
 const panelButton =
 	"hidden h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 aria-pressed:border-slate-700 aria-pressed:bg-slate-800 aria-pressed:text-sky-300 md:inline-flex";
 
-export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft, onToggleRight, onOpenDrawer }: TopBarProps) {
+export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft, onToggleRight, onOpenDrawer, onExport }: TopBarProps) {
 	return (
 		<header className="z-20 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/80 px-3 backdrop-blur">
 			<div className="flex min-w-0 items-center gap-2.5">
@@ -71,6 +73,18 @@ export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft
 				{sessionLabel && <span className="hidden min-w-0 truncate text-xs text-slate-500 lg:inline">{sessionLabel}</span>}
 			</div>
 			<div className="flex shrink-0 items-center gap-1">
+				<button
+					type="button"
+					onClick={onExport}
+					title="导出当前会话为 Markdown"
+					aria-label="导出会话"
+					className={panelButton}
+				>
+					<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+						<path d="M10 3v9m0 0 3-3m-3 3L7 9" strokeLinecap="round" strokeLinejoin="round" />
+						<path d="M4 14v2.25c0 .41.34.75.75.75h10.5c.41 0 .75-.34.75-.75V14" strokeLinecap="round" />
+					</svg>
+				</button>
 				<button
 					type="button"
 					onClick={onToggleLeft}
