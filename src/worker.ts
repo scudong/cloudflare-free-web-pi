@@ -12,6 +12,8 @@ import {
 	Harness,
 } from "@earendil-works/pi-durable";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
+import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
+import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
 
 const ctx = BACKGROUND_CONTEXT;
 
@@ -126,6 +128,12 @@ const spikeExtension = defineExtension({
 		}),
 	],
 });
+/** Code mode 扩展：单例即可（沙箱无状态，脚本每次执行新建 VM）。 */
+const codemodeExtension = createCodemodeExtension({
+	sandbox: createInlineCodemodeSandbox({ memoryLimitBytes: 64 * 1024 * 1024 }),
+	models: false,
+});
+
 export class SpikeAgent extends DurableObject {
 
 	private harness: Harness | null = null;
@@ -136,6 +144,8 @@ export class SpikeAgent extends DurableObject {
 			models.setProvider(deepseekProvider()); // reads DEEPSEEK_API_KEY
 			const registry = createRegistry();
 			registry.install(spikeExtension);
+			// Code mode：模型写 JS 调 tools.<name>()，QuickJS WASM 沙箱内执行（workerd 原生支持）。
+			registry.install(codemodeExtension);
 			// Durable Object SQLite: conversations survive DO restarts and redeploys.
 			const storage = await openDurableObjectSqliteStorage(this.ctx.storage);
 			ensureTables(this.ctx.storage.sql);
@@ -149,8 +159,20 @@ export class SpikeAgent extends DurableObject {
 	async chat(message: string): Promise<{ answer: string; tools: { name: string; summary: string }[] }> {
 		const harness = await this.open();
 		const root = await harness.root(ctx, {
-			agent: { model: { provider: "deepseek", modelId: "deepseek-flash" }, extensions: [spikeExtension] },
+			agent: { model: { provider: "deepseek", modelId: "deepseek-flash" }, extensions: [spikeExtension, codemodeExtension] },
 		});
+		// 会话首次创建后 agent 选择会固化在 pi.agent 文档里；幂等重设，保证新扩展开关对老会话也生效。
+		await root.configure(
+			{
+				extensions: [spikeExtension, codemodeExtension],
+				instructions:
+					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
+			},
+			ctx,
+		);
+		// 记录本轮起点：之后只把新增条目里的工具结果算作本轮工具活动。
+		const before = await root.entries({}, 1, undefined, ctx);
+		const beforeId = (before.items[0] as unknown as { id?: number } | undefined)?.id ?? 0;
 		const submission = await root.submit({ type: "input", content: message }, ctx);
 		const settled = await submission.wait(ctx);
 		if (settled.status !== "done" || settled.type !== "input") {
@@ -165,6 +187,7 @@ export class SpikeAgent extends DurableObject {
 		const tools: { name: string; summary: string }[] = [];
 		for (const e of page2.items as unknown as Record<string, unknown>[]) {
 			if ((e as { kind?: unknown }).kind !== "pi.tool-result") continue;
+			if (Number((e as { id?: unknown }).id ?? 0) <= beforeId) continue;
 			const model = (e as { model?: { toolName?: string; content?: { type: string; text?: string }[] }[] }).model;
 			const first = model?.[0];
 			const text = (first?.content ?? []).map((b) => b.text ?? "").join("");
@@ -200,6 +223,26 @@ export class SpikeAgent extends DurableObject {
 			if (request.method === "POST" && url.pathname === "/chat") {
 				const { message } = (await request.json()) as { message: string };
 				return Response.json(await this.chat(message));
+			}
+			if (request.method === "GET" && url.pathname === "/debug/agent") {
+				const harness = await this.open();
+				const root = await harness.root(ctx);
+				const agent = await root.agent(ctx);
+				const a = agent as unknown as {
+					tools?: readonly { name?: string }[];
+					callable?: readonly { name?: string }[];
+					deferred?: readonly { name?: string }[];
+					extensions?: readonly { name?: string }[];
+					sections?: readonly { key?: string }[];
+				};
+				const names = (x?: readonly { name?: string }[]) => (x ?? []).map((t) => t.name);
+				return Response.json({
+					tools: names(a.tools),
+					callable: names(a.callable),
+					deferred: names(a.deferred),
+					extensions: names(a.extensions),
+					sections: (a.sections ?? []).map((x) => x.key),
+				});
 			}
 			if (request.method === "GET" && url.pathname === "/sessions") {
 				return Response.json({ sessions: [{ id: "1", title: "当前会话", created_at: new Date().toISOString() }] });
