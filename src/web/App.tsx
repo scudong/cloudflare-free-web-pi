@@ -5,8 +5,9 @@ import { MessageList } from "./components/MessageList";
 import { Composer } from "./components/Composer";
 import { Sidebar } from "./components/Sidebar";
 import { Workbench } from "./components/Workbench";
+import { Rail, type RailView } from "./components/Rail";
+import { AutomationPanel, McpPanel, SkillPanel } from "./components/LeftPanels";
 import { SettingsDialog } from "./components/SettingsDialog";
-import type { WorkbenchTab } from "./components/Workbench";
 import { api } from "./lib/api";
 import { parseEntries, truncateOneLine } from "./lib/entries";
 import { parseAutomations, parseFiles, parseMemories, parseSessions, parseSkills } from "./lib/collections";
@@ -19,7 +20,7 @@ const DESKTOP_QUERY = "(min-width: 768px)";
 const LEFT_OPEN_KEY = "pi-harness.left-open";
 const RIGHT_OPEN_KEY = "pi-harness.right-open";
 type PanelState = "loading" | "ready" | "error";
-type MobileTab = "chat" | "files" | "memories";
+type MobileTab = "chat" | "files";
 
 /** Tolerantly extract the tool list from a /api/chat response. */
 function toToolInfos(raw: unknown): ToolCallInfo[] {
@@ -55,7 +56,8 @@ export default function App() {
 	const [mobileTab, setMobileTab] = useState<MobileTab>("chat");
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);
-	const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
+	// 左侧 Rail 当前展示的面板（v0.21.0）：会话 / 连接 / 定时 / 技能
+	const [railView, setRailView] = useState<RailView>("sessions");
 	// 右栏宽度（v0.16.0）：可拖拽分隔条、打开文档时自动加宽、可最大化阅读
 	const [rightWidth, setRightWidth] = useState(() => {
 		const saved = typeof window === "undefined" ? null : Number(localStorage.getItem("pi-right-width") ?? "");
@@ -785,17 +787,7 @@ export default function App() {
 		})();
 	}, []);
 
-	/** Sidebar 记忆库 entry: reveal the workbench on the memories tab. */
-	const handleOpenMemories = useCallback(() => {
-		setDrawerOpen(false);
-		setWorkbenchTab("memories");
-		if (isDesktop) {
-			setRightOpen(true);
-			saveBool(RIGHT_OPEN_KEY, true);
-		} else {
-			setMobileTab("memories");
-		}
-	}, [isDesktop]);
+	/** Sidebar 记忆库入口已移除（v0.21.0）：记忆列表在设置弹窗里。 */
 
 	// 窗口尺寸跨越断点时自动展开/收起（用户手动设置过则不干预）
 	useEffect(() => {
@@ -849,24 +841,58 @@ export default function App() {
 
 	const currentSession = sessions.find((s) => s.id === sessionId);
 	const sessionLabel = sessionName || (currentSession ? currentSession.title : "");
-	const showSidebar = isDesktop && leftOpen;
+	// Rail 常驻（v0.21.0），leftOpen 只控制左侧内容栏
+	const showLeftContent = isDesktop && leftOpen;
 	// 全宽阅读时让文档独占（v0.16.0）：桌面上隐藏聊天栏，避免被挤成窄条
 	const showChat = isDesktop ? !workbenchWide : mobileTab === "chat";
-	const showWorkbench = isDesktop ? rightOpen : mobileTab !== "chat";
+	const showWorkbench = isDesktop ? rightOpen : mobileTab === "files";
 
+	/** 左侧内容：随 Rail 切换（会话 / 连接 / 定时 / 技能）。 */
 	const sidebar = (
 		<Sidebar
 			sessions={sessions}
 			currentId={sessionId}
 			query={sessionQuery}
 			sessionsLoading={sessionsLoading}
-			memoryCount={memories.length}
 			onQueryChange={setSessionQuery}
 			onSelect={handleSelectSession}
-			onNewSession={handleNewSession}
 			onRename={handleRenameSession}
 			onDelete={handleDeleteSession}
-			onOpenMemories={handleOpenMemories}
+		/>
+	);
+
+	const leftContent =
+		railView === "sessions" ? (
+			sidebar
+		) : railView === "mcp" ? (
+			<McpPanel servers={mcpServers} loading={mcpLoading} error={mcpError} onAdd={handleAddMcp} onDelete={handleDeleteMcp} />
+		) : railView === "automations" ? (
+			<AutomationPanel
+				items={automations}
+				loading={automationsLoading}
+				error={automationsError}
+				onAdd={handleAddAutomation}
+				onToggle={handleToggleAutomation}
+				onDelete={handleDeleteAutomation}
+			/>
+		) : (
+			<SkillPanel
+				items={skills}
+				loading={skillsLoading}
+				error={skillsError}
+				onAdd={handleAddSkill}
+				onDelete={handleDeleteSkill}
+				onImport={handleImportSkill}
+			/>
+		);
+
+	const rail = (
+		<Rail
+			view={railView}
+			onViewChange={setRailView}
+			onNewSession={handleNewSession}
+			newSessionDisabled={resetting}
+			onOpenSettings={() => setSettingsOpen(true)}
 		/>
 	);
 
@@ -880,7 +906,12 @@ export default function App() {
 			/>
 
 			<div className="flex min-h-0 flex-1">
-				{showSidebar && <div className="w-60 shrink-0 border-r border-slate-800">{sidebar}</div>}
+				{isDesktop && rail}
+				{showLeftContent && (
+					<div className={`min-w-0 shrink-0 border-r border-slate-800 ${railView === "sessions" ? "w-60" : "w-80"}`}>
+						{leftContent}
+					</div>
+				)}
 
 				{showChat && (
 					<section className="flex min-w-0 flex-1 flex-col" aria-label="聊天">
@@ -925,38 +956,15 @@ export default function App() {
 						style={isDesktop && !workbenchWide ? { width: rightWidth } : undefined}
 					>
 						<Workbench
-							tab={workbenchTab}
-							onTabChange={setWorkbenchTab}
 							sessionId={sessionId}
 							files={files}
 							filesLoading={filesState === "loading"}
 							filesError={filesError}
-							memories={memories}
-							memoriesLoading={memoriesState === "loading"}
-							memoriesError={memoriesError}
-							refreshTick={panelTick}
-							onDeleteFile={handleDeleteFile}
-							onDeleteMemory={handleDeleteMemory}
-							mcpServers={mcpServers}
-							mcpLoading={mcpLoading}
-							mcpError={mcpError}
-							onAddMcp={handleAddMcp}
-							onDeleteMcp={handleDeleteMcp}
-							skills={skills}
-							skillsLoading={skillsLoading}
-							skillsError={skillsError}
-							onAddSkill={handleAddSkill}
-							onDeleteSkill={handleDeleteSkill}
-							onImportSkill={handleImportSkill}
-							automations={automations}
-							automationsLoading={automationsLoading}
-							automationsError={automationsError}
-							onAddAutomation={handleAddAutomation}
-							onToggleAutomation={handleToggleAutomation}
-							onDeleteAutomation={handleDeleteAutomation}
 							wide={workbenchWide}
 							onToggleWide={() => setWorkbenchWide((v) => !v)}
 							onFileOpenChange={handleFileOpenChange}
+							refreshTick={panelTick}
+							onDeleteFile={handleDeleteFile}
 						/>
 					</div>
 				)}
@@ -978,6 +986,10 @@ export default function App() {
 				onRestore={handleRestore}
 				webSearch={webSearch}
 				onToggleWebSearch={handleToggleWebSearch}
+				memories={memories}
+				memoriesLoading={memoriesState === "loading"}
+				memoriesError={memoriesError}
+				onDeleteMemory={handleDeleteMemory}
 				authRequired={!!auth?.required}
 				onLogout={handleLogout}
 			/>
@@ -991,7 +1003,10 @@ export default function App() {
 						onClick={() => setDrawerOpen(false)}
 						className="absolute inset-0 bg-black/60"
 					/>
-					<div className="absolute inset-y-0 left-0 w-60 border-r border-slate-800 bg-slate-900 shadow-xl">{sidebar}</div>
+					<div className="absolute inset-y-0 left-0 flex w-80 max-w-[85vw] border-r border-slate-800 bg-slate-900 shadow-xl">
+						{rail}
+						<div className="min-w-0 flex-1">{leftContent}</div>
+					</div>
 				</div>
 			)}
 
@@ -1003,11 +1018,10 @@ export default function App() {
 				>
 					{(
 						[
-							{ key: "chat", label: "聊天" },
-							{ key: "files", label: "文件" },
-							{ key: "memories", label: "记忆" },
+							{ key: "chat", label: "聊天", icon: "💬" },
+							{ key: "files", label: "文件", icon: "📄" },
 						] as const
-					).map(({ key, label }) => (
+					).map(({ key, label, icon }) => (
 						<button
 							key={key}
 							type="button"
@@ -1018,14 +1032,21 @@ export default function App() {
 							}`}
 						>
 							<span aria-hidden className="text-base leading-none">
-								{key === "chat" ? "💬" : key === "files" ? "📄" : "🧠"}
+								{icon}
 							</span>
 							{label}
-							{key === "files" && files.length > 0 && (
-								<span className="sr-only">{`${files.length} 个文件`}</span>
-							)}
 						</button>
 					))}
+					<button
+						type="button"
+						onClick={() => setSettingsOpen(true)}
+						className="flex flex-col items-center gap-0.5 py-2 text-[11px] text-slate-400 transition-colors hover:text-slate-200"
+					>
+						<span aria-hidden className="text-base leading-none">
+							⚙️
+						</span>
+						设置
+					</button>
 				</nav>
 			)}
 		</div>

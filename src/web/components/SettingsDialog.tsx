@@ -1,4 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { formatTime } from "../lib/format";
+import type { MemoryInfo } from "../types";
 
 interface SettingsDialogProps {
 	open: boolean;
@@ -17,6 +19,11 @@ interface SettingsDialogProps {
 	/** 网页搜索开关（null = 尚未读到后端设置）。 */
 	webSearch: boolean | null;
 	onToggleWebSearch: (next: boolean) => void;
+	/** 记忆库（v0.21.0 从工作台移入设置）。 */
+	memories: MemoryInfo[];
+	memoriesLoading: boolean;
+	memoriesError: string | null;
+	onDeleteMemory: (id: number) => Promise<boolean>;
 	/** 设置了访问密码才显示登出。 */
 	authRequired: boolean;
 	onLogout: () => void;
@@ -68,6 +75,10 @@ export function SettingsDialog({
 	onRestore,
 	webSearch,
 	onToggleWebSearch,
+	memories,
+	memoriesLoading,
+	memoriesError,
+	onDeleteMemory,
 	authRequired,
 	onLogout,
 }: SettingsDialogProps) {
@@ -151,6 +162,40 @@ export function SettingsDialog({
 						<Switch checked={webSearch === true} onChange={onToggleWebSearch} label="启用网页搜索" />
 					</div>
 					{webSearch === null && <p className="mt-2 text-xs text-slate-500">正在读取设置…</p>}
+				</Section>
+
+				<Section title={`记忆库${memories.length ? `（${memories.length}）` : ""}`}>
+					<div className="max-h-56 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/40 p-1.5">
+						{memoriesError && <p className="px-1.5 py-1.5 text-xs text-rose-300">{memoriesError}</p>}
+						{memoriesLoading && memories.length === 0 && <p className="px-1.5 py-1.5 text-xs text-slate-500">正在加载…</p>}
+						{!memoriesLoading && !memoriesError && memories.length === 0 && (
+							<p className="px-1.5 py-2 text-xs leading-relaxed text-slate-500">
+								记忆库还是空的。对 π 说「记住…」即可保存一条长期记忆；每轮对话结束也会自动抽取。
+							</p>
+						)}
+						<ul className="space-y-1">
+							{memories.map((memory) => (
+								<li key={memory.id} className="rounded-lg bg-slate-800/50 px-2.5 py-2">
+									<p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-slate-200">{memory.content}</p>
+									<div className="mt-1.5 flex items-center justify-between gap-2">
+										<span className="min-w-0 truncate text-[11px] text-slate-500">
+											{memory.source === "reflect" ? "自动抽取 · " : ""}
+											{formatTime(memory.createdAt)}
+										</span>
+										{memory.id > 0 && (
+											<button
+												type="button"
+												onClick={() => void onDeleteMemory(memory.id)}
+												className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-slate-500 transition-colors hover:bg-red-950/60 hover:text-red-300"
+											>
+												删除
+											</button>
+										)}
+									</div>
+								</li>
+							))}
+						</ul>
+					</div>
 				</Section>
 
 				<Section title="数据">

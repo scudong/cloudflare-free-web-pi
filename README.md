@@ -22,7 +22,7 @@
 | 技能 | 自定义技能（`SKILL.md` 规范）+ 一键安装 `badlogic/pi-skills` 社区技能；模型按需 `load_skill` |
 | 扩展 | 任意 **MCP** 服务器（Streamable HTTP，支持自定义请求头） |
 | 定时 | Durable Object alarm 驱动的定时任务（每天 HH:MM / 每隔 N 分钟） |
-| 其他 | **设置页**（主题/布局/搜索/数据统一管理）、只读分享链接、Markdown 导出、全量备份/恢复、浅色/深色主题、访问密码登录 |
+| 其他 | **左侧工具栏**（新会话/会话/连接/定时/技能/设置）、**设置页**（主题/布局/搜索/记忆库/数据）、只读分享链接、Markdown 导出、全量备份/恢复、浅色/深色主题、访问密码登录 |
 
 ---
 
@@ -127,7 +127,7 @@ npx wrangler deploy
 src/
   worker.ts              # Worker 入口 + Durable Object（API、工具、存储、调度）
   web/                   # React 前端
-    components/          #   Sidebar / ChatHeader / MessageList / Composer / Workbench / TopBar / SettingsDialog
+    components/          #   Rail / Sidebar / LeftPanels / ChatHeader / MessageList / Composer / Workbench / TopBar / SettingsDialog
     lib/                 #   api 客户端、SSE 解析、Markdown 渲染、宽容解析器
 wrangler.jsonc           # Worker + DO + 静态资源绑定
 .github/workflows/deploy.yml
@@ -140,7 +140,7 @@ CHANGELOG.md             # 逐版本更新记录
 
 完整记录见 [CHANGELOG.md](./CHANGELOG.md)。里程碑：
 
-`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索
+`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏
 
 ## 致谢
 

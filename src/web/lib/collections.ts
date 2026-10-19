@@ -69,6 +69,7 @@ export function parseMemories(raw: unknown): MemoryInfo[] {
 		id: pickNumber(entry, ["id"]) || -(index + 1),
 		content: pickString(entry, ["content", "text", "value"]),
 		createdAt: pickString(entry, ["created_at", "createdAt", "updated_at"]),
+		source: pickString(entry, ["source"]) || undefined,
 	}));
 }
 

@@ -33,6 +33,8 @@ export interface MemoryInfo {
 	id: number;
 	content: string;
 	createdAt: string;
+	/** manual = 显式保存；reflect = 会话末自动抽取。旧数据可能为空。 */
+	source?: string;
 }
 
 /** An MCP server the agent can call tools from (v5). */
