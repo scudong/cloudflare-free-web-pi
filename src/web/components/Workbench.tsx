@@ -307,21 +307,26 @@ function McpList({
 	servers: McpServerInfo[];
 	loading: boolean;
 	error: string | null;
-	onAdd: (name: string, url: string) => Promise<boolean>;
+	onAdd: (name: string, url: string, headers?: Record<string, string>) => Promise<boolean>;
 	onDelete: (id: string) => Promise<boolean>;
 }) {
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
+	const [headerKey, setHeaderKey] = useState("");
+	const [headerValue, setHeaderValue] = useState("");
 	const [busy, setBusy] = useState(false);
 
 	const submit = () => {
 		if (!name.trim() || !url.trim() || busy) return;
 		setBusy(true);
 		void (async () => {
-			const ok = await onAdd(name.trim(), url.trim());
+			const headers = headerKey.trim() && headerValue.trim() ? { [headerKey.trim()]: headerValue.trim() } : undefined;
+			const ok = await onAdd(name.trim(), url.trim(), headers);
 			if (ok) {
 				setName("");
 				setUrl("");
+				setHeaderKey("");
+				setHeaderValue("");
 			}
 			setBusy(false);
 		})();
@@ -344,6 +349,22 @@ function McpList({
 					aria-label="MCP 服务器地址"
 					className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
 				/>
+				<div className="flex gap-1.5">
+					<input
+						value={headerKey}
+						onChange={(e) => setHeaderKey(e.target.value)}
+						placeholder="请求头名（可选，如 x-api-key）"
+						aria-label="请求头名称"
+						className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+					/>
+					<input
+						value={headerValue}
+						onChange={(e) => setHeaderValue(e.target.value)}
+						placeholder="请求头值"
+						aria-label="请求头值"
+						className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+					/>
+				</div>
 				<button
 					type="button"
 					onClick={submit}

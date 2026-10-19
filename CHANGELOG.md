@@ -2,6 +2,17 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（免本地浏览器的网页操作）
+
+### MCP 请求头 + Browserbase 接入（v0.18.0）
+- MCP 服务器支持自定义**请求头**（表单新增「请求头名/值」两栏），用于 API key 类服务
+- 延迟披露阈值从 6 提高到 **12**：6–9 个工具的服务器（如 Browserbase）直接可用，更大的集合才走 tool_search
+- 实测 Browserbase MCP（`https://mcp.browserbase.com/mcp`，请求头 `x-bb-api-key`）：
+  `start` → `navigate` → 读标题 `Example Domain` → `end` 全部成功，无需本地 Chrome
+
+### 说明
+- API key 存在 DO 的 `mcp_servers.headers` 里（随备份导出，注意备份文件保密）
+
 ## 2026-10-19（社区技能）
 
 ### 安装 pi 社区技能（v0.17.0）

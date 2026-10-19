@@ -188,8 +188,8 @@ export const api = {
 
 	mcpServers: () => requestJson<{ servers?: unknown[] }>("/api/mcp"),
 
-	addMcp: (name: string, url: string) =>
-		requestJson<{ ok?: boolean; tools?: number }>("/api/mcp", jsonPost({ name, url })),
+	addMcp: (name: string, url: string, headers?: Record<string, string>) =>
+		requestJson<{ ok?: boolean; tools?: number; error?: string }>("/api/mcp", jsonPost({ name, url, headers })),
 
 	deleteMcp: (id: string) => requestJson<{ ok: boolean }>(withQuery("/api/mcp", { id }), { method: "DELETE" }),
 

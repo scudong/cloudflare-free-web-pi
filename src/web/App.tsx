@@ -506,16 +506,20 @@ export default function App() {
 		};
 	}, [panelTick]);
 
-	const handleAddMcp = useCallback(async (name: string, url: string) => {
+	const handleAddMcp = useCallback(async (name: string, url: string, headers?: Record<string, string>) => {
 		try {
-			await api.addMcp(name, url);
+			const result = await api.addMcp(name, url, headers);
 			setPanelTick((tick) => tick + 1);
+			setMessages((prev) => [
+				...prev,
+				{ id: nextId(), role: "notice", text: `已连接 MCP「${name}」：${result.tools ?? 0} 个工具` },
+			]);
 			return true;
 		} catch {
-			setMcpError("添加失败，请检查地址。");
+			setMcpError("添加失败，请检查地址或密钥。");
 			return false;
 		}
-	}, []);
+	}, [nextId]);
 
 	const handleDeleteMcp = useCallback(async (id: string) => {
 		try {

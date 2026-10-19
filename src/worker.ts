@@ -253,7 +253,7 @@ function parseFrontmatter(text: string): { name: string; description: string; bo
 /** 工具搜索扩展：模型先搜再加载被延迟的工具（v0.13.0）。 */
 const toolSearchExtension = createToolSearchExtension();
 /** MCP 工具总数达到该阈值时改为延迟披露，避免工具列表撑爆上下文。 */
-const DEFER_MCP_THRESHOLD = 6;
+const DEFER_MCP_THRESHOLD = 12;
 
 /** 可选模型（pi-ai deepseek provider 的目录）。 */
 const AVAILABLE_MODELS = ["deepseek-flash", "deepseek-v4-pro"];
@@ -298,7 +298,7 @@ async function buildMcpExtension(sql: { exec(q: string, ...b: unknown[]): { toAr
 	}
 	const total = connected.reduce((n, item) => n + item.entry.tools.length, 0);
 	// 工具多时改为延迟披露：模型先用 tool_search 搜索，再按需加载。
-	const defer = total >= DEFER_MCP_THRESHOLD;
+	const defer = total > DEFER_MCP_THRESHOLD;
 
 	const tools = [];
 	for (const { server, entry } of connected) {
