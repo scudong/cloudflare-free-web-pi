@@ -205,6 +205,51 @@ function userContent(message: string, images: string[] | undefined): string | { 
 	return [{ type: "text", text: message || "（图片）" }, ...blocks];
 }
 
+/** 社区技能目录（badlogic/pi-skills）与从 URL 导入的解析逻辑。 */
+const COMMUNITY_SKILLS = [
+	{ name: "brave-search", description: "通过 Brave Search API 搜索网页与提取正文", needsLocal: false },
+	{ name: "youtube-transcript", description: "抓取 YouTube 视频字幕用于总结分析", needsLocal: false },
+	{ name: "browser-tools", description: "通过 Chrome DevTools 协议做浏览器自动化", needsLocal: true },
+	{ name: "transcribe", description: "本地语音转写（Apple Silicon / ffmpeg）", needsLocal: true },
+	{ name: "gdcli", description: "Google Drive 命令行（列目录/上传/下载/分享）", needsLocal: true },
+	{ name: "gccli", description: "Google Calendar 命令行（查看/创建事件）", needsLocal: true },
+	{ name: "gmcli", description: "Gmail 命令行（搜索/读信/发信）", needsLocal: true },
+	{ name: "vscode", description: "VS Code 集成（查看 diff / 比较文件）", needsLocal: true },
+];
+const COMMUNITY_RAW_BASE = "https://raw.githubusercontent.com/badlogic/pi-skills/main";
+
+/** 把 GitHub 页面链接/目录链接统一成 SKILL.md 的 raw 地址。 */
+function normalizeSkillUrl(input: string): string | null {
+	const url = input.trim();
+	if (!/^https?:\/\//.test(url)) return null;
+	let m = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:blob|tree)\/([^/]+)\/(.+)$/.exec(url);
+	if (m) {
+		const [, owner, repo, branch, path] = m;
+		const clean = path!.replace(/\/+$/, "");
+		const file = /\.md$/i.test(clean) ? clean : `${clean}/SKILL.md`;
+		return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${file}`;
+	}
+	m = /^https?:\/\/raw\.githubusercontent\.com\/.+$/.exec(url);
+	if (m) return /\.[a-z]+$/i.test(url) ? url : `${url.replace(/\/+$/, "")}/SKILL.md`;
+	if (/\.md$/i.test(url)) return url;
+	return `${url.replace(/\/+$/, "")}/SKILL.md`;
+}
+
+/** 解析 SKILL.md 的 YAML frontmatter（只取 name / description）。 */
+function parseFrontmatter(text: string): { name: string; description: string; body: string } {
+	const match = /^﻿?---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+	if (!match) return { name: "", description: "", body: text.trim() };
+	const header = match[1] ?? "";
+	const body = text.slice(match[0].length).trim();
+	const read = (key: string) => {
+		const re = new RegExp(`^${key}:\\s*(.+)$`, "m");
+		const hit = re.exec(header);
+		if (!hit) return "";
+		return (hit[1] ?? "").trim().replace(/^["']|["']$/g, "");
+	};
+	return { name: read("name"), description: read("description"), body };
+}
+
 /** 工具搜索扩展：模型先搜再加载被延迟的工具（v0.13.0）。 */
 const toolSearchExtension = createToolSearchExtension();
 /** MCP 工具总数达到该阈值时改为延迟披露，避免工具列表撑爆上下文。 */
@@ -280,6 +325,8 @@ async function buildMcpExtension(sql: { exec(q: string, ...b: unknown[]): { toAr
 
 export class SpikeAgent extends DurableObject {
 	/** pi-durable 的存储句柄，用来枚举会话（Harness 本身不提供列表 API）。 */
+	/** 正在跑对话的会话 id，用于避免定时任务与用户对话并发。 */
+	private activeChats = new Set<string>();
 	/** MCP 扩展：构建一次后常驻，避免每轮重连造成工具列表抖动。 */
 	private mcpExt: { name: string; tools?: unknown[] } | null = null;
 	/** 注册表引用：MCP 扩展在运行时安装（install 按名替换）。 */
@@ -313,6 +360,23 @@ export class SpikeAgent extends DurableObject {
 	}
 
 	async chat(
+		message: string,
+		sessionId?: string,
+		images?: string[],
+	): Promise<{ answer: string; tools: { name: string; summary: string }[] }> {
+		const key = sessionId || "1";
+		this.activeChats.add(key);
+		try {
+			return await this.runChat(message, sessionId, images);
+		} catch (err) {
+			if (/SessionFailed|storage error/i.test(String(err))) await this.recoverSession();
+			throw err;
+		} finally {
+			this.activeChats.delete(key);
+		}
+	}
+
+	private async runChat(
 		message: string,
 		sessionId?: string,
 		images?: string[],
@@ -460,6 +524,16 @@ export class SpikeAgent extends DurableObject {
 		return { sessions: rows };
 	}
 
+	/** 会话存储出错后重建 Harness（pi-durable 要求 close + reopen）。 */
+	async recoverSession(): Promise<void> {
+		try {
+			if (this.harness) await this.harness.close(ctx).catch(() => {});
+		} catch {
+			// 关闭失败也继续重建
+		}
+		this.harness = null;
+	}
+
 	/** 下一次闹钟时间：所有启用的定时任务里最早的一个。 */
 	private async scheduleNextAlarm(): Promise<void> {
 		try {
@@ -503,9 +577,15 @@ export class SpikeAgent extends DurableObject {
 			).toArray() as { id: string; prompt: string; session_id: string; schedule: string }[];
 			for (const job of due) {
 				try {
+					// 会话正忙时跳过这一轮，避免并发 submit 破坏会话状态（v0.17.1）
+					if (this.activeChats.has(job.session_id || "1")) {
+						sqlFacade!.exec("UPDATE automations SET next_run_at = ? WHERE id = ?", now + 5 * 60_000, job.id);
+						continue;
+					}
 					await this.chat(job.prompt, job.session_id || undefined);
 				} catch (err) {
-					console.warn(`automation ${job.id} failed`, err);
+					console.warn(`automation ${job.id} failed`, String(err).slice(0, 200));
+					await this.recoverSession();
 				}
 				let schedule: { kind: string; time?: string; minutes?: number } = { kind: "daily", time: "09:00" };
 				try {
@@ -862,6 +942,19 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 
 	/** 流式聊天：SSE 推送 text delta / 工具开始结束 / 最终 done。 */
 	async chatStream(message: string, sessionId?: string, images?: string[]): Promise<Response> {
+		const key = sessionId || "1";
+		this.activeChats.add(key);
+		try {
+			return await this.runChatStream(message, sessionId, images);
+		} catch (err) {
+			if (/SessionFailed|storage error/i.test(String(err))) await this.recoverSession();
+			throw err;
+		} finally {
+			this.activeChats.delete(key);
+		}
+	}
+
+	private async runChatStream(message: string, sessionId?: string, images?: string[]): Promise<Response> {
 		const harness = await this.open();
 		const root = await this.conversationFor(harness, sessionId);
 		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
@@ -1070,6 +1163,36 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/skills/community" && request.method === "GET") {
+				return Response.json({
+					source: "https://github.com/badlogic/pi-skills",
+					skills: COMMUNITY_SKILLS.map((item) => ({ ...item, url: `${COMMUNITY_RAW_BASE}/${item.name}/SKILL.md` })),
+				});
+			}
+			if (url.pathname === "/skills/import" && request.method === "POST") {
+				const body = (await request.json()) as { url?: string };
+				const target = normalizeSkillUrl(body.url ?? "");
+				if (!target) return Response.json({ error: "需要 http(s) 链接" }, { status: 400 });
+				let text = "";
+				try {
+					const resp = await fetch(target, { headers: { "user-agent": "pi-harness-skill-import" } });
+					if (!resp.ok) return Response.json({ error: `抓取失败：HTTP ${resp.status}` }, { status: 400 });
+					text = await resp.text();
+				} catch (err) {
+					return Response.json({ error: `抓取失败：${String(err).slice(0, 120)}` }, { status: 400 });
+				}
+				if (!text.trim()) return Response.json({ error: "内容为空" }, { status: 400 });
+				const parsed = parseFrontmatter(text);
+				const fallbackName = (target.split("/").slice(-2, -1)[0] ?? "imported-skill").toLowerCase();
+				const name = (parsed.name || fallbackName).slice(0, 40);
+				const description = parsed.description || "（从社区导入，未提供描述）";
+				ensureTables(sqlFacade!);
+				sqlFacade!.exec(
+					"INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
+					name, description.slice(0, 200), (parsed.body || text).slice(0, 200_000), new Date().toISOString(),
+				);
+				return Response.json({ ok: true, name, description, source: target });
 			}
 			if (url.pathname === "/skills" && request.method === "GET") {
 				ensureTables(sqlFacade!);

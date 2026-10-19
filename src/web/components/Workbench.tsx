@@ -21,6 +21,7 @@ interface WorkbenchProps {
 	skillsError: string | null;
 	onAddSkill: (name: string, description: string, content: string) => Promise<boolean>;
 	onDeleteSkill: (name: string) => Promise<boolean>;
+	onImportSkill: (url: string) => Promise<boolean>;
 	/** 最大化阅读（v0.16.0）。 */
 	wide: boolean;
 	onToggleWide: () => void;
@@ -537,18 +538,38 @@ function SkillList({
 	error,
 	onAdd,
 	onDelete,
+	onImport,
 }: {
 	items: SkillInfo[];
 	loading: boolean;
 	error: string | null;
 	onAdd: (name: string, description: string, content: string) => Promise<boolean>;
 	onDelete: (name: string) => Promise<boolean>;
+	onImport: (url: string) => Promise<boolean>;
 }) {
 	const [name, setName] = useState("");
+	const [importUrl, setImportUrl] = useState("");
+	const [community, setCommunity] = useState<{ name: string; description: string; needsLocal?: boolean; url: string }[]>([]);
+	const [busyImport, setBusyImport] = useState<string | null>(null);
 	const [description, setDescription] = useState("");
 	const [content, setContent] = useState("");
 	const [openName, setOpenName] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.communitySkills();
+				if (alive) setCommunity(Array.isArray(data.skills) ? data.skills : []);
+			} catch {
+				// 社区目录不可用时静默降级
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, []);
 
 	const submit = () => {
 		if (!name.trim() || !content.trim() || busy) return;
@@ -597,6 +618,130 @@ function SkillList({
 				>
 					{busy ? "保存中…" : "添加 / 更新技能"}
 				</button>
+			</div>
+			<div className="shrink-0 space-y-1.5 border-b border-slate-800/70 p-3">
+				<div className="flex gap-1.5">
+					<input
+						value={importUrl}
+						onChange={(e) => setImportUrl(e.target.value)}
+						placeholder="从 URL 导入 SKILL.md / GitHub 目录"
+						aria-label="技能来源链接"
+						className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+					/>
+					<button
+						type="button"
+						onClick={() => {
+							if (!importUrl.trim()) return;
+							setBusyImport(importUrl);
+							void (async () => {
+								const ok = await onImport(importUrl.trim());
+								if (ok) setImportUrl("");
+								setBusyImport(null);
+							})();
+						}}
+						disabled={!importUrl.trim() || busyImport !== null}
+						className="shrink-0 rounded-md border border-slate-600 px-2 py-1.5 text-xs text-slate-200 disabled:opacity-40"
+					>
+						{busyImport ? "导入中…" : "导入"}
+					</button>
+				</div>
+				{community.length > 0 && (
+					<details className="rounded-md border border-slate-700/70 bg-slate-800/30 px-2 py-1.5">
+						<summary className="cursor-pointer text-xs text-slate-300">从社区安装（badlogic/pi-skills）</summary>
+						<ul className="mt-1.5 space-y-1">
+							{community.map((item) => {
+								const installed = items.some((skill) => skill.name === item.name);
+								return (
+									<li key={item.name} className="flex items-start gap-2">
+										<span className="min-w-0 flex-1">
+											<span className="block truncate text-[12px] text-slate-200">
+												{item.name}
+												{item.needsLocal && <span className="ml-1 text-[10px] text-amber-300">需本地命令行</span>}
+											</span>
+											<span className="block truncate text-[11px] text-slate-500">{item.description}</span>
+										</span>
+										<button
+											type="button"
+											onClick={() => {
+												setBusyImport(item.name);
+												void (async () => {
+													await onImport(item.url);
+													setBusyImport(null);
+												})();
+											}}
+											disabled={busyImport !== null}
+											className="shrink-0 rounded border border-slate-600 px-1.5 py-0.5 text-[11px] text-slate-200 disabled:opacity-40"
+										>
+											{installed ? "重新安装" : busyImport === item.name ? "安装中…" : "安装"}
+										</button>
+									</li>
+								);
+							})}
+						</ul>
+					</details>
+				)}
+			</div>
+			<div className="shrink-0 space-y-1.5 border-b border-slate-800/70 p-3">
+				<div className="flex gap-1.5">
+					<input
+						value={importUrl}
+						onChange={(e) => setImportUrl(e.target.value)}
+						placeholder="从 URL 导入 SKILL.md / GitHub 目录"
+						aria-label="技能来源链接"
+						className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+					/>
+					<button
+						type="button"
+						onClick={() => {
+							if (!importUrl.trim()) return;
+							setBusyImport(importUrl);
+							void (async () => {
+								const ok = await onImport(importUrl.trim());
+								if (ok) setImportUrl("");
+								setBusyImport(null);
+							})();
+						}}
+						disabled={!importUrl.trim() || busyImport !== null}
+						className="shrink-0 rounded-md border border-slate-600 px-2 py-1.5 text-xs text-slate-200 disabled:opacity-40"
+					>
+						{busyImport ? "导入中…" : "导入"}
+					</button>
+				</div>
+				{community.length > 0 && (
+					<details className="rounded-md border border-slate-700/70 bg-slate-800/30 px-2 py-1.5">
+						<summary className="cursor-pointer text-xs text-slate-300">从社区安装（badlogic/pi-skills）</summary>
+						<ul className="mt-1.5 space-y-1">
+							{community.map((item) => {
+								const installed = items.some((skill) => skill.name === item.name);
+								return (
+									<li key={item.name} className="flex items-start gap-2">
+										<span className="min-w-0 flex-1">
+											<span className="block truncate text-[12px] text-slate-200">
+												{item.name}
+												{item.needsLocal && <span className="ml-1 text-[10px] text-amber-300">需本地命令行</span>}
+											</span>
+											<span className="block truncate text-[11px] text-slate-500">{item.description}</span>
+										</span>
+										<button
+											type="button"
+											onClick={() => {
+												setBusyImport(item.name);
+												void (async () => {
+													await onImport(item.url);
+													setBusyImport(null);
+												})();
+											}}
+											disabled={busyImport !== null}
+											className="shrink-0 rounded border border-slate-600 px-1.5 py-0.5 text-[11px] text-slate-200 disabled:opacity-40"
+										>
+											{installed ? "重新安装" : busyImport === item.name ? "安装中…" : "安装"}
+										</button>
+									</li>
+								);
+							})}
+						</ul>
+					</details>
+				)}
 			</div>
 			<div className="min-h-0 flex-1 overflow-y-auto p-2">
 				{loading && items.length === 0 && <p className="px-1 py-2 text-xs text-slate-500">正在加载…</p>}
@@ -663,6 +808,7 @@ export function Workbench({
 	skillsError,
 	onAddSkill,
 	onDeleteSkill,
+	onImportSkill,
 	wide,
 	onToggleWide,
 	onFileOpenChange,
@@ -774,6 +920,7 @@ export function Workbench({
 							error={skillsError}
 							onAdd={onAddSkill}
 							onDelete={onDeleteSkill}
+							onImport={onImportSkill}
 						/>
 					)}
 				</>

@@ -146,6 +146,14 @@ export const api = {
 
 	skills: () => requestJson<{ skills?: unknown[] }>("/api/skills"),
 
+	communitySkills: () =>
+		requestJson<{ source?: string; skills?: { name: string; description: string; needsLocal?: boolean; url: string }[] }>(
+			"/api/skills/community",
+		),
+
+	importSkill: (url: string) =>
+		requestJson<{ ok?: boolean; name?: string; error?: string }>("/api/skills/import", jsonPost({ url })),
+
 	addSkill: (name: string, description: string, content: string) =>
 		requestJson<{ ok?: boolean }>("/api/skills", jsonPost({ name, description, content })),
 

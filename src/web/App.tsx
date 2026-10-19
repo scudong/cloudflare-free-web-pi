@@ -400,6 +400,26 @@ export default function App() {
 		}
 	}, []);
 
+	const handleImportSkill = useCallback(async (url: string) => {
+		try {
+			const result = await api.importSkill(url);
+			if (result.ok) {
+				setMessages((prev) => [
+					...prev,
+					{ id: nextId(), role: "notice", text: `已安装技能：${result.name ?? "（未命名）"}` },
+				]);
+				setPanelTick((tick) => tick + 1);
+				return true;
+			}
+			setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `安装失败：${result.error ?? "未知错误"}` }]);
+			return false;
+		} catch (err) {
+			const detail = err instanceof Error ? err.message : String(err);
+			setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `安装失败：${detail}` }]);
+			return false;
+		}
+	}, [nextId]);
+
 	const handleDeleteSkill = useCallback(async (name: string) => {
 		try {
 			await api.deleteSkill(name);
@@ -886,6 +906,7 @@ export default function App() {
 							skillsError={skillsError}
 							onAddSkill={handleAddSkill}
 							onDeleteSkill={handleDeleteSkill}
+							onImportSkill={handleImportSkill}
 							automations={automations}
 							automationsLoading={automationsLoading}
 							automationsError={automationsError}

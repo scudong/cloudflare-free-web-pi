@@ -2,6 +2,19 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（社区技能）
+
+### 安装 pi 社区技能（v0.17.0）
+- 技能遵循 Agent Skills 规范（`SKILL.md` + YAML frontmatter）
+- `GET /api/skills/community`：内置 `badlogic/pi-skills` 目录（brave-search / youtube-transcript / browser-tools / transcribe / gdcli / gccli / gmcli / vscode），标注「需本地命令行」
+- `POST /api/skills/import {url}`：支持 GitHub 目录/文件链接、raw 链接、任意 `.md`；自动规范化到 SKILL.md 并解析 frontmatter
+- 技能页新增「从社区安装」列表（一键安装/重装）与 URL 导入框
+
+### 修复：定时任务与对话并发破坏会话
+- 症状：`SessionFailed: Session failed after a storage error; close and reopen it`，且之后该会话所有请求都失败
+- 原因：定时任务在会话正忙时仍然 `submit`，并发写入破坏 `pi.live` 文档
+- 修复：`activeChats` 记录进行中的会话，忙时把定时任务顺延 5 分钟；`chat`/`chatStream` 出错若为存储类错误则 `close + reopen` Harness 自愈
+
 ## 2026-10-19（右栏可伸缩）
 
 ### 右栏不再固定 320px（v0.16.0）
