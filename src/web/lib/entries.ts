@@ -169,6 +169,10 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 				thinking: thinking || undefined,
 				files: files.length ? files : undefined,
 			});
+		} else if (kind === "compaction") {
+			// pi.compaction：早期对话被摘要成一条记录（v0.31.0），聊天里显示为一条系统提示
+			flushStandaloneTools();
+			messages.push({ id: `c${seq++}`, role: "notice", text: "上下文已压缩：更早的对话被摘要为一条记录，最近的内容保持原文。" });
 		} else if (kind === "tool-result" || kind === "tool_result" || kind === "toolResult") {
 			// 后端把工具结果放在 model[0]：{ toolName, content: [{type:"text",text}] }
 			const firstModel = Array.isArray(entry.model) ? (entry.model[0] as Record<string, unknown> | undefined) : undefined;

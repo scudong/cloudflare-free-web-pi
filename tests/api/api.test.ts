@@ -285,6 +285,10 @@ describe("工具注册（防回归）", () => {
 		for (const name of ["dispatch_tasks", "update_plan", "web_search", "web_fetch_page", "write_file", "codemode", "remember", "recall"]) {
 			expect(tools).toContain(name);
 		}
+		// 目标模式（v0.31.0）
+		for (const name of ["set_goal", "complete_goal", "report_goal"]) {
+			expect(tools).toContain(name);
+		}
 	});
 
 	it("子代理工具暴露可用工具清单", async () => {
@@ -300,6 +304,49 @@ describe("计划", () => {
 	it("空计划返回空数组", async () => {
 		const { json } = await api("/api/plan?sessionId=1");
 		expect(Array.isArray(json.steps)).toBe(true);
+	});
+});
+
+describe("目标模式", () => {
+	it("初始为空", async () => {
+		const { json } = await api("/api/goal?sessionId=1");
+		expect(json.goal).toBeNull();
+	});
+
+	it("空目标被拒绝", async () => {
+		const { status, json } = await post("/api/goal", { sessionId: "1", objective: "  " });
+		expect(status).toBe(400);
+		expect(json.ok).toBe(false);
+	});
+
+	it("建立 → 读取 → 停止", async () => {
+		const created = await post("/api/goal", {
+			sessionId: "1",
+			objective: "写完对比报告",
+			tokenBudget: 50000,
+			maxTurns: 5,
+		});
+		expect(created.json.ok).toBe(true);
+		expect(created.json.goal.status).toBe("active");
+		expect(created.json.goal.objective).toBe("写完对比报告");
+		expect(created.json.goal.tokenBudget).toBe(50000);
+		expect(created.json.goal.maxTurns).toBe(5);
+
+		const read = await api("/api/goal?sessionId=1");
+		expect(read.json.goal.status).toBe("active");
+
+		const stopped = await api("/api/goal?sessionId=1", { method: "DELETE" });
+		expect(stopped.json.ok).toBe(true);
+		expect(stopped.json.goal.status).toBe("paused");
+	});
+
+	it("重复建立会覆盖旧目标", async () => {
+		await post("/api/goal", { sessionId: "1", objective: "第一版", tokenBudget: 20000 });
+		const second = await post("/api/goal", { sessionId: "1", objective: "第二版", tokenBudget: 30000 });
+		expect(second.json.goal.objective).toBe("第二版");
+		expect(second.json.goal.status).toBe("active");
+		expect(second.json.goal.tokensUsed).toBe(0);
+		await api("/api/goal?sessionId=1", { method: "DELETE" });
 	});
 });
 

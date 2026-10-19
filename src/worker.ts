@@ -11,6 +11,7 @@ import {
 	defineExtension,
 	defineTool,
 	Harness,
+	UsageDoc,
 } from "@earendil-works/pi-durable";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
@@ -64,6 +65,8 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	// 提示模板与规则文件（v0.31.0）：纯数据能力，运行时加载
 	sql.exec(`CREATE TABLE IF NOT EXISTS prompts (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS rules (name TEXT PRIMARY KEY, content TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`);
+	// 目标模式（v0.31.0）：一个会话一个目标，active 时按 token 预算与轮次自动续转
+	sql.exec(`CREATE TABLE IF NOT EXISTS goals (session_id TEXT PRIMARY KEY, objective TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', token_budget INTEGER NOT NULL DEFAULT 200000, baseline_tokens INTEGER NOT NULL DEFAULT 0, tokens_used INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0, max_turns INTEGER NOT NULL DEFAULT 12, summary TEXT NOT NULL DEFAULT '', next_run_at INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 	// LLM 供应商（v0.27.0）：CCswitch 式自定义 OpenAI 兼容端点
 	sql.exec(`CREATE TABLE IF NOT EXISTS providers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL, models TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
@@ -119,6 +122,97 @@ const readPlan = (conversationId: string): PlanStep[] => {
 		return [];
 	}
 };
+
+/* ---------------- 目标模式（v0.31.0） ---------------- */
+
+type GoalStatus = "active" | "done" | "blocked" | "paused" | "exhausted";
+
+type GoalRow = {
+	session_id: string;
+	objective: string;
+	status: GoalStatus;
+	token_budget: number;
+	baseline_tokens: number;
+	tokens_used: number;
+	turns: number;
+	max_turns: number;
+	summary: string;
+	next_run_at: number;
+	created_at: string;
+	updated_at: string;
+};
+
+const GOAL_TOKEN_BUDGET_DEFAULT = 200_000;
+const GOAL_MAX_TURNS_DEFAULT = 12;
+/** 单次请求内最多自动续转几轮；剩下的交给 alarm 跨请求接续。 */
+const GOAL_ROUNDS_PER_REQUEST = 3;
+
+function readGoalRow(sessionId: string): GoalRow | null {
+	try {
+		const rows = sqlFacade!.exec("SELECT * FROM goals WHERE session_id = ?", sessionId).toArray() as GoalRow[];
+		return rows[0] ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/** 对外（前端 / SSE）的目标视图。 */
+function goalInfo(row: GoalRow | null) {
+	if (!row) return null;
+	return {
+		objective: row.objective,
+		status: row.status,
+		tokenBudget: row.token_budget,
+		tokensUsed: row.tokens_used,
+		turns: row.turns,
+		maxTurns: row.max_turns,
+		summary: row.summary || undefined,
+		updatedAt: row.updated_at,
+	};
+}
+
+function writeGoal(
+	sessionId: string,
+	patch: Partial<Pick<GoalRow, "status" | "tokens_used" | "turns" | "summary" | "next_run_at" | "baseline_tokens">>,
+): void {
+	const sets: string[] = [];
+	const args: unknown[] = [];
+	for (const [key, value] of Object.entries(patch)) {
+		if (value === undefined) continue;
+		sets.push(`${key} = ?`);
+		args.push(value);
+	}
+	if (!sets.length) return;
+	sets.push("updated_at = ?");
+	args.push(new Date().toISOString(), sessionId);
+	sqlFacade!.exec(`UPDATE goals SET ${sets.join(", ")} WHERE session_id = ?`, ...args);
+}
+
+/** 建立（或替换）一个会话的目标。baseline 是本轮之前的累计 token，用于计算目标消耗。 */
+function startGoal(sessionId: string, objective: string, tokenBudget: number, maxTurns: number, baseline: number): void {
+	const now = new Date().toISOString();
+	sqlFacade!.exec(
+		`INSERT INTO goals (session_id, objective, status, token_budget, baseline_tokens, tokens_used, turns, max_turns, summary, next_run_at, created_at, updated_at)
+		 VALUES (?, ?, 'active', ?, ?, 0, 0, ?, '', 0, ?, ?)
+		 ON CONFLICT(session_id) DO UPDATE SET objective = excluded.objective, status = 'active', token_budget = excluded.token_budget, baseline_tokens = excluded.baseline_tokens, tokens_used = 0, turns = 0, max_turns = excluded.max_turns, summary = '', next_run_at = 0, updated_at = excluded.updated_at`,
+		sessionId, objective, tokenBudget, baseline, maxTurns, now, now,
+	);
+}
+
+/** 自动续转的提示词：强调「直接做」，避免模型空转。 */
+function goalContinuePrompt(row: GoalRow): string {
+	return [
+		`继续推进目标：${row.objective}`,
+		"",
+		`进度：已完成 ${row.turns} 轮，已用 ${row.tokens_used} / ${row.token_budget} tokens。`,
+		"要求：",
+		"- 先看计划和已有产出，不要重复已经做过的工作，直接做下一步。",
+		"- 不要只回复「继续」之类的话，这一轮必须有实际进展。",
+		"- 全部达成后调用 complete_goal，并给出可核对的验证证据。",
+		"- 确实无法推进时调用 report_goal 说明阻塞原因。",
+	].join("\n");
+}
+
 
 /* ---------------- 提示模板与规则（v0.31.0） ---------------- */
 
@@ -356,6 +450,86 @@ const spikeExtension = defineExtension({
 						text: `计划已更新：${steps.length} 步，完成 ${done} 步${current ? `，当前：${current.title}` : ""}。`,
 					}],
 				};
+			},
+		}),
+		defineTool({
+			name: "set_goal",
+			description:
+				"为用户的长程目标开启目标模式：绑定目标 + token 预算 + 最大轮次。开启后你会在每轮结束后被自动要求继续推进，直到调用 complete_goal、预算用尽或报告受阻。只在用户给出一个需要多轮才能完成的大目标时使用；普通问题不要用。",
+			parameters: Type.Object({
+				objective: Type.String({ description: "要达成的目标，一句话，可验收" }),
+				tokenBudget: Type.Optional(Type.Number({ description: "token 预算，默认 200000" })),
+				maxTurns: Type.Optional(Type.Number({ description: "最多自动续转轮次，默认 12" })),
+			}),
+			execute: async (args, api) => {
+				const a = args as { objective?: unknown; tokenBudget?: unknown; maxTurns?: unknown };
+				const objective = String(a.objective ?? "").trim().slice(0, 300);
+				if (!objective) return { output: [{ type: "text", text: "目标不能为空。" }] };
+				const sid = String(api.conversationId);
+				const existing = readGoalRow(sid);
+				if (existing?.status === "active") {
+					return { output: [{ type: "text", text: `当前会话已有进行中的目标「${existing.objective}」，先完成或停止它。` }] };
+				}
+				const budget = Math.max(10_000, Math.floor(Number(a.tokenBudget ?? GOAL_TOKEN_BUDGET_DEFAULT) || GOAL_TOKEN_BUDGET_DEFAULT));
+				const turns = Math.min(50, Math.max(1, Math.floor(Number(a.maxTurns ?? GOAL_MAX_TURNS_DEFAULT) || GOAL_MAX_TURNS_DEFAULT)));
+				// baseline = -1：目标由模型在对话中途建立，真实基线在下一轮同步时以当时累计值为准
+				startGoal(sid, objective, budget, turns, -1);
+				return {
+					output: [{
+						type: "text",
+						text: `目标已开启：${objective}（预算 ${budget} tokens，最多 ${turns} 轮）。完成后必须调用 complete_goal 并给出验证证据。`,
+					}],
+				};
+			},
+		}),
+		defineTool({
+			name: "complete_goal",
+			description:
+				"声明当前目标已完成并关闭目标模式。必须给出可核对的完成证据；如果计划里还有未完成步骤会被拒绝。",
+			parameters: Type.Object({
+				summary: Type.String({ description: "完成情况，一段话" }),
+				evidence: Type.String({ description: "完成证据：做了什么、怎么验证的（文件、数值、测试输出、链接）" }),
+			}),
+			execute: async (args, api) => {
+				const a = args as { summary?: unknown; evidence?: unknown };
+				const sid = String(api.conversationId);
+				const row = readGoalRow(sid);
+				if (!row || row.status !== "active") {
+					return { output: [{ type: "text", text: "当前会话没有进行中的目标。" }] };
+				}
+				const evidence = String(a.evidence ?? "").trim();
+				if (evidence.length < 10) {
+					return { output: [{ type: "text", text: "证据太短（至少 10 字）。请说明你实际做了什么、用什么方式验证的，再调用本工具。" }] };
+				}
+				// 完成硬校验：计划里不能还有没做完的步骤
+				const steps = readPlan(sid);
+				const open = steps.filter((s) => s.status !== "completed");
+				if (steps.length && open.length) {
+					return {
+						output: [{
+							type: "text",
+							text: `计划还有 ${open.length} 步未完成（${open.slice(0, 5).map((s) => s.title).join("；")}）。先完成它们并把计划更新为全部 completed，再调用 complete_goal。`,
+						}],
+					};
+				}
+				const summary = String(a.summary ?? "").trim().slice(0, 800);
+				writeGoal(sid, { status: "done", summary: `${summary}\n\n证据：${evidence.slice(0, 400)}`, next_run_at: 0 });
+				return { output: [{ type: "text", text: `目标已完成并关闭。\n${summary}` }] };
+			},
+		}),
+		defineTool({
+			name: "report_goal",
+			description: "报告目标推进受阻（缺少权限、信息不足、外部依赖不可用等），并结束自动续转。",
+			parameters: Type.Object({
+				reason: Type.String({ description: "受阻原因，具体说明缺什么" }),
+			}),
+			execute: async (args, api) => {
+				const sid = String(api.conversationId);
+				const row = readGoalRow(sid);
+				if (!row || row.status !== "active") return { output: [{ type: "text", text: "当前会话没有进行中的目标。" }] };
+				const reason = String((args as { reason?: unknown }).reason ?? "").trim().slice(0, 500) || "未说明";
+				writeGoal(sid, { status: "blocked", summary: reason, next_run_at: 0 });
+				return { output: [{ type: "text", text: `目标已标记为受阻并停止续转：${reason}` }] };
 			},
 		}),
 		defineTool({
@@ -812,7 +986,7 @@ export class SpikeAgent extends DurableObject {
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
 					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
 					: [spikeExtension, codemodeExtension, toolSearchExtension],
-				instructions: this.buildInstructions(inv),
+				instructions: this.buildInstructions(inv, sessionId),
 			},
 			ctx,
 		);
@@ -971,13 +1145,18 @@ export class SpikeAgent extends DurableObject {
 		}
 	}
 
-	/** 组装本轮 instructions：基础规则 + 技能索引 + 可选显式技能正文。 */
-	private buildInstructions(inv: { name: string; content: string } | null): string {
+	/** 组装本轮 instructions：基础规则 + 技能索引 + 可选显式技能正文 + 进行中的目标。 */
+	private buildInstructions(inv: { name: string; content: string } | null, sessionId?: string): string {
 		const base =
 			"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。";
 		const withSkills = this.instructionsWithSkills(base);
-		if (!inv) return withSkills;
-		return `${withSkills}\n\n## 用户显式调用的技能：${inv.name}\n下面是该技能的完整说明，请严格按照它执行，不要声称找不到该技能：\n\n${inv.content}`;
+		const goal = sessionId ? readGoalRow(sessionId) : null;
+		const goalBlock =
+			goal && goal.status === "active"
+				? `\n\n## 目标模式（进行中）\n目标：${goal.objective}\n进度：第 ${goal.turns + 1} 轮，已用 ${goal.tokens_used} / ${goal.token_budget} tokens。\n- 这一轮必须有实际进展，不要只回复「继续」。\n- 全部达成后调用 complete_goal，并附可核对的证据。\n- 确实无法推进时调用 report_goal 说明阻塞原因。`
+				: "";
+		if (!inv) return withSkills + goalBlock;
+		return `${withSkills}${goalBlock}\n\n## 用户显式调用的技能：${inv.name}\n下面是该技能的完整说明，请严格按照它执行，不要声称找不到该技能：\n\n${inv.content}`;
 	}
 
 	/** 会话存储出错后重建 Harness（pi-durable 要求 close + reopen）。 */
@@ -990,10 +1169,18 @@ export class SpikeAgent extends DurableObject {
 		this.harness = null;
 	}
 
-	/** 下一次闹钟时间：所有启用的定时任务里最早的一个。 */
+	/** 下一次闹钟时间：定时任务与待续转目标里最早的一个。 */
 	private async scheduleNextAlarm(): Promise<void> {
 		try {
-			const rows = sqlFacade!.exec("SELECT MIN(next_run_at) AS next FROM automations WHERE enabled = 1").toArray() as { next: number | null }[];
+			const rows = sqlFacade!
+				.exec(
+					`SELECT MIN(t) AS next FROM (
+						SELECT MIN(next_run_at) AS t FROM automations WHERE enabled = 1 AND next_run_at > 0
+						UNION ALL
+						SELECT MIN(next_run_at) FROM goals WHERE status = 'active' AND next_run_at > 0
+					)`,
+				)
+				.toArray() as { next: number | null }[];
 			const next = rows[0]?.next;
 			if (typeof next === "number" && Number.isFinite(next)) {
 				const at = Math.max(Date.now() + 5_000, next);
@@ -1055,6 +1242,27 @@ export class SpikeAgent extends DurableObject {
 				);
 			}
 			if (due.length) sqlFacade!.exec("UPDATE automations SET next_run_at = ? WHERE enabled = 1 AND next_run_at <= ?", now + 60_000, now);
+
+			// 目标自动续转（v0.31.0）：到点的目标推进一轮
+			const dueGoals = sqlFacade!
+				.exec("SELECT session_id FROM goals WHERE status = 'active' AND next_run_at > 0 AND next_run_at <= ?", now)
+				.toArray() as { session_id: string }[];
+			for (const goal of dueGoals) {
+				if (this.activeChats.has(goal.session_id)) {
+					writeGoal(goal.session_id, { next_run_at: now + 60_000 });
+					continue;
+				}
+				try {
+					this.activeChats.add(goal.session_id);
+					await this.goalTick(goal.session_id);
+				} catch (err) {
+					console.warn(`goal ${goal.session_id} tick failed`, String(err).slice(0, 200));
+					await this.recoverSession();
+					writeGoal(goal.session_id, { next_run_at: now + 60_000 });
+				} finally {
+					this.activeChats.delete(goal.session_id);
+				}
+			}
 		} catch (err) {
 			console.warn("alarm failed", err);
 		}
@@ -1127,6 +1335,7 @@ export class SpikeAgent extends DurableObject {
 				providers: q("SELECT id, name, base_url, api_key, models FROM providers"),
 				prompts: q("SELECT name, description, content FROM prompts"),
 				rules: q("SELECT name, content, enabled FROM rules"),
+				goals: q("SELECT session_id, objective, status, token_budget, baseline_tokens, tokens_used, turns, max_turns, summary, next_run_at, created_at, updated_at FROM goals"),
 			},
 		};
 	}
@@ -1219,6 +1428,20 @@ export class SpikeAgent extends DurableObject {
 			);
 			counts.rules = (counts.rules ?? 0) + 1;
 		}
+		for (const g of rows("goals")) {
+			const sid = str(g.session_id).trim();
+			const objective = str(g.objective).trim();
+			if (!sid || !objective) continue;
+			sqlFacade!.exec(
+				`INSERT INTO goals (session_id, objective, status, token_budget, baseline_tokens, tokens_used, turns, max_turns, summary, next_run_at, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 ON CONFLICT(session_id) DO UPDATE SET objective = excluded.objective, status = excluded.status, token_budget = excluded.token_budget, baseline_tokens = excluded.baseline_tokens, tokens_used = excluded.tokens_used, turns = excluded.turns, max_turns = excluded.max_turns, summary = excluded.summary, next_run_at = excluded.next_run_at`,
+				sid, objective, str(g.status) || "paused", num(g.token_budget) || GOAL_TOKEN_BUDGET_DEFAULT,
+				num(g.baseline_tokens), num(g.tokens_used), num(g.turns), num(g.max_turns) || GOAL_MAX_TURNS_DEFAULT,
+				str(g.summary), num(g.next_run_at), str(g.created_at) || new Date().toISOString(), new Date().toISOString(),
+			);
+			counts.goals = (counts.goals ?? 0) + 1;
+		}
 		for (const p of rows("providers")) {
 			const pid = str(p.id).trim();
 			if (!pid) continue;
@@ -1246,6 +1469,8 @@ export class SpikeAgent extends DurableObject {
 			);
 			counts.sessions = (counts.sessions ?? 0) + 1;
 		}
+		// 恢复后可能带回进行中的目标：重排闹钟
+		await this.scheduleNextAlarm();
 		return counts;
 	}
 
@@ -1469,6 +1694,70 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 		}
 	}
 
+	/** 会话累计 token（pi.usage 的 models + tools 两个桶）。 */
+	private async goalTokens(harness: Awaited<ReturnType<typeof this.open>>, conversationId: unknown): Promise<number> {
+		try {
+			const usage = await (harness as unknown as {
+				snapshot(
+					token: unknown,
+					id: unknown,
+					c: unknown,
+				): Promise<{ models?: Record<string, { totalTokens?: number }>; tools?: Record<string, { totalTokens?: number }> } | undefined>;
+			}).snapshot(UsageDoc, conversationId, ctx);
+			let total = 0;
+			for (const bucket of [usage?.models, usage?.tools]) {
+				if (!bucket) continue;
+				for (const u of Object.values(bucket)) total += Number(u?.totalTokens ?? 0);
+			}
+			return total;
+		} catch {
+			return 0;
+		}
+	}
+
+	/**
+	 * 同步目标进度（每轮结束后调用）：把会话累计 token 折算成目标消耗，累加轮次，
+	 * 到预算/轮次上限就自动收尾（exhausted）。
+	 */
+	private async syncGoalProgress(
+		harness: Awaited<ReturnType<typeof this.open>>,
+		conversationId: unknown,
+		sessionId: string,
+		incrementTurn: boolean,
+	): Promise<GoalRow | null> {
+		const row = readGoalRow(sessionId);
+		if (!row) return null;
+		const total = await this.goalTokens(harness, conversationId);
+		// baseline = -1 表示目标由模型在对话中途建立：第一次同步以当前累计值为起点，不计之前的花费。
+		const baseline = row.baseline_tokens < 0 ? total : row.baseline_tokens;
+		const used = total > 0 ? Math.max(0, total - baseline) : row.tokens_used;
+		const turns = row.turns + (incrementTurn ? 1 : 0);
+		if (row.status !== "active") {
+			// 已经结束的目标只补记本轮消耗，不再改变状态
+			writeGoal(sessionId, { baseline_tokens: baseline, tokens_used: used, turns });
+			return { ...row, baseline_tokens: baseline, tokens_used: used, turns };
+		}
+		let status: GoalStatus = "active";
+		if (used >= row.token_budget || turns >= row.max_turns) status = "exhausted";
+		const nextRunAt = status === "active" ? row.next_run_at : 0;
+		writeGoal(sessionId, { baseline_tokens: baseline, tokens_used: used, turns, status, next_run_at: nextRunAt });
+		return { ...row, baseline_tokens: baseline, tokens_used: used, turns, status, next_run_at: nextRunAt };
+	}
+
+	/** alarm 用：为目标推进一轮（跨请求续转）。 */
+	private async goalTick(sessionId: string): Promise<void> {
+		const row = readGoalRow(sessionId);
+		if (!row || row.status !== "active") return;
+		writeGoal(sessionId, { next_run_at: 0 });
+		const harness = await this.open();
+		const conversation = await this.conversationFor(harness, sessionId);
+		await this.chat(goalContinuePrompt(row), sessionId);
+		const updated = await this.syncGoalProgress(harness, conversation.id, sessionId, true);
+		if (updated?.status === "active") {
+			writeGoal(sessionId, { next_run_at: Date.now() + 15_000 });
+		}
+	}
+
 	/** 流式聊天：SSE 推送 text delta / 工具开始结束 / 最终 done。 */
 	async chatStream(message: string, sessionId?: string, images?: string[]): Promise<Response> {
 		const key = sessionId || "1";
@@ -1496,7 +1785,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
 					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
 					: [spikeExtension, codemodeExtension, toolSearchExtension],
-				instructions: this.buildInstructions(inv),
+				instructions: this.buildInstructions(inv, sessionId),
 			},
 			ctx,
 		);
@@ -1556,8 +1845,46 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				}
 			});
 			try {
-				const submission = await root.submit({ type: "input", content: userContent(message, images) as never }, ctx);
-				const settled = await submission.wait(ctx);
+				const sid = String(root.id);
+				let answer = "";
+				let prompt = message;
+				let promptImages: string[] | undefined = images;
+				let round = 0;
+				// 目标模式（v0.31.0）：一轮结束且目标仍在进行时自动续转，最多 3 轮/请求，其余交给 alarm。
+				for (;;) {
+					const submission = await root.submit({ type: "input", content: userContent(prompt, promptImages) as never }, ctx);
+					const settled = await submission.wait(ctx);
+					if (settled.status !== "done" || settled.type !== "input") {
+						await send("error", { message: `运行未完成：${JSON.stringify(settled).slice(0, 200)}` });
+						break;
+					}
+					const entry = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), ctx);
+					const c = entry?.model?.[0]?.content;
+					answer =
+						typeof c === "string"
+							? c
+							: Array.isArray(c)
+								? c.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).join("")
+								: "";
+					round++;
+					const goal = readGoalRow(sid);
+					if (!goal) break;
+					const updated = await this.syncGoalProgress(harness, root.id, sid, true);
+					if (!updated) break;
+					if (updated.status !== "active") {
+						await send("goal", { goal: goalInfo(updated), finished: true });
+						break;
+					}
+					if (round >= GOAL_ROUNDS_PER_REQUEST) {
+						writeGoal(sid, { next_run_at: Date.now() + 15_000 });
+						await this.scheduleNextAlarm();
+						await send("goal", { goal: goalInfo(readGoalRow(sid)), scheduled: true });
+						break;
+					}
+					await send("goal", { goal: goalInfo(updated), continuing: true, round });
+					prompt = goalContinuePrompt(updated);
+					promptImages = undefined;
+				}
 				const page2 = await root.entries({}, 60, undefined, ctx);
 				const lastId = Number((page2.items[0] as unknown as { id?: number } | undefined)?.id ?? 0);
 				const tools: { name: string; summary: string }[] = [];
@@ -1568,19 +1895,6 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 					const first = model?.[0];
 					const text = (first?.content ?? []).map((b) => b.text ?? "").join("");
 					if (first) tools.push({ name: first.toolName ?? "tool", summary: text.slice(0, 80) });
-				}
-				let answer = "";
-				if (settled.status === "done" && settled.type === "input") {
-					const entry = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), ctx);
-					const c = entry?.model?.[0]?.content;
-					answer =
-						typeof c === "string"
-							? c
-							: Array.isArray(c)
-								? c.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).join("")
-								: "";
-				} else {
-					await send("error", { message: `运行未完成：${JSON.stringify(settled).slice(0, 200)}` });
 				}
 				// 标题/时间维护
 				try {
@@ -1696,6 +2010,12 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				ensureTables(sqlFacade!);
 				sqlFacade!.exec("UPDATE sessions_meta SET deleted = 1, updated_at = ? WHERE id = ?", new Date().toISOString(), id);
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ?", id);
+				// 目标随会话一起停止，避免继续消耗 token（v0.31.0）
+				try {
+					writeGoal(id, { status: "paused", next_run_at: 0 });
+				} catch {
+					// 没有目标时忽略
+				}
 				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/files" && request.method === "GET") {
@@ -1912,6 +2232,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 					{ id: "compaction", name: "上下文压缩", description: "接近上下文上限时自动摘要旧内容", enabled: settings.enabled, detail: `保留 ${settings.keepRecentTokens} tokens / 预留 ${settings.reserveTokens}` },
 					{ id: "plan", name: "计划清单", description: "update_plan 维护分步计划", enabled: true },
 					{ id: "subagents", name: "子代理", description: "dispatch_tasks 并行分派子任务", enabled: true },
+					{ id: "goal", name: "目标模式", description: "目标 + token 预算 + 自动续转 + 完成校验", enabled: true },
 					{ id: "web_search", name: "联网搜索", description: "web_search / web_fetch_page", enabled: getSetting("web_search", "1") === "1" },
 				];
 				const data = [
@@ -1986,6 +2307,38 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				ensureTables(sqlFacade!);
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				return Response.json({ steps: readPlan(sid) });
+			}
+			/* ---- 目标模式（v0.31.0）：GET 读 / POST 建立 / DELETE 停止 ---- */
+			if (url.pathname === "/goal" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const sid = url.searchParams.get("sessionId") ?? "1";
+				return Response.json({ goal: goalInfo(readGoalRow(sid)) });
+			}
+			if (url.pathname === "/goal" && request.method === "POST") {
+				ensureTables(sqlFacade!);
+				const body = (await request.json().catch(() => ({}))) as {
+					sessionId?: string;
+					objective?: string;
+					tokenBudget?: number;
+					maxTurns?: number;
+				};
+				const objective = String(body.objective ?? "").trim().slice(0, 300);
+				if (!objective) return Response.json({ ok: false, error: "目标不能为空。" }, { status: 400 });
+				const sid = String(body.sessionId ?? "1");
+				const budget = Math.max(10_000, Math.floor(Number(body.tokenBudget ?? GOAL_TOKEN_BUDGET_DEFAULT) || GOAL_TOKEN_BUDGET_DEFAULT));
+				const turns = Math.min(50, Math.max(1, Math.floor(Number(body.maxTurns ?? GOAL_MAX_TURNS_DEFAULT) || GOAL_MAX_TURNS_DEFAULT)));
+				const harness = await this.open();
+				const conversation = await this.conversationFor(harness, sid);
+				const baseline = await this.goalTokens(harness, conversation.id);
+				startGoal(sid, objective, budget, turns, baseline);
+				return Response.json({ ok: true, goal: goalInfo(readGoalRow(sid)) });
+			}
+			if (url.pathname === "/goal" && request.method === "DELETE") {
+				ensureTables(sqlFacade!);
+				const sid = url.searchParams.get("sessionId") ?? "1";
+				writeGoal(sid, { status: "paused", next_run_at: 0 });
+				await this.scheduleNextAlarm();
+				return Response.json({ ok: true, goal: goalInfo(readGoalRow(sid)) });
 			}
 			if (url.pathname === "/providers" && request.method === "GET") {
 				ensureTables(sqlFacade!);

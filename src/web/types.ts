@@ -87,8 +87,22 @@ export interface AutomationInfo {
 	enabled: boolean;
 }
 
-/** 提示模板（v0.31.0）：输入 / 选中后把正文填进输入框。 */
-export interface PromptInfo {
+/**
+ * 目标（v0.31.0）：绑定一个会话的长期目标。
+ * status: active 进行中 / done 已完成 / blocked 受阻 / paused 手动暂停 / exhausted 预算用尽
+ */
+export interface GoalInfo {
+	objective: string;
+	status: "active" | "done" | "blocked" | "paused" | "exhausted";
+	tokenBudget: number;
+	tokensUsed: number;
+	turns: number;
+	maxTurns: number;
+	summary?: string;
+	updatedAt?: string;
+}
+
+/** 提示模板（v0.31.0）：输入 / 选中后把正文填进输入框。 */export interface PromptInfo {
 	name: string;
 	description: string;
 	content: string;

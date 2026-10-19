@@ -81,6 +81,20 @@ describe("parseEntries · 工具与产出", () => {
 	});
 });
 
+describe("parseEntries · 上下文压缩（v0.31.0）", () => {
+	it("pi.compaction 渲染成一条系统提示", () => {
+		const raw = [
+			entry(1, "pi.user", [{ role: "user", content: "问" }]),
+			entry(2, "pi.compaction", [{ content: "（更早的对话摘要）" }]),
+			entry(3, "pi.assistant", [{ content: [{ type: "text", text: "答" }] }]),
+		];
+		const messages = parseEntries(raw);
+		expect(messages.map((m) => m.role)).toEqual(["user", "notice", "assistant"]);
+		expect(messages[1]).toMatchObject({ role: "notice" });
+		expect((messages[1] as { text: string }).text).toContain("上下文已压缩");
+	});
+});
+
 describe("parseEntries · 容错", () => {
 	it("空输入返回空数组", () => {
 		expect(parseEntries(null)).toEqual([]);

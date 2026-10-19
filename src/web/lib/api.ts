@@ -9,6 +9,10 @@ export interface SessionInfo {
 	name?: string;
 }
 
+import type { GoalInfo } from "../types";
+
+export type { GoalInfo };
+
 export interface ChatResult {
 	answer: string;
 	tools: { name?: string; summary?: string }[];
@@ -179,7 +183,7 @@ export const api = {
 
 	/** 手动压缩当前会话（v0.30.0）。 */
 	compact: (sessionId: string, instructions?: string) =>
-		requestJson<{ ok?: boolean; taskId?: string }>("/api/compact", jsonPost({ sessionId, instructions })),
+		requestJson<{ ok?: boolean; taskId?: string; error?: string }>("/api/compact", jsonPost({ sessionId, instructions })),
 
 	communitySkills: () =>
 		requestJson<{ source?: string; skills?: { name: string; description: string; needsLocal?: boolean; url: string }[] }>(
@@ -241,6 +245,15 @@ export const api = {
 	/** 当前会话的分步计划（v0.22.0）。 */
 	plan: (sessionId: string) =>
 		requestJson<{ steps?: { title: string; status: string }[] }>(withQuery("/api/plan", { sessionId })),
+
+	/** 目标（v0.31.0）：一个会话一份，active 时自动续转。 */
+	goal: (sessionId: string) => requestJson<{ goal?: GoalInfo | null }>(withQuery("/api/goal", { sessionId })),
+
+	setGoal: (body: { sessionId: string; objective: string; tokenBudget?: number; maxTurns?: number }) =>
+		requestJson<{ ok?: boolean; goal?: GoalInfo | null; error?: string }>("/api/goal", jsonPost(body)),
+
+	stopGoal: (sessionId: string) =>
+		requestJson<{ ok?: boolean; goal?: GoalInfo | null }>(withQuery("/api/goal", { sessionId }), { method: "DELETE" }),
 
 	share: (sessionId: string) =>
 		requestJson<{ ok?: boolean; token?: string; url?: string }>("/api/share", jsonPost({ sessionId, kind: "conversation" })),

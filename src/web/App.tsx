@@ -8,13 +8,14 @@ import { Workbench } from "./components/Workbench";
 import { Rail, type RailView } from "./components/Rail";
 import { AutomationPanel, McpPanel, SkillPanel } from "./components/LeftPanels";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { GoalBar, GoalDialog } from "./components/GoalBar";
 import { api } from "./lib/api";
 import { parseEntries, truncateOneLine } from "./lib/entries";
 import { parseAutomations, parseFiles, parseMemories, parsePrompts, parseRules, parseSessions, parseSkills } from "./lib/collections";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { AutomationInfo, ChatMessage, FileArtifact, FileInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
+import type { AutomationInfo, ChatMessage, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -78,6 +79,9 @@ export default function App() {
 	} | null>(null);
 	// 当前会话的分步计划（v0.22.0）
 	const [plan, setPlan] = useState<PlanStep[]>([]);
+	// 目标模式（v0.31.0）
+	const [goal, setGoal] = useState<GoalInfo | null>(null);
+	const [goalDialogOpen, setGoalDialogOpen] = useState(false);
 	/** 从聊天里的文件卡打开右栏预览（v0.22.0）。 */
 	const [fileRequest, setFileRequest] = useState<{ name: string; tick: number } | null>(null);
 	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
@@ -224,12 +228,14 @@ export default function App() {
 
 			void (async () => {
 				// Streaming bubble: created on first delta / tool event so an empty wait shows nothing.
-				const bubbleId = nextId();
+				let bubbleId = nextId();
 				let bubbleShown = false;
 				let buffered = "";
 				let thinkingBuf = "";
 				const tools: ToolCallInfo[] = [];
 				const artifacts: FileArtifact[] = [];
+				/** 压缩提示（v0.31.0）：start 时插一条 notice，end 时把它改成完成态。 */
+				let compactionNoticeId: string | null = null;
 				const ensureBubble = () => {
 					if (bubbleShown) return;
 					bubbleShown = true;
@@ -249,6 +255,16 @@ export default function App() {
 								: m,
 						),
 					);
+				};
+				// 目标续转（v0.31.0）：新一轮从一条空气泡重新开始，上一轮的内容保持不动
+				const startNewRound = (label: string) => {
+					bubbleShown = false;
+					bubbleId = nextId();
+					buffered = "";
+					thinkingBuf = "";
+					tools.length = 0;
+					artifacts.length = 0;
+					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: label }]);
 				};
 				// update_plan 的入参就是最新计划：聊天里实时渲染，不用等工具结果
 				const applyPlan = (args: unknown) => {
@@ -281,6 +297,35 @@ export default function App() {
 								buffered += typeof event.delta === "string" ? event.delta : "";
 								ensureBubble();
 								syncBubble();
+							} else if (event.type === "compaction") {
+								// 上下文压缩（v0.31.0）：开始 → 插提示；结束 → 改成完成态
+								const status = typeof event.status === "string" ? event.status : "";
+								if (status === "start") {
+									const id = nextId();
+									compactionNoticeId = id;
+									setMessages((prev) => [...prev, { id, role: "notice", text: "上下文较长，正在压缩更早的内容…" }]);
+								} else if (status === "end") {
+									const id = compactionNoticeId;
+									setMessages((prev) =>
+										prev.map((m) =>
+											id && m.id === id ? { ...m, text: "上下文已压缩：更早的对话被摘要为一条记录。" } : m,
+										),
+									);
+								}
+							} else if (event.type === "goal") {
+								// 目标状态（v0.31.0）：更新目标条；续转时开新一轮气泡
+								const next = (event.goal ?? null) as GoalInfo | null;
+								if (next) setGoal(next);
+								if (event.continuing) {
+									startNewRound(`🎯 继续推进目标（第 ${Number(event.round ?? 0) + 1} 轮）`);
+								} else if (event.finished) {
+									setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "目标已结束。" }]);
+								} else if (event.scheduled) {
+									setMessages((prev) => [
+										...prev,
+										{ id: nextId(), role: "notice", text: "本轮自动续转结束，目标仍在进行：稍后会自动接着跑。" },
+									]);
+								}
 							} else if (event.type === "tool_start") {
 								const name = typeof event.name === "string" ? event.name : "tool";
 								tools.push({
@@ -366,6 +411,33 @@ export default function App() {
 		},
 		[pending, nextId, sessionId],
 	);
+
+	/** 建立目标并立刻发出第一轮（v0.31.0）。 */
+	const handleCreateGoal = useCallback(
+		async (objective: string, tokenBudget: number, maxTurns: number): Promise<boolean> => {
+			try {
+				const res = await api.setGoal({ sessionId, objective, tokenBudget, maxTurns });
+				if (!res.goal) return false;
+				setGoal(res.goal);
+				handleSend(objective, []);
+				return true;
+			} catch {
+				return false;
+			}
+		},
+		[sessionId, handleSend],
+	);
+
+	/** 停止目标的自动续转（保留记录）。 */
+	const handleStopGoal = useCallback(async () => {
+		try {
+			const res = await api.stopGoal(sessionId);
+			setGoal(res.goal ?? null);
+			setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "已停止目标的自动续转。" }]);
+		} catch {
+			setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "停止目标失败，请重试。" }]);
+		}
+	}, [sessionId, nextId]);
 
 	/** 停止：先让服务端真正中止生成（省 token），再断开本地流（v0.19.0）。 */
 	const handleStop = useCallback(() => {
@@ -458,6 +530,22 @@ export default function App() {
 				);
 			} catch {
 				if (alive) setPlan([]);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [sessionId]);
+
+	// 目标（v0.31.0）：切会话时读取该会话的目标
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.goal(sessionId);
+				if (alive) setGoal(data.goal ?? null);
+			} catch {
+				if (alive) setGoal(null);
 			}
 		})();
 		return () => {
@@ -1136,6 +1224,8 @@ export default function App() {
 							models={models}
 							model={model}
 							onModelChange={handleModelChange}
+							onOpenGoal={() => setGoalDialogOpen(true)}
+							goalActive={goal?.status === "active"}
 						/>
 						<MessageList
 							messages={messages}
@@ -1148,6 +1238,7 @@ export default function App() {
 							files={files}
 							onOpenFile={handleOpenFileFromChat}
 						/>
+						{goal && <GoalBar goal={goal} onStop={() => void handleStopGoal()} onNew={() => setGoalDialogOpen(true)} />}
 						<Composer pending={pending} onSend={handleSend} onStop={handleStop} skills={skills} prompts={prompts} />
 					</section>
 				)}
@@ -1188,6 +1279,9 @@ export default function App() {
 				)}
 			</div>
 
+			{/* 目标弹窗（v0.31.0） */}
+			<GoalDialog open={goalDialogOpen} onClose={() => setGoalDialogOpen(false)} onSubmit={handleCreateGoal} />
+
 			{/* 设置弹窗（v0.20.0）：顶栏菜单收纳于此 */}
 			<SettingsDialog
 				open={settingsOpen}
@@ -1208,6 +1302,7 @@ export default function App() {
 				onChangeThinkingLevel={handleChangeThinkingLevel}
 				compaction={compaction}
 				onChangeCompaction={handleChangeCompaction}
+				sessionId={sessionId}
 				memories={memories}
 				memoriesLoading={memoriesState === "loading"}
 				memoriesError={memoriesError}

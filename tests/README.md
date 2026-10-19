@@ -67,3 +67,5 @@ tests/
 | **能力注册表** | `api/api.test.ts` · 能力注册表 |
 | **提示模板** | `unit/template.test.ts` + `api/api.test.ts` · 提示模板 |
 | **规则文件** | `api/api.test.ts` · 规则文件 |
+| **上下文压缩（提示）** | `unit/entries.test.ts` · 上下文压缩 |
+| **目标模式** | `api/api.test.ts` · 目标模式 + 工具注册（防回归） |

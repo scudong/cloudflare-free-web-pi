@@ -38,6 +38,8 @@ interface SettingsDialogProps {
 	/** 上下文压缩策略（v0.30.0）。 */
 	compaction: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number } | null;
 	onChangeCompaction: (patch: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>) => void;
+	/** 手动压缩的目标会话（v0.31.0）。 */
+	sessionId: string;
 	/** 记忆库（v0.21.0 从工作台移入设置）。 */
 	memories: MemoryInfo[];
 	memoriesLoading: boolean;
@@ -110,6 +112,7 @@ export function SettingsDialog({
 	onChangeThinkingLevel,
 	compaction,
 	onChangeCompaction,
+	sessionId,
 	memories,
 	memoriesLoading,
 	memoriesError,
@@ -122,6 +125,27 @@ export function SettingsDialog({
 	const restoreRef = useRef<HTMLInputElement>(null);
 	const [tab, setTab] = useState<SettingsTab>("general");
 	const [clearing, setClearing] = useState(false);
+	/** 手动压缩（v0.31.0）。 */
+	const [compactState, setCompactState] = useState<"idle" | "running" | "done" | "error">("idle");
+	const [compactMessage, setCompactMessage] = useState("");
+
+	const handleCompactNow = async () => {
+		setCompactState("running");
+		setCompactMessage("");
+		try {
+			const res = await api.compact(sessionId);
+			if (res.error) {
+				setCompactState("error");
+				setCompactMessage(res.error);
+			} else {
+				setCompactState("done");
+				setCompactMessage("已提交压缩任务，完成后聊天里会出现提示。");
+			}
+		} catch (err) {
+			setCompactState("error");
+			setCompactMessage(err instanceof Error ? err.message : String(err));
+		}
+	};
 
 	// 供应商（v0.27.0）
 	const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -392,6 +416,21 @@ export function SettingsDialog({
 											className="mt-1 w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100"
 										/>
 									</label>
+								</div>
+								<div className="mt-3 flex flex-wrap items-center gap-2">
+									<button
+										type="button"
+										onClick={() => void handleCompactNow()}
+										disabled={compactState === "running"}
+										className="rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-300 transition-colors hover:bg-sky-500/20 disabled:opacity-50"
+									>
+										{compactState === "running" ? "压缩中…" : "立即压缩当前会话"}
+									</button>
+									{compactMessage && (
+										<span className={`text-xs ${compactState === "error" ? "text-rose-300" : "text-emerald-300"}`}>
+											{compactMessage}
+										</span>
+									)}
 								</div>
 							</Section>
 
