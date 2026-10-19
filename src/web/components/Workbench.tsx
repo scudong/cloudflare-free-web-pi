@@ -187,7 +187,12 @@ function FileView({
 				</button>
 			</div>
 			<div className={`min-h-0 flex-1 overflow-y-auto p-3 ${dockRight ? "md:px-8" : ""}`}>
-				<div className={dockRight ? "mx-auto w-full max-w-4xl" : ""}>
+				{/* HTML 预览要撑满可用高度：百分比高度需要父级有确定高度，否则 iframe 只占默认高度（v0.31.1） */}
+				<div
+					className={`${dockRight ? "mx-auto w-full max-w-4xl" : ""} ${
+						state === "ready" && mode === "preview" && isHtml ? "h-full" : ""
+					}`}
+				>
 					{state === "loading" && <p className="text-xs text-slate-500">正在加载文件内容…</p>}
 					{state === "error" && <p className="text-xs text-red-300/90">加载失败：{error}</p>}
 					{state === "ready" && mode === "preview" && isHtml && (
