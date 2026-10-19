@@ -300,10 +300,11 @@ export default function App() {
 		[pending, nextId, sessionId],
 	);
 
-	/** 停止：only abort the wait; the in-flight request's catch/finally does the cleanup. */
+	/** 停止：先让服务端真正中止生成（省 token），再断开本地流（v0.19.0）。 */
 	const handleStop = useCallback(() => {
 		abortRef.current?.abort();
-	}, []);
+		void api.abort(sessionId).catch(() => {});
+	}, [sessionId]);
 
 	// 访问控制（一次）
 	useEffect(() => {

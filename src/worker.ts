@@ -625,6 +625,14 @@ export class SpikeAgent extends DurableObject {
 		return `${base}\n\n可用技能（需要时调用 load_skill 读取完整说明后再执行）：\n${lines}`;
 	}
 
+	/** 真正中止服务端生成（v0.19.0）：撤回排队输入并等待会话空闲。 */
+	async abort(sessionId?: string): Promise<{ ok: true }> {
+		const harness = await this.open();
+		const conversation = await this.conversationFor(harness, sessionId);
+		await conversation.abort(ctx);
+		return { ok: true };
+	}
+
 	/** 全量备份：记忆、文件、定时任务、MCP 配置、会话元数据（不含对话正文，正文走 /api/export）。 */
 	async backup(): Promise<{ version: number; exportedAt: string; data: Record<string, unknown> }> {
 		await this.open();
@@ -1215,6 +1223,10 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				ensureTables(sqlFacade!);
 				sqlFacade!.exec("DELETE FROM skills WHERE name = ?", url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/abort" && request.method === "POST") {
+				const body = (await request.json().catch(() => ({}))) as { sessionId?: string };
+				return Response.json(await this.abort(body.sessionId));
 			}
 			if (url.pathname === "/backup" && request.method === "GET") {
 				return Response.json(await this.backup());

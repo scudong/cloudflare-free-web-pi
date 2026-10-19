@@ -2,6 +2,13 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（真正的停止）
+
+### 停止按钮改为服务端中止（v0.19.0）
+- 新增 `POST /api/abort {sessionId}` → `conversation.abort()`：撤回排队输入、中止当前生成并等待会话空闲
+- 前端「停止」先调中止接口再断开 SSE，避免「界面停了但服务端继续跑、继续烧 token」
+- 中止后会话仍可继续对话（不会进入失败态）
+
 ## 2026-10-19（免本地浏览器的网页操作）
 
 ### MCP 请求头 + Browserbase 接入（v0.18.0）

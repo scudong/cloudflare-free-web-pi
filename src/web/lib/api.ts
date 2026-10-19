@@ -144,6 +144,8 @@ export const api = {
 
 	logout: () => requestJson<{ ok?: boolean }>("/api/logout", { method: "POST" }),
 
+	abort: (sessionId: string) => requestJson<{ ok?: boolean }>("/api/abort", jsonPost({ sessionId })),
+
 	skills: () => requestJson<{ skills?: unknown[] }>("/api/skills"),
 
 	communitySkills: () =>
