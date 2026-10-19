@@ -868,6 +868,22 @@ export default function App() {
 		});
 	}, [thinkingLevel, nextId]);
 
+	/** 一键清空记忆库（v0.26.0）。 */
+	const handleClearMemories = useCallback(async (): Promise<number | null> => {
+		try {
+			const result = await api.clearMemories();
+			setPanelTick((tick) => tick + 1);
+			setMessages((prev) => [
+				...prev,
+				{ id: nextId(), role: "notice", text: `已清空记忆库（${result.deleted ?? 0} 条）。` },
+			]);
+			return result.deleted ?? 0;
+		} catch {
+			setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "清空记忆库失败。" }]);
+			return null;
+		}
+	}, [nextId]);
+
 	/** 退出登录：清 cookie 并回到登录闸门。 */
 	const handleLogout = useCallback(() => {
 		setSettingsOpen(false);
@@ -1090,6 +1106,7 @@ export default function App() {
 				memoriesLoading={memoriesState === "loading"}
 				memoriesError={memoriesError}
 				onDeleteMemory={handleDeleteMemory}
+				onClearMemories={handleClearMemories}
 				authRequired={!!auth?.required}
 				onLogout={handleLogout}
 			/>

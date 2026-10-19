@@ -1,7 +1,9 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { formatTime } from "../lib/format";
 import { THEMES, type ThemeId } from "../lib/theme";
 import type { MemoryInfo } from "../types";
+
+type SettingsTab = "general" | "chat" | "memory" | "data";
 
 interface SettingsDialogProps {
 	open: boolean;
@@ -28,6 +30,8 @@ interface SettingsDialogProps {
 	memoriesLoading: boolean;
 	memoriesError: string | null;
 	onDeleteMemory: (id: number) => Promise<boolean>;
+	/** 一键清空记忆库（v0.26.0）。 */
+	onClearMemories: () => Promise<number | null>;
 	/** 设置了访问密码才显示登出。 */
 	authRequired: boolean;
 	onLogout: () => void;
@@ -53,7 +57,7 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (nex
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
 	return (
-		<section className="border-b border-slate-700/70 py-4 first:pt-1 last:border-b-0 last:pb-0">
+		<section className="border-b border-slate-700/70 py-4 first:pt-0 last:border-b-0 last:pb-0">
 			<h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{title}</h2>
 			{children}
 		</section>
@@ -63,7 +67,14 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 const actionButton =
 	"rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-200 shadow-sm transition-colors hover:bg-slate-700/60 hover:text-white";
 
-/** 设置弹窗（v0.20.0）：原顶栏菜单全部收纳于此，参照 Codex/Trae 的设置页。 */
+const TABS: { key: SettingsTab; label: string; icon: string }[] = [
+	{ key: "general", label: "通用", icon: "⚙️" },
+	{ key: "chat", label: "对话", icon: "💬" },
+	{ key: "memory", label: "记忆", icon: "🧠" },
+	{ key: "data", label: "数据", icon: "💾" },
+];
+
+/** 设置弹窗（v0.26.0：按子功能分 tab）。 */
 export function SettingsDialog({
 	open,
 	onClose,
@@ -85,10 +96,13 @@ export function SettingsDialog({
 	memoriesLoading,
 	memoriesError,
 	onDeleteMemory,
+	onClearMemories,
 	authRequired,
 	onLogout,
 }: SettingsDialogProps) {
 	const restoreRef = useRef<HTMLInputElement>(null);
+	const [tab, setTab] = useState<SettingsTab>("general");
+	const [clearing, setClearing] = useState(false);
 
 	useEffect(() => {
 		if (!open) return;
@@ -99,7 +113,20 @@ export function SettingsDialog({
 		return () => window.removeEventListener("keydown", onKey);
 	}, [open, onClose]);
 
+	// 每次打开回到第一个 tab
+	useEffect(() => {
+		if (open) setTab("general");
+	}, [open]);
+
+	const handleClear = () => {
+		if (clearing || memories.length === 0) return;
+		if (!window.confirm(`确定清空全部 ${memories.length} 条记忆？此操作不可撤销。`)) return;
+		setClearing(true);
+		void onClearMemories().finally(() => setClearing(false));
+	};
+
 	if (!open) return null;
+
 	return (
 		<div className="absolute inset-0 z-40">
 			<button type="button" aria-label="关闭设置" onClick={onClose} className="dialog-scrim absolute inset-0" />
@@ -107,9 +134,10 @@ export function SettingsDialog({
 				role="dialog"
 				aria-modal="true"
 				aria-label="设置"
-				className="absolute left-1/2 top-1/2 max-h-[86vh] w-[min(92vw,30rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl ring-1 ring-black/5"
+				className="absolute left-1/2 top-1/2 flex max-h-[86vh] w-[min(92vw,32rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl ring-1 ring-black/5"
 			>
-				<div className="mb-3 flex items-center justify-between">
+				{/* 标题 */}
+				<div className="flex shrink-0 items-center justify-between px-5 pb-2 pt-4">
 					<h1 className="text-base font-semibold text-slate-100">设置</h1>
 					<button
 						type="button"
@@ -123,163 +151,212 @@ export function SettingsDialog({
 					</button>
 				</div>
 
-				<Section title="外观">
-					<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-						{THEMES.map((option) => (
-							<button
-								key={option.id}
-								type="button"
-								onClick={() => onThemeChange(option.id)}
-								aria-pressed={theme === option.id}
-								className={`flex flex-col items-center gap-1.5 rounded-lg border px-2 py-2.5 text-xs transition-colors ${
-									theme === option.id
-										? "border-sky-500/70 bg-sky-500/10 text-slate-100"
-										: "border-slate-700 text-slate-300 hover:border-slate-600 hover:text-white"
-								}`}
-							>
-								<span
-									aria-hidden
-									className="h-6 w-full rounded border border-slate-600/60"
-									style={{ backgroundColor: option.swatch }}
-								/>
-								<span className="flex items-center gap-1">
-									<span aria-hidden>{option.icon}</span>
-									{option.label}
-								</span>
-							</button>
-						))}
-					</div>
-				</Section>
-
-				<Section title="布局">
-					<div className="flex flex-col gap-3">
-						<div className="flex items-center justify-between">
-							<span className="text-sm text-slate-200">会话栏（左侧）</span>
-							<Switch checked={leftOpen} onChange={onToggleLeft} label="显示/收起会话栏" />
-						</div>
-						<div className="flex items-center justify-between">
-							<span className="text-sm text-slate-200">工作台（右侧）</span>
-							<Switch checked={rightOpen} onChange={onToggleRight} label="显示/收起工作台" />
-						</div>
-					</div>
-				</Section>
-
-				<Section title="思考过程">
-					<p className="mb-2 text-xs leading-relaxed text-slate-500">
-						开启后模型先思考再回答，聊天里会出现可展开的「思考过程」块。档位越高越慢、越费 token。
-					</p>
-					<div className="inline-flex rounded-lg border border-slate-700 p-0.5">
-						{[
-							{ value: "off", label: "关闭" },
-							{ value: "low", label: "低" },
-							{ value: "high", label: "高" },
-						].map((option) => (
-							<button
-								key={option.value}
-								type="button"
-								onClick={() => onChangeThinkingLevel(option.value)}
-								aria-pressed={thinkingLevel === option.value}
-								className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-									thinkingLevel === option.value
-										? "bg-violet-600 text-white"
-										: "text-slate-300 hover:text-white"
-								}`}
-							>
-								{option.label}
-							</button>
-						))}
-					</div>
-				</Section>
-
-				<Section title="网页搜索">
-					<div className="flex items-start justify-between gap-4">
-						<div className="min-w-0">
-							<p className="text-sm text-slate-200">启用 DeepSeek 联网搜索</p>
-							<p className="mt-1 text-xs leading-relaxed text-slate-500">
-								开启后模型可用 web_search 搜索、web_fetch_page 抓取正文，按成功请求计费（约 ¥5 / 1000 次）。
-							</p>
-						</div>
-						<Switch checked={webSearch === true} onChange={onToggleWebSearch} label="启用网页搜索" />
-					</div>
-					{webSearch === null && <p className="mt-2 text-xs text-slate-500">正在读取设置…</p>}
-				</Section>
-
-				<Section title={`记忆库${memories.length ? `（${memories.length}）` : ""}`}>
-					<div className="max-h-56 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/40 p-1.5">
-						{memoriesError && <p className="px-1.5 py-1.5 text-xs text-rose-300">{memoriesError}</p>}
-						{memoriesLoading && memories.length === 0 && <p className="px-1.5 py-1.5 text-xs text-slate-500">正在加载…</p>}
-						{!memoriesLoading && !memoriesError && memories.length === 0 && (
-							<p className="px-1.5 py-2 text-xs leading-relaxed text-slate-500">
-								记忆库还是空的。对 π 说「记住…」即可保存一条长期记忆；每轮对话结束也会自动抽取。
-							</p>
-						)}
-						<ul className="space-y-1">
-							{memories.map((memory) => (
-								<li key={memory.id} className="rounded-lg bg-slate-800/50 px-2.5 py-2">
-									<p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-slate-200">{memory.content}</p>
-									<div className="mt-1.5 flex items-center justify-between gap-2">
-										<span className="min-w-0 truncate text-[11px] text-slate-500">
-											{memory.source === "reflect" ? "自动抽取 · " : ""}
-											{formatTime(memory.createdAt)}
-										</span>
-										{memory.id > 0 && (
-											<button
-												type="button"
-												onClick={() => void onDeleteMemory(memory.id)}
-												className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-slate-500 transition-colors hover:bg-red-950/60 hover:text-red-300"
-											>
-												删除
-											</button>
-										)}
-									</div>
-								</li>
-							))}
-						</ul>
-					</div>
-				</Section>
-
-				<Section title="数据">
-					<div className="grid grid-cols-2 gap-2">
-						<button type="button" onClick={onShare} className={actionButton}>
-							🔗 分享当前会话
-						</button>
-						<button type="button" onClick={onExport} className={actionButton}>
-							📥 导出 Markdown
-						</button>
-						<button type="button" onClick={onBackup} className={actionButton}>
-							💾 备份数据
-						</button>
-						<button type="button" onClick={() => restoreRef.current?.click()} className={actionButton}>
-							♻️ 恢复备份
-						</button>
-					</div>
-					<input
-						ref={restoreRef}
-						type="file"
-						accept="application/json,.json"
-						hidden
-						onChange={(event) => {
-							const file = event.target.files?.[0];
-							if (file) onRestore(file);
-							event.target.value = "";
-						}}
-					/>
-					<p className="mt-2 text-xs leading-relaxed text-slate-500">
-						备份含 MCP 密钥，请妥善保管；恢复为合并式，不删除现有数据。
-					</p>
-				</Section>
-
-				{authRequired && (
-					<Section title="账号">
+				{/* 分类 tab */}
+				<div role="tablist" aria-label="设置分类" className="flex shrink-0 gap-1 px-4">
+					{TABS.map((item) => (
 						<button
+							key={item.key}
 							type="button"
-							onClick={onLogout}
-							className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300 transition-colors hover:bg-rose-500/20"
+							role="tab"
+							aria-selected={tab === item.key}
+							onClick={() => setTab(item.key)}
+							className={`flex flex-1 items-center justify-center gap-1.5 rounded-t-lg border-b-2 px-2 py-2 text-[13px] font-medium transition-colors ${
+								tab === item.key
+									? "border-sky-500 text-sky-300"
+									: "border-transparent text-slate-400 hover:border-slate-700 hover:text-slate-200"
+							}`}
 						>
-							退出登录
+							<span aria-hidden>{item.icon}</span>
+							{item.label}
 						</button>
-					</Section>
-				)}
+					))}
+				</div>
+
+				{/* 内容区 */}
+				<div className="min-h-0 flex-1 overflow-y-auto border-t border-slate-800 px-5 py-4">
+					{tab === "general" && (
+						<>
+							<Section title="外观">
+								<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+									{THEMES.map((option) => (
+										<button
+											key={option.id}
+											type="button"
+											onClick={() => onThemeChange(option.id)}
+											aria-pressed={theme === option.id}
+											className={`flex flex-col items-center gap-1.5 rounded-lg border px-2 py-2.5 text-xs transition-colors ${
+												theme === option.id
+													? "border-sky-500/70 bg-sky-500/10 text-slate-100"
+													: "border-slate-700 text-slate-300 hover:border-slate-600 hover:text-white"
+											}`}
+										>
+											<span
+												aria-hidden
+												className="h-6 w-full rounded border border-slate-600/60"
+												style={{ backgroundColor: option.swatch }}
+											/>
+											<span className="flex items-center gap-1">
+												<span aria-hidden>{option.icon}</span>
+												{option.label}
+											</span>
+										</button>
+									))}
+								</div>
+							</Section>
+
+							<Section title="布局">
+								<div className="flex flex-col gap-3">
+									<div className="flex items-center justify-between">
+										<span className="text-sm text-slate-200">会话栏（左侧）</span>
+										<Switch checked={leftOpen} onChange={onToggleLeft} label="显示/收起会话栏" />
+									</div>
+									<div className="flex items-center justify-between">
+										<span className="text-sm text-slate-200">工作台（右侧）</span>
+										<Switch checked={rightOpen} onChange={onToggleRight} label="显示/收起工作台" />
+									</div>
+								</div>
+							</Section>
+
+							{authRequired && (
+								<Section title="账号">
+									<button
+										type="button"
+										onClick={onLogout}
+										className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300 transition-colors hover:bg-rose-500/20"
+									>
+										退出登录
+									</button>
+								</Section>
+							)}
+						</>
+					)}
+
+					{tab === "chat" && (
+						<>
+							<Section title="思考过程">
+								<p className="mb-2 text-xs leading-relaxed text-slate-500">
+									开启后模型先思考再回答，聊天里会出现可展开的「思考过程」块。档位越高越慢、越费 token。
+								</p>
+								<div className="inline-flex rounded-lg border border-slate-700 p-0.5">
+									{[
+										{ value: "off", label: "关闭" },
+										{ value: "low", label: "低" },
+										{ value: "high", label: "高" },
+									].map((option) => (
+										<button
+											key={option.value}
+											type="button"
+											onClick={() => onChangeThinkingLevel(option.value)}
+											aria-pressed={thinkingLevel === option.value}
+											className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+												thinkingLevel === option.value ? "bg-violet-600 text-white" : "text-slate-300 hover:text-white"
+											}`}
+										>
+											{option.label}
+										</button>
+									))}
+								</div>
+							</Section>
+
+							<Section title="网页搜索">
+								<div className="flex items-start justify-between gap-4">
+									<div className="min-w-0">
+										<p className="text-sm text-slate-200">启用 DeepSeek 联网搜索</p>
+										<p className="mt-1 text-xs leading-relaxed text-slate-500">
+											开启后模型可用 web_search 搜索、web_fetch_page 抓取正文，按成功请求计费（约 ¥5 / 1000 次）。
+										</p>
+									</div>
+									<Switch checked={webSearch === true} onChange={onToggleWebSearch} label="启用网页搜索" />
+								</div>
+								{webSearch === null && <p className="mt-2 text-xs text-slate-500">正在读取设置…</p>}
+							</Section>
+						</>
+					)}
+
+					{tab === "memory" && (
+						<Section title={`记忆库${memories.length ? `（${memories.length}）` : ""}`}>
+							<div className="mb-2 flex items-center justify-between gap-2">
+								<p className="text-xs leading-relaxed text-slate-500">
+									对 π 说「记住…」可保存；每轮对话结束也会自动抽取。
+								</p>
+								<button
+									type="button"
+									onClick={handleClear}
+									disabled={clearing || memories.length === 0}
+									className="shrink-0 rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-xs text-rose-300 transition-colors hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+								>
+									{clearing ? "清空中…" : "清空全部"}
+								</button>
+							</div>
+							<div className="max-h-[46vh] overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/40 p-1.5">
+								{memoriesError && <p className="px-1.5 py-1.5 text-xs text-rose-300">{memoriesError}</p>}
+								{memoriesLoading && memories.length === 0 && (
+									<p className="px-1.5 py-1.5 text-xs text-slate-500">正在加载…</p>
+								)}
+								{!memoriesLoading && !memoriesError && memories.length === 0 && (
+									<p className="px-1.5 py-2 text-xs leading-relaxed text-slate-500">记忆库还是空的。</p>
+								)}
+								<ul className="space-y-1">
+									{memories.map((memory) => (
+										<li key={memory.id} className="rounded-lg bg-slate-800/50 px-2.5 py-2">
+											<p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-slate-200">
+												{memory.content}
+											</p>
+											<div className="mt-1.5 flex items-center justify-between gap-2">
+												<span className="min-w-0 truncate text-[11px] text-slate-500">
+													{memory.source === "reflect" ? "自动抽取 · " : ""}
+													{formatTime(memory.createdAt)}
+												</span>
+												{memory.id > 0 && (
+													<button
+														type="button"
+														onClick={() => void onDeleteMemory(memory.id)}
+														className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-slate-500 transition-colors hover:bg-red-950/60 hover:text-red-300"
+													>
+														删除
+													</button>
+												)}
+											</div>
+										</li>
+									))}
+								</ul>
+							</div>
+						</Section>
+					)}
+
+					{tab === "data" && (
+						<Section title="数据">
+							<div className="grid grid-cols-2 gap-2">
+								<button type="button" onClick={onShare} className={actionButton}>
+									🔗 分享当前会话
+								</button>
+								<button type="button" onClick={onExport} className={actionButton}>
+									📥 导出 Markdown
+								</button>
+								<button type="button" onClick={onBackup} className={actionButton}>
+									💾 备份数据
+								</button>
+								<button type="button" onClick={() => restoreRef.current?.click()} className={actionButton}>
+									♻️ 恢复备份
+								</button>
+							</div>
+							<input
+								ref={restoreRef}
+								type="file"
+								accept="application/json,.json"
+								hidden
+								onChange={(event) => {
+									const file = event.target.files?.[0];
+									if (file) onRestore(file);
+									event.target.value = "";
+								}}
+							/>
+							<p className="mt-2 text-xs leading-relaxed text-slate-500">
+								备份含 MCP 密钥，请妥善保管；恢复为合并式，不删除现有数据。
+							</p>
+						</Section>
+					)}
+				</div>
 			</div>
 		</div>
 	);

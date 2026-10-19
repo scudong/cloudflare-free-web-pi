@@ -1631,6 +1631,13 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				return Response.json({ memories: rows });
 			}
 			if (url.pathname === "/memories" && request.method === "DELETE") {
+				// all=1 → 一键清空（v0.26.0）
+				if (url.searchParams.get("all") === "1") {
+					ensureTables(sqlFacade!);
+					const before = (sqlFacade!.exec("SELECT COUNT(*) AS n FROM pi_mem").toArray() as { n: number }[])[0]?.n ?? 0;
+					sqlFacade!.exec("DELETE FROM pi_mem");
+					return Response.json({ ok: true, deleted: before });
+				}
 				sqlFacade!.exec("DELETE FROM pi_mem WHERE id = ?", Number(url.searchParams.get("id") ?? 0));
 				return Response.json({ ok: true });
 			}

@@ -214,6 +214,9 @@ export const api = {
 
 	deleteMemory: (id: number) => requestJson<{ ok: boolean }>(withQuery("/api/memories", { id: String(id) }), { method: "DELETE" }),
 
+	/** 一键清空记忆库（v0.26.0）。 */
+	clearMemories: () => requestJson<{ ok: boolean; deleted?: number }>("/api/memories?all=1", { method: "DELETE" }),
+
 	reset: (sessionId: string) => requestJson<{ ok: boolean }>("/api/reset", jsonPost({ sessionId })),
 
 	renameSession: (id: string, title: string) =>
