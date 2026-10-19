@@ -1,0 +1,37 @@
+src/web/App.tsx
+  00512495ff504ece 57-64,573-598,783-784,846-854,856-865,895-897
+src/web/components/Workbench.tsx
+  00512495ff504ece 24-28,184-186,193-195,256-263,274-275,292,666-668,690-693,731-734,736-738,754
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "a96dfa1e4e51c66e4096815fcd8136b038bd67fd",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 115,
+      "total_deletions": 20,
+      "accepted_lines": 102,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/Workbench.tsx": {
+          "additions": 49,
+          "deletions": 12,
+          "accepted_lines": 42
+        },
+        "src/web/App.tsx": {
+          "additions": 66,
+          "deletions": 8,
+          "accepted_lines": 60
+        }
+      }
+    }
+  }
+}
