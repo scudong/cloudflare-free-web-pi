@@ -1,0 +1,51 @@
+src/web/components/Workbench.tsx
+  00512495ff504ece 310,315-316,323-324,328-329,352-367
+src/web/App.tsx
+  00512495ff504ece 509,511,513-516,519,522
+src/web/lib/api.ts
+  00512495ff504ece 191-192
+src/worker.ts
+  00512495ff504ece 256,301
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "d440b4fd0a54fa1d3053e1227269af8feb117130",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 35,
+      "total_deletions": 10,
+      "accepted_lines": 35,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/App.tsx": {
+          "additions": 8,
+          "deletions": 4,
+          "accepted_lines": 8
+        },
+        "src/web/components/Workbench.tsx": {
+          "additions": 23,
+          "deletions": 2,
+          "accepted_lines": 23
+        },
+        "src/worker.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/lib/api.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        }
+      }
+    }
+  }
+}
