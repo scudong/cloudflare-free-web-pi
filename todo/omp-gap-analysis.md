@@ -107,9 +107,9 @@
 
 ## 五、可执行 TODO
 
-- [ ] P0 子代理编排：`createSubagent(task, {tools})` + 并行扇出 + 结果汇总
-- [ ] P0 压缩可配置：设置页加阈值/保留量，压缩时聊天里给提示
-- [ ] P1 Goal 模式：目标 + token 预算 + 自动续转 + 完成校验
+- [x] P0 子代理编排：`createSubagent(task, {tools})` + 并行扇出 + 结果汇总
+- [x] P0 压缩可配置：设置页加阈值/保留量，压缩时聊天里给提示
+- [x] P1 Goal 模式：目标 + token 预算 + 自动续转 + 完成校验
 - [ ] P1 会话分支：从任意消息分叉，侧栏显示分支树
 - [ ] P1 工具审批：read/write/exec 三档
 - [ ] P2 Context files：项目级可编辑 instructions
