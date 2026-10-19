@@ -1,0 +1,44 @@
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 44,48,56-57,64,105,110
+src/web/components/MessageList.tsx
+  00512495ff504ece 108-109
+src/web/styles/index.css
+  00512495ff504ece 116-134,149,156-160,162-167,169-180,184-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "69d06acdeb565a72cc515093c8a335ad2ca8eaa5",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 62,
+      "total_deletions": 11,
+      "accepted_lines": 62,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 7,
+          "deletions": 7,
+          "accepted_lines": 7
+        },
+        "src/web/styles/index.css": {
+          "additions": 53,
+          "deletions": 2,
+          "accepted_lines": 53
+        },
+        "src/web/components/MessageList.tsx": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        }
+      }
+    }
+  }
+}
