@@ -24,6 +24,13 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	sql.exec(`CREATE TABLE IF NOT EXISTS pi_mem (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS vfs_files (name TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS reflect_state (conversation_id TEXT PRIMARY KEY, last_entry_id INTEGER NOT NULL, updated_at TEXT NOT NULL)`);
+	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
+	try {
+		sql.exec(`ALTER TABLE pi_mem ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`);
+	} catch {
+		// 列已存在
+	}
 };
 
 const stripHtml = (html: string) =>
@@ -204,6 +211,8 @@ export class SpikeAgent extends DurableObject {
 			console.warn("session meta update failed", e);
 		}
 		const page2 = await root.entries({}, 60, undefined, ctx);
+		const lastId = Number((page2.items[0] as unknown as { id?: number } | undefined)?.id ?? 0);
+		this.ctx.waitUntil(this.maybeReflect(root as never, lastId));
 		const tools: { name: string; summary: string }[] = [];
 		for (const e of page2.items as unknown as Record<string, unknown>[]) {
 			if ((e as { kind?: unknown }).kind !== "pi.tool-result") continue;
@@ -282,6 +291,92 @@ export class SpikeAgent extends DurableObject {
 	}
 
 	/** 重置一个会话的转录（工作台文件与记忆库保留）。 */
+	/**
+	 * reflect：把一段对话里值得长期记住的事实抽出来入库（对齐本地 pi memory 插件的 reflect）。
+	 * 用一次低成本模型调用；解析失败就跳过，绝不阻塞主流程。
+	 */
+	private async reflect(conversationId: string, transcript: string): Promise<number> {
+		const apiKey = (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY;
+		if (!apiKey || transcript.trim().length < 40) return 0;
+		try {
+			const resp = await fetch("https://api.deepseek.com/v1/chat/completions", {
+				method: "POST",
+				headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+				body: JSON.stringify({
+					model: "deepseek-flash",
+					temperature: 0.1,
+					max_tokens: 400,
+					messages: [
+						{
+							role: "system",
+							content:
+								"你是记忆抽取器。从对话中抽取值得长期记住的事实（用户身份/偏好/项目/约定），忽略寒暄与临时内容。只输出 JSON 数组，每项是一句中文事实，最多 3 条；没有就输出 []。",
+						},
+						{ role: "user", content: transcript.slice(-6000) },
+					],
+				}),
+			});
+			if (!resp.ok) return 0;
+			const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
+			const raw = data.choices?.[0]?.message?.content ?? "";
+			const match = raw.match(/\[[\s\S]*\]/);
+			if (!match) return 0;
+			const facts = JSON.parse(match[0]) as unknown;
+			if (!Array.isArray(facts)) return 0;
+			let saved = 0;
+			// 去重：规范化（去空白与标点）后，新事实与已有记忆互为子串即视为重复。
+			const norm = (t: string) => t.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+			const existing = (sqlFacade!.exec("SELECT content FROM pi_mem ORDER BY id DESC LIMIT 300").toArray() as { content: string }[])
+				.map((r) => norm(r.content))
+				.filter((t) => t.length >= 6);
+			for (const fact of facts) {
+				const content = String(fact ?? "").trim().slice(0, 300);
+				if (!content) continue;
+				const n = norm(content);
+				if (n.length < 6) continue;
+				if (existing.some((e) => e.includes(n) || n.includes(e))) continue;
+				sqlFacade!.exec(
+					"INSERT INTO pi_mem (content, created_at, source) VALUES (?, ?, 'reflect')",
+					content, new Date().toISOString(),
+				);
+				existing.push(n);
+				saved++;
+			}
+			if (saved) console.log(`reflect: ${saved} 条入库（会话 ${conversationId}）`);
+			return saved;
+		} catch (err) {
+			console.warn("reflect skipped", err);
+			return 0;
+		}
+	}
+
+	/** 达到阈值才跑 reflect：默认每 6 个新条目一次，避免每轮都花 token。 */
+	private async maybeReflect(root: { id: unknown; entries(q: object, limit: number, cursor: undefined, context: unknown): Promise<unknown> }, uptoId: number): Promise<number> {
+		try {
+			const convId = String(root.id);
+			const state = sqlFacade!.exec("SELECT last_entry_id FROM reflect_state WHERE conversation_id = ?", convId).toArray() as { last_entry_id: number }[];
+			const since = state[0]?.last_entry_id ?? 0;
+			if (uptoId - since < 6) return 0;
+			const page = (await root.entries({ order: "descending" }, 40, undefined, ctx)) as { items: readonly Record<string, unknown>[] };
+			const lines: string[] = [];
+			for (const e of [...page.items].reverse()) {
+				const kind = String(e.kind ?? "");
+				const text = JSON.stringify(e.model ?? e.data ?? "").slice(0, 800);
+				if (kind === "pi.user") lines.push(`用户：${text}`);
+				else if (kind === "pi.assistant") lines.push(`助手：${text}`);
+			}
+			const saved = await this.reflect(convId, lines.join("\n"));
+			sqlFacade!.exec(
+				"INSERT INTO reflect_state (conversation_id, last_entry_id, updated_at) VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET last_entry_id = excluded.last_entry_id, updated_at = excluded.updated_at",
+				convId, uptoId, new Date().toISOString(),
+			);
+			return saved;
+		} catch (err) {
+			console.warn("maybeReflect skipped", err);
+			return 0;
+		}
+	}
+
 	/** 流式聊天：SSE 推送 text delta / 工具开始结束 / 最终 done。 */
 	async chatStream(message: string, sessionId?: string): Promise<Response> {
 		const harness = await this.open();
@@ -331,6 +426,7 @@ export class SpikeAgent extends DurableObject {
 				const submission = await root.submit({ type: "input", content: message }, ctx);
 				const settled = await submission.wait(ctx);
 				const page2 = await root.entries({}, 60, undefined, ctx);
+				const lastId = Number((page2.items[0] as unknown as { id?: number } | undefined)?.id ?? 0);
 				const tools: { name: string; summary: string }[] = [];
 				for (const e of page2.items as unknown as Record<string, unknown>[]) {
 					if ((e as { kind?: unknown }).kind !== "pi.tool-result") continue;
@@ -371,6 +467,7 @@ export class SpikeAgent extends DurableObject {
 					console.warn("session meta update failed", err);
 				}
 				await send("done", { answer, tools });
+				this.ctx.waitUntil(this.maybeReflect(root as never, lastId));
 			} catch (err) {
 				await send("error", { message: String(err).slice(0, 300) });
 			} finally {
@@ -455,9 +552,17 @@ export class SpikeAgent extends DurableObject {
 				sqlFacade!.exec("DELETE FROM vfs_files WHERE name = ?", url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
 			}
+			if (url.pathname === "/reflect" && request.method === "POST") {
+				const body = (await request.json().catch(() => ({}))) as { sessionId?: string };
+				const harness = await this.open();
+				const conversation = await this.conversationFor(harness, body.sessionId);
+				const page = (await conversation.entries({}, 1, undefined, ctx)) as { items: readonly { id?: number }[] };
+				const saved = await this.maybeReflect(conversation as never, Number(page.items[0]?.id ?? 0));
+				return Response.json({ ok: true, saved });
+			}
 			if (url.pathname === "/memories" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				const rows = sqlFacade!.exec("SELECT id, content, created_at FROM pi_mem ORDER BY id DESC LIMIT 200").toArray();
+				const rows = sqlFacade!.exec("SELECT id, content, created_at, source FROM pi_mem ORDER BY id DESC LIMIT 200").toArray();
 				return Response.json({ memories: rows });
 			}
 			if (url.pathname === "/memories" && request.method === "DELETE") {
