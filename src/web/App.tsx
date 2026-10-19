@@ -11,7 +11,7 @@ import { parseEntries, truncateOneLine } from "./lib/entries";
 import { parseFiles, parseMemories, parseSessions } from "./lib/collections";
 import { loadBool, saveBool } from "./lib/localStore";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { ChatMessage, FileInfo, MemoryInfo, SessionListItem, ToolCallInfo } from "./types";
+import type { ChatMessage, FileInfo, McpServerInfo, MemoryInfo, SessionListItem, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -48,6 +48,9 @@ export default function App() {
 	// Session list
 	const [sessionId, setSessionId] = useState("1");
 	const [sessions, setSessions] = useState<SessionListItem[]>([]);
+	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
+	const [mcpLoading, setMcpLoading] = useState(true);
+	const [mcpError, setMcpError] = useState<string | null>(null);
 	const [sessionsLoading, setSessionsLoading] = useState(true);
 	const [sessionQuery, setSessionQuery] = useState("");
 
@@ -262,6 +265,48 @@ export default function App() {
 	/** 停止：only abort the wait; the in-flight request's catch/finally does the cleanup. */
 	const handleStop = useCallback(() => {
 		abortRef.current?.abort();
+	}, []);
+
+	// MCP 服务器列表（全局，随 panelTick 刷新）
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.mcpServers();
+				if (!alive) return;
+				const list = Array.isArray(data.servers) ? (data.servers as McpServerInfo[]) : [];
+				setMcpServers(list);
+				setMcpError(null);
+			} catch {
+				if (alive) setMcpError("加载 MCP 服务器失败。");
+			} finally {
+				if (alive) setMcpLoading(false);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [panelTick]);
+
+	const handleAddMcp = useCallback(async (name: string, url: string) => {
+		try {
+			await api.addMcp(name, url);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			setMcpError("添加失败，请检查地址。");
+			return false;
+		}
+	}, []);
+
+	const handleDeleteMcp = useCallback(async (id: string) => {
+		try {
+			await api.deleteMcp(id);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			return false;
+		}
 	}, []);
 
 	/** 新会话：abort in-flight wait → POST /api/sessions → switch to the new conversation. */
@@ -479,6 +524,11 @@ export default function App() {
 							refreshTick={panelTick}
 							onDeleteFile={handleDeleteFile}
 							onDeleteMemory={handleDeleteMemory}
+							mcpServers={mcpServers}
+							mcpLoading={mcpLoading}
+							mcpError={mcpError}
+							onAddMcp={handleAddMcp}
+							onDeleteMcp={handleDeleteMcp}
 						/>
 					</div>
 				)}

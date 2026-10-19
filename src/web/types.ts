@@ -32,3 +32,11 @@ export interface MemoryInfo {
 	content: string;
 	createdAt: string;
 }
+
+/** An MCP server the agent can call tools from (v5). */
+export interface McpServerInfo {
+	id: string;
+	name: string;
+	url: string;
+	created_at?: string;
+}

@@ -14,6 +14,7 @@ import {
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { watchEvents } from "@earendil-works/pi-durable";
+import { McpClient, StreamableHttpTransport, toLlmContent } from "@earendil-works/pi-mcp";
 import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -39,6 +40,7 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 		// 列已存在
 	}
 	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS reflect_state (conversation_id TEXT PRIMARY KEY, last_entry_id INTEGER NOT NULL, updated_at TEXT NOT NULL)`);
 	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
 	try {
@@ -158,8 +160,60 @@ const codemodeExtension = createCodemodeExtension({
 	models: false,
 });
 
+/** 已连接的 MCP 客户端缓存：同一 DO 实例内复用，配置变更时清空。 */
+const mcpCache = new Map<string, { client: McpClient; tools: { name: string; description?: string; inputSchema?: unknown }[] }>();
+
+/** 读取配置的 MCP 服务器，连接并包装成 pi-durable 工具（惰性、失败静默）。 */
+async function buildMcpExtension(sql: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } }) {
+	const servers = sql.exec("SELECT id, name, url, headers FROM mcp_servers ORDER BY created_at ASC").toArray() as {
+		id: string;
+		name: string;
+		url: string;
+		headers: string;
+	}[];
+	if (!servers.length) return null;
+	const tools = [];
+	for (const server of servers) {
+		try {
+			let entry = mcpCache.get(server.id);
+			if (!entry) {
+				const client = new McpClient({ name: "pi-harness", version: "1.0.0" });
+				const headers = JSON.parse(server.headers || "{}") as Record<string, string>;
+				await client.connect(new StreamableHttpTransport({ url: server.url, headers }));
+				const listed = await client.listTools();
+				entry = { client, tools: listed as never };
+				mcpCache.set(server.id, entry);
+			}
+			for (const tool of entry.tools) {
+				const jsName = `mcp__${server.id}__${tool.name}`.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 60);
+				tools.push(
+					defineTool({
+						name: jsName,
+						description: `[${server.name}] ${tool.description ?? tool.name}`.slice(0, 400),
+						parameters: Type.Unsafe((tool.inputSchema as object) ?? { type: "object", properties: {} }),
+						execute: async (args: unknown) => {
+							const res = await entry!.client.callTool(tool.name, (args ?? {}) as Record<string, unknown>);
+							const content = toLlmContent(res as never) as { type: string; text?: string }[];
+							const text = content.map((c) => c.text ?? "").join("\n").slice(0, 8000);
+							return { output: [{ type: "text", text: text || "(空结果)" }] };
+						},
+					}),
+				);
+			}
+		} catch (err) {
+			console.warn(`MCP server ${server.name} unavailable`, String(err));
+		}
+	}
+	// 每个会话每次只用一个扩展名，内部工具数量随配置变化。
+	return defineExtension({ name: "mcp", tools });
+}
+
 export class SpikeAgent extends DurableObject {
 	/** pi-durable 的存储句柄，用来枚举会话（Harness 本身不提供列表 API）。 */
+	/** MCP 扩展：构建一次后常驻，避免每轮重连造成工具列表抖动。 */
+	private mcpExt: { name: string; tools?: unknown[] } | null = null;
+	/** 注册表引用：MCP 扩展在运行时安装（install 按名替换）。 */
+	private registryRef: { install(ext: unknown): void; snapshot(): { installed(): readonly { name: string }[] } } | null = null;
 	private storageRef: { scanConversations(q: object, limit: number, cursor: undefined, context: unknown): Promise<unknown> } | null = null;
 
 	private harness: Harness | null = null;
@@ -169,6 +223,7 @@ export class SpikeAgent extends DurableObject {
 			const models = createModels();
 			models.setProvider(deepseekProvider()); // reads DEEPSEEK_API_KEY
 			const registry = createRegistry();
+			this.registryRef = registry as unknown as typeof this.registryRef;
 			registry.install(spikeExtension);
 			// Code mode：模型写 JS 调 tools.<name>()，QuickJS WASM 沙箱内执行（workerd 原生支持）。
 			registry.install(codemodeExtension);
@@ -177,6 +232,9 @@ export class SpikeAgent extends DurableObject {
 			ensureTables(this.ctx.storage.sql);
 			sqlFacade = this.ctx.storage.sql;
 			this.storageRef = storage;
+			// MCP 扩展在表就绪后构建并安装；之后由 /api/mcp 变更时重建。
+			this.mcpExt = (await buildMcpExtension(sqlFacade)) as never;
+				if (this.mcpExt) registry.install(this.mcpExt);
 			this.harness = await Harness.open(storage, { models, registry }, ctx);
 			this.harness.resume();
 		}
@@ -187,14 +245,17 @@ export class SpikeAgent extends DurableObject {
 		const harness = await this.open();
 		const root = await this.conversationFor(harness, sessionId);
 		// 会话首次创建后 agent 选择会固化在 pi.agent 文档里；幂等重设，保证新扩展开关对老会话也生效。
+		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
 		await root.configure(
 			{
-				extensions: [spikeExtension, codemodeExtension],
+				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0 ? [spikeExtension, codemodeExtension, mcpExt as never] : [spikeExtension, codemodeExtension],
 				instructions:
 					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
 			},
 			ctx,
 		);
+		const dbgAgent = await root.agent(ctx);
+		console.log("CHAT_TOOLS", JSON.stringify(dbgAgent.tools.map((t) => (t as { name?: string }).name)));
 		// 记录本轮起点：之后只把新增条目里的工具结果算作本轮工具活动。
 		const before = await root.entries({}, 1, undefined, ctx);
 		const beforeId = (before.items[0] as unknown as { id?: number } | undefined)?.id ?? 0;
@@ -399,9 +460,10 @@ export class SpikeAgent extends DurableObject {
 	async chatStream(message: string, sessionId?: string): Promise<Response> {
 		const harness = await this.open();
 		const root = await this.conversationFor(harness, sessionId);
+		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
 		await root.configure(
 			{
-				extensions: [spikeExtension, codemodeExtension],
+				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0 ? [spikeExtension, codemodeExtension, mcpExt as never] : [spikeExtension, codemodeExtension],
 				instructions:
 					"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。",
 			},
@@ -532,6 +594,9 @@ export class SpikeAgent extends DurableObject {
 			if (request.method === "GET" && url.pathname === "/debug/agent") {
 				const harness = await this.open();
 				const root = await harness.root(ctx);
+				const mcpExtDbg = await buildMcpExtension(sqlFacade!);
+				if (mcpExtDbg && this.registryRef) this.registryRef.install(mcpExtDbg);
+				await root.configure({ extensions: mcpExtDbg ? [spikeExtension, codemodeExtension, mcpExtDbg] : [spikeExtension, codemodeExtension] }, ctx);
 				const agent = await root.agent(ctx);
 				const a = agent as unknown as {
 					tools?: readonly { name?: string }[];
@@ -547,6 +612,8 @@ export class SpikeAgent extends DurableObject {
 					deferred: names(a.deferred),
 					extensions: names(a.extensions),
 					sections: (a.sections ?? []).map((x) => x.key),
+					mcpToolCount: mcpExtDbg ? (mcpExtDbg.tools?.length ?? 0) : 0,
+					installed: this.registryRef?.snapshot().installed().map((e) => e.name) ?? null,
 				});
 			}
 			if (request.method === "GET" && url.pathname === "/sessions") {
@@ -587,6 +654,42 @@ export class SpikeAgent extends DurableObject {
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/mcp" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const rows = sqlFacade!.exec("SELECT id, name, url, created_at FROM mcp_servers ORDER BY created_at ASC").toArray();
+				return Response.json({ servers: rows });
+			}
+			if (url.pathname === "/mcp" && request.method === "POST") {
+				const body = (await request.json()) as { name?: string; url?: string; headers?: Record<string, string> };
+				const name = (body.name ?? "").trim();
+				const serverUrl = (body.url ?? "").trim();
+				if (!name || !/^https?:\/\//.test(serverUrl)) {
+					return Response.json({ error: "需要名称与 http(s) 服务器地址" }, { status: 400 });
+				}
+				ensureTables(sqlFacade!);
+				const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || `s${Date.now()}`;
+				sqlFacade!.exec(
+					"INSERT INTO mcp_servers (id, name, url, headers, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, url = excluded.url, headers = excluded.headers",
+					id, name, serverUrl, JSON.stringify(body.headers ?? {}), new Date().toISOString(),
+				);
+				mcpCache.clear();
+				const rebuilt = await buildMcpExtension(sqlFacade!);
+				if (rebuilt) {
+					this.mcpExt = rebuilt as never;
+					if (this.registryRef) this.registryRef.install(rebuilt);
+				}
+				return Response.json({ ok: true, id, tools: rebuilt?.tools?.length ?? 0 });
+			}
+			if (url.pathname === "/mcp" && request.method === "DELETE") {
+				sqlFacade!.exec("DELETE FROM mcp_servers WHERE id = ?", url.searchParams.get("id") ?? "");
+				mcpCache.clear();
+				const rebuilt = await buildMcpExtension(sqlFacade!);
+				if (rebuilt) {
+					this.mcpExt = rebuilt as never;
+					if (this.registryRef) this.registryRef.install(rebuilt);
+				}
+				return Response.json({ ok: true, tools: rebuilt?.tools?.length ?? 0 });
 			}
 			if (url.pathname === "/reflect" && request.method === "POST") {
 				const body = (await request.json().catch(() => ({}))) as { sessionId?: string };

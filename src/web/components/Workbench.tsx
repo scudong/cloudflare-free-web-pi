@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { renderMarkdown } from "../lib/rich";
-import type { FileInfo, MemoryInfo } from "../types";
+import type { FileInfo, McpServerInfo, MemoryInfo } from "../types";
 
-export type WorkbenchTab = "files" | "memories";
+export type WorkbenchTab = "files" | "memories" | "mcp";
 
 interface WorkbenchProps {
 	tab: WorkbenchTab;
@@ -15,10 +15,15 @@ interface WorkbenchProps {
 	memories: MemoryInfo[];
 	memoriesLoading: boolean;
 	memoriesError: string | null;
+	mcpServers: McpServerInfo[];
+	mcpLoading: boolean;
+	mcpError: string | null;
 	/** Bumped after each chat round / deletion so an open file re-fetches fresh content. */
 	refreshTick: number;
 	onDeleteFile: (name: string) => Promise<boolean>;
 	onDeleteMemory: (id: number) => Promise<boolean>;
+	onAddMcp: (name: string, url: string) => Promise<boolean>;
+	onDeleteMcp: (id: string) => Promise<boolean>;
 }
 
 function formatSize(size: number): string {
@@ -246,6 +251,96 @@ function FileView({
 	);
 }
 
+/** The "连接" tab: MCP servers the agent can call tools from. */
+function McpList({
+	servers,
+	loading,
+	error,
+	onAdd,
+	onDelete,
+}: {
+	servers: McpServerInfo[];
+	loading: boolean;
+	error: string | null;
+	onAdd: (name: string, url: string) => Promise<boolean>;
+	onDelete: (id: string) => Promise<boolean>;
+}) {
+	const [name, setName] = useState("");
+	const [url, setUrl] = useState("");
+	const [busy, setBusy] = useState(false);
+
+	const submit = () => {
+		if (!name.trim() || !url.trim() || busy) return;
+		setBusy(true);
+		void (async () => {
+			const ok = await onAdd(name.trim(), url.trim());
+			if (ok) {
+				setName("");
+				setUrl("");
+			}
+			setBusy(false);
+		})();
+	};
+
+	return (
+		<div className="flex min-h-0 flex-1 flex-col">
+			<div className="shrink-0 space-y-1.5 border-b border-slate-800/70 p-3">
+				<input
+					value={name}
+					onChange={(e) => setName(e.target.value)}
+					placeholder="名称，如 deepwiki"
+					aria-label="MCP 名称"
+					className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+				/>
+				<input
+					value={url}
+					onChange={(e) => setUrl(e.target.value)}
+					placeholder="https://example.com/mcp"
+					aria-label="MCP 服务器地址"
+					className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
+				/>
+				<button
+					type="button"
+					onClick={submit}
+					disabled={busy || !name.trim() || !url.trim()}
+					className="w-full rounded-md bg-sky-600 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+				>
+					{busy ? "连接中…" : "添加 MCP 服务器"}
+				</button>
+			</div>
+			<div className="min-h-0 flex-1 overflow-y-auto p-2">
+				{loading && servers.length === 0 && <p className="px-1 py-2 text-xs text-slate-500">正在加载…</p>}
+				{error && <p className="px-1 py-2 text-xs text-rose-300">{error}</p>}
+				{!loading && servers.length === 0 && !error && (
+					<p className="px-1 py-2 text-xs text-slate-500">还没有连接 MCP。添加后其工具会以 mcp__名称__工具 的形式提供。</p>
+				)}
+				<ul className="space-y-1">
+					{servers.map((server) => (
+						<li key={server.id} className="flex items-start gap-2 rounded-lg bg-slate-800/50 px-2.5 py-2">
+							<span aria-hidden className="mt-0.5 text-xs">🔌</span>
+							<span className="min-w-0 flex-1">
+								<span className="block truncate text-[13px] text-slate-100">{server.name}</span>
+								<span className="block truncate text-[11px] text-slate-500">{server.url}</span>
+							</span>
+							<button
+								type="button"
+								title="移除"
+								aria-label={`移除 ${server.name}`}
+								onClick={() => {
+									if (window.confirm(`移除 MCP「${server.name}」？`)) void onDelete(server.id);
+								}}
+								className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
+							>
+								🗑
+							</button>
+						</li>
+					))}
+				</ul>
+			</div>
+		</div>
+	);
+}
+
 /** Right column: workbench with 文件 / 记忆 tabs, switching to a file view on click. */
 export function Workbench({
 	tab,
@@ -257,9 +352,14 @@ export function Workbench({
 	memories,
 	memoriesLoading,
 	memoriesError,
+	mcpServers,
+	mcpLoading,
+	mcpError,
 	refreshTick,
 	onDeleteFile,
 	onDeleteMemory,
+	onAddMcp,
+	onDeleteMcp,
 }: WorkbenchProps) {
 	const [openName, setOpenName] = useState<string | null>(null);
 
@@ -314,6 +414,7 @@ export function Workbench({
 					<div className="flex shrink-0 items-stretch border-b border-slate-800/70" role="tablist">
 						{tabButton("files", "文件", files.length)}
 						{tabButton("memories", "记忆", memories.length)}
+						{tabButton("mcp", "连接", mcpServers.length)}
 					</div>
 					{tab === "files" ? (
 						<FileList
@@ -323,8 +424,10 @@ export function Workbench({
 							onOpen={setOpenName}
 							onDelete={handleDeleteFile}
 						/>
-					) : (
+					) : tab === "memories" ? (
 						<MemoryList memories={memories} loading={memoriesLoading} error={memoriesError} onDelete={handleDeleteMemory} />
+					) : (
+						<McpList servers={mcpServers} loading={mcpLoading} error={mcpError} onAdd={onAddMcp} onDelete={onDeleteMcp} />
 					)}
 				</>
 			)}

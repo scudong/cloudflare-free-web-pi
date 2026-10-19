@@ -135,6 +135,13 @@ export const api = {
 	deleteFile: (sessionId: string, name: string) =>
 		requestJson<{ ok: boolean }>(withQuery("/api/files", { sessionId, name }), { method: "DELETE" }),
 
+	mcpServers: () => requestJson<{ servers?: unknown[] }>("/api/mcp"),
+
+	addMcp: (name: string, url: string) =>
+		requestJson<{ ok?: boolean; tools?: number }>("/api/mcp", jsonPost({ name, url })),
+
+	deleteMcp: (id: string) => requestJson<{ ok: boolean }>(withQuery("/api/mcp", { id }), { method: "DELETE" }),
+
 	memories: () => requestJson<{ memories?: unknown[] }>("/api/memories"),
 
 	deleteMemory: (id: number) => requestJson<{ ok: boolean }>(withQuery("/api/memories", { id: String(id) }), { method: "DELETE" }),

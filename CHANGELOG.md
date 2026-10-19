@@ -2,6 +2,14 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-19（MCP 接入）
+
+### MCP（Model Context Protocol）工具接入（本条提交）
+- `mcp_servers` 表 + `GET/POST/DELETE /api/mcp`；工作台新增「连接」tab，可添加/移除 Streamable HTTP MCP 服务器
+- 启动时连接并列出工具，包装为 `mcp__<服务器>__<工具>`，仅模型可调用
+- **踩坑：** 扩展必须在 `Harness.open` 前 `registry.install`；早期版本每轮重建导致工具反复添加/移除，污染老会话转录（`pi.system` 的 toolsAdded/toolsRemoved 记录），表现为模型只看到旧工具集——新会话正常。现改为「构建一次常驻 + 配置变更时重建，失败保留上次成功结果」
+- 验证：新会话中模型调用 `mcp__deepwiki__ask_wiki_question` 得到真实回答
+
 ## 2026-10-19
 
 ### 文件按会话隔离 + 会话重命名/删除（`201bb89`）
