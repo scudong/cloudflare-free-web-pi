@@ -81,8 +81,10 @@ export const api = {
 	createSession: () => requestJson<{ id?: string; title?: string }>("/api/sessions", { method: "POST" }),
 
 	/**
-	 * POST /api/chat/stream — SSE。onEvent 收到 {type:"text",delta} / {type:"tool_start",name}
-	 * / {type:"tool_end",name} / {type:"done",answer,tools} / {type:"error",message}。
+	 * POST /api/chat/stream — SSE。事件：
+	 * thinking_start / thinking{delta}（思考过程）
+	 * text{delta} / tool_start{name,id,parentId,args} / tool_end{name,id,parentId,summary}
+	 * done{answer,tools} / error{message}
 	 */
 	streamChat: async (
 		message: string,
@@ -110,10 +112,13 @@ export const api = {
 			while (cut >= 0) {
 				const frame = buffer.slice(0, cut);
 				buffer = buffer.slice(cut + 2);
+				// 事件名在 "event: xxx" 行；data 行是 JSON。
+				const eventLine = frame.split("\n").find((l) => l.startsWith("event:"));
 				const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
 				if (dataLine) {
 					try {
-						onEvent(JSON.parse(dataLine.slice(5).trim()));
+						const payload = JSON.parse(dataLine.slice(5).trim()) as { type?: string; [key: string]: unknown };
+						onEvent({ type: eventLine ? eventLine.slice(6).trim() : (payload.type ?? "message"), ...payload });
 					} catch {
 						// Ignore malformed frames; the terminal done event still arrives.
 					}
@@ -171,11 +176,15 @@ export const api = {
 	setModel: (sessionId: string, modelId: string) =>
 		requestJson<{ ok?: boolean }>("/api/model", jsonPost({ sessionId, modelId })),
 
-	/** 全局设置（v0.20.0）：目前只有网页搜索开关。 */
-	settings: () => requestJson<{ webSearch?: boolean }>("/api/settings"),
+	/** 全局设置（v0.20.0 网页搜索；v0.22.0 增加思考档位）。 */
+	settings: () => requestJson<{ webSearch?: boolean; thinkingLevel?: string }>("/api/settings"),
 
-	setSettings: (patch: { webSearch?: boolean }) =>
-		requestJson<{ ok?: boolean; webSearch?: boolean }>("/api/settings", jsonPost(patch)),
+	setSettings: (patch: { webSearch?: boolean; thinkingLevel?: string }) =>
+		requestJson<{ ok?: boolean; webSearch?: boolean; thinkingLevel?: string }>("/api/settings", jsonPost(patch)),
+
+	/** 当前会话的分步计划（v0.22.0）。 */
+	plan: (sessionId: string) =>
+		requestJson<{ steps?: { title: string; status: string }[] }>(withQuery("/api/plan", { sessionId })),
 
 	share: (sessionId: string) =>
 		requestJson<{ ok?: boolean; token?: string; url?: string }>("/api/share", jsonPost({ sessionId, kind: "conversation" })),

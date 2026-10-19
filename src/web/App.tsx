@@ -13,7 +13,7 @@ import { parseEntries, truncateOneLine } from "./lib/entries";
 import { parseAutomations, parseFiles, parseMemories, parseSessions, parseSkills } from "./lib/collections";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { AutomationInfo, ChatMessage, FileInfo, McpServerInfo, MemoryInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
+import type { AutomationInfo, ChatMessage, FileArtifact, FileInfo, McpServerInfo, MemoryInfo, PlanStep, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -21,21 +21,6 @@ const LEFT_OPEN_KEY = "pi-harness.left-open";
 const RIGHT_OPEN_KEY = "pi-harness.right-open";
 type PanelState = "loading" | "ready" | "error";
 type MobileTab = "chat" | "files";
-
-/** Tolerantly extract the tool list from a /api/chat response. */
-function toToolInfos(raw: unknown): ToolCallInfo[] {
-	if (!Array.isArray(raw)) return [];
-	return raw
-		.filter((item): item is Record<string, unknown> => item !== null && typeof item === "object")
-		.map((item) => {
-			const full = typeof item.summary === "string" ? item.summary : "";
-			return {
-				name: typeof item.name === "string" && item.name.trim() ? item.name.trim() : "工具",
-				summary: truncateOneLine(full, TOOL_SUMMARY_MAX),
-				full,
-			};
-		});
-}
 
 export default function App() {
 	const isDesktop = useMediaQuery(DESKTOP_QUERY);
@@ -83,6 +68,12 @@ export default function App() {
 	const [model, setModel] = useState("deepseek-flash");
 	// 网页搜索开关（v0.20.0）：null 表示尚未读到后端设置
 	const [webSearch, setWebSearch] = useState<boolean | null>(null);
+	// 思考档位（v0.22.0）：off / low / high
+	const [thinkingLevel, setThinkingLevel] = useState<string>("low");
+	// 当前会话的分步计划（v0.22.0）
+	const [plan, setPlan] = useState<PlanStep[]>([]);
+	/** 从聊天里的文件卡打开右栏预览（v0.22.0）。 */
+	const [fileRequest, setFileRequest] = useState<{ name: string; tick: number } | null>(null);
 	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
 	const [skills, setSkills] = useState<SkillInfo[]>([]);
 	const [skillsLoading, setSkillsLoading] = useState(true);
@@ -227,7 +218,9 @@ export default function App() {
 				const bubbleId = nextId();
 				let bubbleShown = false;
 				let buffered = "";
-				const toolNames: { name: string; summary: string }[] = [];
+				let thinkingBuf = "";
+				const tools: ToolCallInfo[] = [];
+				const artifacts: FileArtifact[] = [];
 				const ensureBubble = () => {
 					if (bubbleShown) return;
 					bubbleShown = true;
@@ -237,10 +230,30 @@ export default function App() {
 					setMessages((prev) =>
 						prev.map((m) =>
 							m.id === bubbleId
-								? { ...m, text: buffered || " ", tools: toolNames.length ? toToolInfos(toolNames) : [] }
+								? {
+										...m,
+										text: buffered || " ",
+										thinking: thinkingBuf || undefined,
+										tools: tools.length ? tools.map((t) => ({ ...t })) : [],
+										files: artifacts.length ? [...artifacts] : undefined,
+									}
 								: m,
 						),
 					);
+				};
+				// update_plan 的入参就是最新计划：聊天里实时渲染，不用等工具结果
+				const applyPlan = (args: unknown) => {
+					const steps = (args as { steps?: unknown })?.steps;
+					if (!Array.isArray(steps)) return;
+					const parsed: PlanStep[] = [];
+					for (const item of steps) {
+						const o = (item ?? {}) as { title?: unknown; status?: unknown };
+						const title = String(o.title ?? "").trim();
+						if (!title) continue;
+						const s = String(o.status ?? "pending");
+						parsed.push({ title, status: s === "completed" || s === "in_progress" ? s : "pending" });
+					}
+					if (parsed.length) setPlan(parsed);
 				};
 				try {
 					await api.streamChat(
@@ -249,23 +262,62 @@ export default function App() {
 						images,
 						(event) => {
 							if (generationRef.current !== generation) return;
-							if (event.type === "text") {
+							if (event.type === "thinking") {
+								thinkingBuf += typeof event.delta === "string" ? event.delta : "";
+								ensureBubble();
+								syncBubble();
+							} else if (event.type === "thinking_start") {
+								ensureBubble();
+							} else if (event.type === "text") {
 								buffered += typeof event.delta === "string" ? event.delta : "";
 								ensureBubble();
 								syncBubble();
 							} else if (event.type === "tool_start") {
-								toolNames.push({ name: typeof event.name === "string" ? event.name : "tool", summary: "执行中…" });
+								const name = typeof event.name === "string" ? event.name : "tool";
+								tools.push({
+									name,
+									summary: "执行中…",
+									id: typeof event.id === "string" ? event.id : undefined,
+									parentId: typeof event.parentId === "string" ? event.parentId : undefined,
+									status: "running",
+									args: event.args,
+								});
+								if (name === "update_plan") applyPlan(event.args);
+								// write_file 的入参里就有文件名 → 直接出文件卡
+								const fileName = (event.args as { name?: unknown } | undefined)?.name;
+								if (name === "write_file" && typeof fileName === "string" && fileName.trim()) {
+									if (!artifacts.some((f) => f.name === fileName)) artifacts.push({ name: fileName });
+								}
 								ensureBubble();
+								syncBubble();
+							} else if (event.type === "tool_end") {
+								const id = typeof event.id === "string" ? event.id : undefined;
+								const name = typeof event.name === "string" ? event.name : "tool";
+								const target = id
+									? tools.find((t) => t.id === id)
+									: [...tools].reverse().find((t) => t.name === name && t.status === "running");
+								if (target) {
+									target.status = event.error ? "error" : "done";
+									target.summary =
+										typeof event.summary === "string" && event.summary
+											? truncateOneLine(event.summary, TOOL_SUMMARY_MAX)
+											: "完成";
+								}
 								syncBubble();
 							} else if (event.type === "done") {
 								const answer = typeof event.answer === "string" ? event.answer : "";
-								const tools = Array.isArray(event.tools) ? (event.tools as { name: string; summary: string }[]) : toolNames;
-								if (!bubbleShown) {
-									ensureBubble();
-								}
+								if (!bubbleShown) ensureBubble();
 								setMessages((prev) => {
 									const next = prev.map((m) =>
-										m.id === bubbleId ? { ...m, text: answer || "（空回复）", tools: toToolInfos(tools) } : m,
+										m.id === bubbleId
+											? {
+													...m,
+													text: answer || "（空回复）",
+													thinking: thinkingBuf || undefined,
+													tools: tools.length ? tools.map((t) => ({ ...t, status: (t.status === "running" ? "done" : t.status) as ToolCallInfo["status"] })) : [],
+													files: artifacts.length ? [...artifacts] : undefined,
+												}
+											: m,
 									);
 									return next;
 								});
@@ -367,7 +419,10 @@ export default function App() {
 		void (async () => {
 			try {
 				const data = await api.settings();
-				if (alive) setWebSearch(data.webSearch !== false);
+				if (alive) {
+					setWebSearch(data.webSearch !== false);
+					if (typeof data.thinkingLevel === "string") setThinkingLevel(data.thinkingLevel);
+				}
 			} catch {
 				if (alive) setWebSearch(true);
 			}
@@ -376,6 +431,29 @@ export default function App() {
 			alive = false;
 		};
 	}, []);
+
+	// 计划（v0.22.0）：切会话时读取该会话的持久化计划
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.plan(sessionId);
+				if (!alive) return;
+				const steps = Array.isArray(data.steps) ? data.steps : [];
+				setPlan(
+					steps.map((s) => ({
+						title: String(s.title ?? ""),
+						status: (s.status === "completed" || s.status === "in_progress" ? s.status : "pending") as PlanStep["status"],
+					})),
+				);
+			} catch {
+				if (alive) setPlan([]);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [sessionId]);
 
 	// 切换会话时，从会话列表带出该会话的模型（若无则默认）
 	useEffect(() => {
@@ -617,6 +695,15 @@ export default function App() {
 		});
 	}, []);
 
+	/** 从聊天里的文件卡打开右栏预览。 */
+	const handleOpenFileFromChat = useCallback((name: string) => {
+		if (!name) return;
+		setFileRequest((prev) => ({ name, tick: (prev?.tick ?? 0) + 1 }));
+		setWorkbenchWide(false);
+		setRightOpen(true);
+		saveBool(RIGHT_OPEN_KEY, true);
+	}, []);
+
 	/** 拖拽分隔条调整右栏宽度（限制在 260px ~ 视口 65%）。 */
 	const handleRightResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
 		event.preventDefault();
@@ -774,6 +861,16 @@ export default function App() {
 		[nextId],
 	);
 
+	/** 思考档位（v0.22.0）：off/低/高，后端在下一次对话生效。 */
+	const handleChangeThinkingLevel = useCallback((next: string) => {
+		const prev = thinkingLevel;
+		setThinkingLevel(next);
+		void api.setSettings({ thinkingLevel: next }).catch(() => {
+			setThinkingLevel(prev);
+			setMessages((m) => [...m, { id: nextId(), role: "notice", text: "思考档位保存失败。" }]);
+		});
+	}, [thinkingLevel, nextId]);
+
 	/** 退出登录：清 cookie 并回到登录闸门。 */
 	const handleLogout = useCallback(() => {
 		setSettingsOpen(false);
@@ -930,6 +1027,9 @@ export default function App() {
 							loading={loading}
 							loadError={loadError}
 							onRetry={handleRetry}
+							plan={plan}
+							files={files}
+							onOpenFile={handleOpenFileFromChat}
 						/>
 						<Composer pending={pending} onSend={handleSend} onStop={handleStop} />
 					</section>
@@ -965,6 +1065,7 @@ export default function App() {
 							onFileOpenChange={handleFileOpenChange}
 							refreshTick={panelTick}
 							onDeleteFile={handleDeleteFile}
+							openRequest={fileRequest}
 						/>
 					</div>
 				)}
@@ -986,6 +1087,8 @@ export default function App() {
 				onRestore={handleRestore}
 				webSearch={webSearch}
 				onToggleWebSearch={handleToggleWebSearch}
+				thinkingLevel={thinkingLevel}
+				onChangeThinkingLevel={handleChangeThinkingLevel}
 				memories={memories}
 				memoriesLoading={memoriesState === "loading"}
 				memoriesError={memoriesError}

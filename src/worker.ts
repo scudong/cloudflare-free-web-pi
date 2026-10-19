@@ -52,6 +52,8 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	sql.exec(`CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS reflect_state (conversation_id TEXT PRIMARY KEY, last_entry_id INTEGER NOT NULL, updated_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+	// 分步计划（update_plan 工具写入）：每个会话一份最新计划（v0.22.0）
+	sql.exec(`CREATE TABLE IF NOT EXISTS plans (conversation_id TEXT PRIMARY KEY, steps TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
 	try {
 		sql.exec(`ALTER TABLE pi_mem ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`);
@@ -75,6 +77,33 @@ function getSetting(key: string, fallback: string): string {
 
 function setSetting(key: string, value: string): void {
 	sqlFacade!.exec("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+}
+
+/** 思考档位：off / low / high（deepseek-flash 支持 low/high/max，v4-pro 支持 high/max）。 */
+type ThinkingLevel = "off" | "low" | "high";
+const currentThinkingLevel = (): ThinkingLevel => {
+	const v = getSetting("thinking_level", "low");
+	return v === "off" || v === "high" ? v : "low";
+};
+
+/** 计划步骤（update_plan 工具）。 */
+type PlanStep = { title: string; status: "pending" | "in_progress" | "completed" };
+
+function savePlan(conversationId: string, steps: PlanStep[]): void {
+	sqlFacade!.exec(
+		"INSERT INTO plans (conversation_id, steps, updated_at) VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET steps = excluded.steps, updated_at = excluded.updated_at",
+		conversationId, JSON.stringify(steps), new Date().toISOString(),
+	);
+}
+
+function readPlan(conversationId: string): PlanStep[] {
+	try {
+		const rows = sqlFacade!.exec("SELECT steps FROM plans WHERE conversation_id = ?", conversationId).toArray() as { steps: string }[];
+		const parsed = rows[0] ? (JSON.parse(rows[0].steps) as unknown) : [];
+		return Array.isArray(parsed) ? (parsed as PlanStep[]) : [];
+	} catch {
+		return [];
+	}
 }
 
 const stripHtml = (html: string) =>
@@ -164,6 +193,43 @@ const spikeExtension = defineExtension({
 				} catch (e) {
 					return { output: [{ type: "text", text: "抓取失败：" + String(e).slice(0, 200) }] };
 				}
+			},
+		}),
+		defineTool({
+			name: "update_plan",
+			description:
+				"维护当前任务的分步计划（Codex 式 todo 列表）。多步任务开始前先列出完整步骤（3–7 步），之后每完成一步就再次调用本工具提交**完整的**步骤列表并更新状态。用户能在聊天界面实时看到这份计划，所以只列真正要做的步骤。",
+			parameters: Type.Object({
+				explanation: Type.Optional(Type.String({ description: "一句话说明为什么更新计划（可选）" })),
+				steps: Type.Array(
+					Type.Object({
+						title: Type.String({ description: "这一步做什么，动词开头，一句话" }),
+						status: Type.String({ description: "pending | in_progress | completed" }),
+					}),
+					{ description: "完整的步骤列表（每次都提交全量，不是增量）" },
+				),
+			}),
+			execute: async (args, api) => {
+				const raw = (args as { steps?: unknown }).steps;
+				const list = Array.isArray(raw) ? raw : [];
+				const steps: PlanStep[] = [];
+				for (const item of list.slice(0, 20)) {
+					const o = (item ?? {}) as { title?: unknown; status?: unknown };
+					const title = String(o.title ?? "").trim().slice(0, 120);
+					if (!title) continue;
+					const s = String(o.status ?? "pending");
+					steps.push({ title, status: s === "completed" || s === "in_progress" ? s : "pending" });
+				}
+				if (!steps.length) return { output: [{ type: "text", text: "计划为空，未保存。" }] };
+				savePlan(String(api.conversationId), steps);
+				const done = steps.filter((s) => s.status === "completed").length;
+				const current = steps.find((s) => s.status === "in_progress");
+				return {
+					output: [{
+						type: "text",
+						text: `计划已更新：${steps.length} 步，完成 ${done} 步${current ? `，当前：${current.title}` : ""}。`,
+					}],
+				};
 			},
 		}),
 		defineTool({
@@ -482,6 +548,8 @@ export class SpikeAgent extends DurableObject {
 		await root.configure(
 			{
 				model: { provider: "deepseek", modelId: this.modelFor(sessionId) },
+				// 思考档位（v0.22.0）：off 时不产生 thinking 事件，前端自然不显示思考块。
+				thinkingLevel: currentThinkingLevel(),
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
 					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
 					: [spikeExtension, codemodeExtension, toolSearchExtension],
@@ -723,6 +791,9 @@ export class SpikeAgent extends DurableObject {
 		if (getSetting("web_search", "1") === "1") {
 			out += "\n需要联网查资料时优先用 web_search 搜索、web_fetch_page 抓取正文（比 http_fetch 更干净）。";
 		}
+		// 分步计划（v0.22.0）：多步任务先 update_plan，用户在聊天里实时看到清单。
+		out +=
+			"\n任务需要 3 步以上（多次检索、多文件产出、先计算后写作等）时，先用 update_plan 列出步骤并在每完成一步后更新；单步问题不要调用它。";
 		return out;
 	}
 
@@ -750,6 +821,7 @@ export class SpikeAgent extends DurableObject {
 				shares: q("SELECT token, kind, session_id, name, created_at FROM shares"),
 				skills: q("SELECT name, description, content FROM skills ORDER BY name"),
 				settings: q("SELECT key, value FROM app_settings"),
+				plans: q("SELECT conversation_id, steps, updated_at FROM plans"),
 			},
 		};
 	}
@@ -823,6 +895,15 @@ export class SpikeAgent extends DurableObject {
 			if (!key) continue;
 			setSetting(key, str(s.value));
 			counts.settings = (counts.settings ?? 0) + 1;
+		}
+		for (const p of rows("plans")) {
+			const cid = str(p.conversation_id);
+			if (!cid) continue;
+			sqlFacade!.exec(
+				"INSERT INTO plans (conversation_id, steps, updated_at) VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET steps = excluded.steps",
+				cid, str(p.steps) || "[]", str(p.updated_at) || new Date().toISOString(),
+			);
+			counts.plans = (counts.plans ?? 0) + 1;
 		}
 		for (const s of rows("sessions")) {
 			const id = str(s.id);
@@ -1077,6 +1158,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 		await root.configure(
 			{
 				model: { provider: "deepseek", modelId: this.modelFor(sessionId) },
+				thinkingLevel: currentThinkingLevel(),
 				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
 					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
 					: [spikeExtension, codemodeExtension, toolSearchExtension],
@@ -1108,14 +1190,32 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				for (const e of events) {
 					if (e.type === "message_update") {
 						for (const change of e.changes) {
-							if (change.type === "text_delta" && change.delta) await send("text", { delta: change.delta });
+							// 思考过程（v0.22.0）：模型开 reasoning 时逐字推送
+							if (change.type === "thinking_delta" && change.delta) await send("thinking", { delta: change.delta });
+							else if (change.type === "thinking_start") await send("thinking_start", {});
+							else if (change.type === "text_delta" && change.delta) await send("text", { delta: change.delta });
 						}
 					} else if (e.type === "tool_execution_start") {
-						const call = e as unknown as { toolName?: string; args?: unknown };
-						await send("tool_start", { name: call.toolName ?? "tool" });
+						const call = e as unknown as { toolName?: string; toolCallId?: string; parentToolCallId?: string; args?: unknown };
+						await send("tool_start", {
+							name: call.toolName ?? "tool",
+							id: call.toolCallId,
+							parentId: call.parentToolCallId,
+							args: call.args,
+						});
 					} else if (e.type === "tool_execution_end") {
-						const call = e as unknown as { toolName?: string };
-						await send("tool_end", { name: call.toolName ?? "tool" });
+						const call = e as unknown as {
+							toolName?: string;
+							toolCallId?: string;
+							parentToolCallId?: string;
+							result?: { summary?: unknown };
+						};
+						await send("tool_end", {
+							name: call.toolName ?? "tool",
+							id: call.toolCallId,
+							parentId: call.parentToolCallId,
+							summary: typeof call.result?.summary === "string" ? call.result.summary : undefined,
+						});
 					}
 				}
 			});
@@ -1417,12 +1517,24 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 			}
 			if (url.pathname === "/settings" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				return Response.json({ webSearch: getSetting("web_search", "1") === "1" });
+				return Response.json({ webSearch: getSetting("web_search", "1") === "1", thinkingLevel: currentThinkingLevel() });
 			}
 			if (url.pathname === "/settings" && request.method === "POST") {
-				const body = (await request.json()) as { webSearch?: boolean };
+				const body = (await request.json()) as { webSearch?: boolean; thinkingLevel?: string };
 				if (typeof body.webSearch === "boolean") setSetting("web_search", body.webSearch ? "1" : "0");
-				return Response.json({ ok: true, webSearch: getSetting("web_search", "1") === "1" });
+				if (body.thinkingLevel === "off" || body.thinkingLevel === "low" || body.thinkingLevel === "high") {
+					setSetting("thinking_level", body.thinkingLevel);
+				}
+				return Response.json({
+					ok: true,
+					webSearch: getSetting("web_search", "1") === "1",
+					thinkingLevel: currentThinkingLevel(),
+				});
+			}
+			if (url.pathname === "/plan" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const sid = url.searchParams.get("sessionId") ?? "1";
+				return Response.json({ steps: readPlan(sid) });
 			}
 			if (url.pathname === "/models" && request.method === "GET") {
 				return Response.json({ models: AVAILABLE_MODELS, default: DEFAULT_MODEL_ID });

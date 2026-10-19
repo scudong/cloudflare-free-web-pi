@@ -19,6 +19,9 @@ interface SettingsDialogProps {
 	/** 网页搜索开关（null = 尚未读到后端设置）。 */
 	webSearch: boolean | null;
 	onToggleWebSearch: (next: boolean) => void;
+	/** 思考档位（v0.22.0）：off / low / high。 */
+	thinkingLevel: string;
+	onChangeThinkingLevel: (next: string) => void;
 	/** 记忆库（v0.21.0 从工作台移入设置）。 */
 	memories: MemoryInfo[];
 	memoriesLoading: boolean;
@@ -75,6 +78,8 @@ export function SettingsDialog({
 	onRestore,
 	webSearch,
 	onToggleWebSearch,
+	thinkingLevel,
+	onChangeThinkingLevel,
 	memories,
 	memoriesLoading,
 	memoriesError,
@@ -148,6 +153,33 @@ export function SettingsDialog({
 							<span className="text-sm text-slate-200">工作台（右侧）</span>
 							<Switch checked={rightOpen} onChange={onToggleRight} label="显示/收起工作台" />
 						</div>
+					</div>
+				</Section>
+
+				<Section title="思考过程">
+					<p className="mb-2 text-xs leading-relaxed text-slate-500">
+						开启后模型先思考再回答，聊天里会出现可展开的「思考过程」块。档位越高越慢、越费 token。
+					</p>
+					<div className="inline-flex rounded-lg border border-slate-700 p-0.5">
+						{[
+							{ value: "off", label: "关闭" },
+							{ value: "low", label: "低" },
+							{ value: "high", label: "高" },
+						].map((option) => (
+							<button
+								key={option.value}
+								type="button"
+								onClick={() => onChangeThinkingLevel(option.value)}
+								aria-pressed={thinkingLevel === option.value}
+								className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+									thinkingLevel === option.value
+										? "bg-violet-600 text-white"
+										: "text-slate-300 hover:text-white"
+								}`}
+							>
+								{option.label}
+							</button>
+						))}
 					</div>
 				</Section>
 

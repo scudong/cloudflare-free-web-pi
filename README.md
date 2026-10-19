@@ -14,7 +14,7 @@
 | 模块 | 能力 |
 |---|---|
 | 会话 | 多会话隔离、自动标题、重命名、删除、**按会话选择模型**（`deepseek-flash` / `deepseek-v4-pro`） |
-| 对话 | SSE 流式逐字输出、工具调用实时 pill、图片输入（粘贴或上传，自动压缩 ≤1568px） |
+| 对话 | SSE 流式逐字输出、**可折叠思考过程**、**吸顶计划清单**（`update_plan`）、工具调用实时 pill（含 codemode 内嵌调用）、**产出文件卡**、完整 Markdown（表格/任务列表/代码复制）、图片输入（粘贴或上传，自动压缩 ≤1568px） |
 | 执行 | `codemode`：模型写 JavaScript 在 QuickJS 沙箱里跑，脚本内可 `await tools.<name>()` 调用其它工具 |
 | 网页 | `web_search` 联网搜索 + `web_fetch_page` 抓取正文（DeepSeek 搜索 API，设置中可开关）；`http_fetch` 直接抓取；**Browserbase MCP** 云端浏览器（导航/点击/提取，无需本地 Chrome） |
 | 记忆 | `remember` / `recall` + 每 6 条自动 `reflect` 抽取长期事实（带去重） |
@@ -97,7 +97,8 @@ npx wrangler deploy
 | GET | `/api/skills/community` | 社区技能目录（badlogic/pi-skills） |
 | POST | `/api/skills/import` | `{url}` 从 GitHub/raw/任意 md 导入技能 |
 | GET / POST / DELETE | `/api/mcp` | MCP 服务器配置（支持 `headers`） |
-| GET / POST | `/api/settings` | 全局设置（目前：网页搜索开关 `webSearch`） |
+| GET / POST | `/api/settings` | 全局设置（网页搜索开关 `webSearch`、思考档位 `thinkingLevel`） |
+| GET | `/api/plan?sessionId=` | 当前会话的分步计划 |
 | GET / POST / PATCH / DELETE | `/api/automations` | 定时任务 |
 | POST | `/api/share` · GET `/s/<token>` | 只读分享 |
 | GET | `/api/export?format=md` | 导出 Markdown |
@@ -108,7 +109,7 @@ npx wrangler deploy
 
 ## 内置工具
 
-`now` · `remember` · `recall` · `list_skills` · `load_skill` · `web_search` · `web_fetch_page` · `http_fetch` · `write_file` · `read_file` · `list_files` · `codemode` · `tool_search`，以及所有已配置 MCP 服务器的工具（`mcp__<服务器>__<工具>`）。
+`now` · `remember` · `recall` · `update_plan` · `list_skills` · `load_skill` · `web_search` · `web_fetch_page` · `http_fetch` · `write_file` · `read_file` · `list_files` · `codemode` · `tool_search`，以及所有已配置 MCP 服务器的工具（`mcp__<服务器>__<工具>`）。
 
 ---
 
@@ -140,7 +141,7 @@ CHANGELOG.md             # 逐版本更新记录
 
 完整记录见 [CHANGELOG.md](./CHANGELOG.md)。里程碑：
 
-`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏
+`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏 · `v0.22` 思考/计划/轨迹
 
 ## 致谢
 

@@ -54,12 +54,67 @@ function imagesOf(value: unknown): string[] {
 	return found;
 }
 
+/** 从条目内容块里收集思考过程（v0.22.0）：pi-ai 的 {type:"thinking", thinking:"..."}。 */
+function thinkingOf(value: unknown): string {
+	const parts: string[] = [];
+	const walk = (node: unknown) => {
+		if (Array.isArray(node)) {
+			for (const item of node) walk(item);
+			return;
+		}
+		if (!node || typeof node !== "object") return;
+		const o = node as Record<string, unknown>;
+		if (o.type === "thinking" && typeof o.thinking === "string") {
+			parts.push(o.thinking);
+			return;
+		}
+		for (const key of ["content", "model", "message", "parts"]) {
+			if (o[key] !== undefined) walk(o[key]);
+		}
+	};
+	walk(value);
+	return parts.join("");
+}
+
+/** 从 write_file 的工具结果文本里提取产出文件名与大小（v0.22.0）。 */
+function artifactsOf(toolName: string, text: string): { name: string; size?: number }[] {
+	if (toolName !== "write_file") return [];
+	const m = /已写入\s+(.+?)（(\d+)\s*字符）/.exec(text);
+	if (!m) return [];
+	const size = Number(m[2]);
+	return [{ name: m[1]!.trim(), ...(Number.isFinite(size) ? { size } : {}) }];
+}
+
 function pickString(o: Record<string, unknown>, keys: string[]): string {
 	for (const key of keys) {
 		const v = o[key];
 		if (typeof v === "string" && v.trim()) return v.trim();
 	}
 	return "";
+}
+
+/**
+ * 判断条目是否按 id 倒序（后端 /api/entries 的返回顺序）。
+ * 只看首尾两个带数字 id 的条目，缺失/相等时按正序处理。
+ */
+function isDescending(list: unknown[]): boolean {
+	const ids: number[] = [];
+	for (const item of list) {
+		if (item && typeof item === "object") {
+			const id = (item as { id?: unknown }).id;
+			if (typeof id === "number" && Number.isFinite(id)) ids.push(id);
+		}
+		if (ids.length >= 2) break;
+	}
+	if (ids.length < 2) return false;
+	// 取最后一个 id 对比（列表可能有尾部空项）
+	for (let i = list.length - 1; i >= 0; i--) {
+		const item = list[i];
+		if (!item || typeof item !== "object") continue;
+		const id = (item as { id?: unknown }).id;
+		if (typeof id === "number" && Number.isFinite(id)) return ids[0]! > id;
+	}
+	return false;
 }
 
 /**
@@ -70,7 +125,9 @@ function pickString(o: Record<string, unknown>, keys: string[]): string {
  * - 未知 kind：跳过
  */
 export function parseEntries(entries: unknown): ChatMessage[] {
-	const list = Array.isArray(entries) ? entries : [];
+	const raw = Array.isArray(entries) ? entries : [];
+	// 后端按 id 倒序返回（新→旧），聊天要按时间正序显示；顺带修正工具结果归属。
+	const list = isDescending(raw) ? [...raw].reverse() : raw;
 	const messages: ChatMessage[] = [];
 	let pendingTools: ToolCallInfo[] = [];
 	let seq = 0;
@@ -96,10 +153,17 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			messages.push({ id: `u${seq++}`, role: "user", text: text || "（图片）", ...(images.length ? { images } : {}) });
 		} else if (kind === "assistant") {
 			const text = textOf(entry.model ?? entry.content ?? entry.text).trim();
+			const thinking = thinkingOf(entry.model ?? entry.content ?? entry.text).trim();
 			const tools = pendingTools;
 			pendingTools = [];
-			if (!text && tools.length === 0) continue;
-			messages.push({ id: `a${seq++}`, role: "assistant", text, tools: tools.length ? tools : undefined });
+			if (!text && tools.length === 0 && !thinking) continue;
+			messages.push({
+				id: `a${seq++}`,
+				role: "assistant",
+				text,
+				tools: tools.length ? tools : undefined,
+				thinking: thinking || undefined,
+			});
 		} else if (kind === "tool-result" || kind === "tool_result" || kind === "toolResult") {
 			// 后端把工具结果放在 model[0]：{ toolName, content: [{type:"text",text}] }
 			const firstModel = Array.isArray(entry.model) ? (entry.model[0] as Record<string, unknown> | undefined) : undefined;
@@ -121,6 +185,14 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			const summary = truncateOneLine(rawSummary, TOOL_SUMMARY_MAX);
 			// Keep the untruncated original so the pill can expand to the full output
 			pendingTools.push({ name, summary: prefix + summary, full: prefix + rawSummary });
+			// 文件产出：挂到最近一条助手消息上（v0.22.0）
+			const files = artifactsOf(name, rawSummary);
+			if (files.length) {
+				const last = messages[messages.length - 1];
+				if (last && last.role === "assistant") {
+					last.files = [...(last.files ?? []), ...files];
+				}
+			}
 		}
 		// 其他 kind：宽容跳过
 	}

@@ -1,13 +1,20 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 /**
- * 极简富文本渲染（不引库）：换行由容器的 whitespace-pre-wrap 承担，
- * 这里只处理 **加粗**。其余字符按纯文本输出（React 自动转义，安全）。
+ * 轻量 Markdown 渲染（v0.22.0 增强）：标题 1–6、有序/无序/**嵌套**列表、
+ * 任务列表、代码块（带语言与复制）、引用、分隔线、管道表格（含对齐）、
+ * 图片，行内支持 **粗体** / *斜体* / ~~删除线~~ / `代码` / [链接]。
+ * 刻意不引第三方库：输出的是 React 元素，天然转义，没有 XSS 面。
  */
+
+const SAFE_HREF = /^(https?:\/\/|\/|#)/i;
+const SAFE_SRC = /^(https?:\/\/|data:image\/)/i;
+
+/** 行内富文本。 */
 export function renderRichText(text: string): ReactNode[] {
 	const nodes: ReactNode[] = [];
-	// 行内：**加粗**、`代码`、[文字](链接)
-	const re = /(\*\*([^*]+)\*\*)|(`([^`]+)`)|(\[([^\]]+)\]\(([^)\s]+)\))/g;
+	const re =
+		/(\*\*([^*]+)\*\*)|(\*([^*\n]+)\*)|(~~([^~]+)~~)|(`([^`]+)`)|(!\[([^\]]*)\]\(([^)\s]+)\))|(\[([^\]]+)\]\(([^)\s]+)\))/g;
 	let last = 0;
 	let key = 0;
 	let match: RegExpExecArray | null;
@@ -22,20 +29,45 @@ export function renderRichText(text: string): ReactNode[] {
 			);
 		} else if (match[4] !== undefined) {
 			nodes.push(
-				<code key={key++} className="rounded bg-slate-950/70 px-1 py-0.5 font-mono text-[0.92em] text-slate-200">
+				<em key={key++} className="italic">
 					{match[4]}
-				</code>,
+				</em>,
 			);
 		} else if (match[6] !== undefined) {
-			const href = match[7] ?? "#";
-			const safe = /^https?:\/\//.test(href) || href.startsWith("/") || href.startsWith("#");
 			nodes.push(
-				safe ? (
+				<span key={key++} className="line-through opacity-70">
+					{match[6]}
+				</span>,
+			);
+		} else if (match[8] !== undefined) {
+			nodes.push(
+				<code key={key++} className="rounded bg-slate-950/70 px-1 py-0.5 font-mono text-[0.92em] text-slate-200">
+					{match[8]}
+				</code>,
+			);
+		} else if (match[10] !== undefined) {
+			const src = match[11] ?? "";
+			if (SAFE_SRC.test(src)) {
+				nodes.push(
+					<img
+						key={key++}
+						src={src}
+						alt={match[10] || "图片"}
+						className="my-1.5 max-h-72 max-w-full rounded-lg border border-slate-700 object-contain"
+					/>,
+				);
+			} else {
+				nodes.push(<span key={key++}>{match[10]}</span>);
+			}
+		} else if (match[13] !== undefined) {
+			const href = match[14] ?? "#";
+			nodes.push(
+				SAFE_HREF.test(href) ? (
 					<a key={key++} href={href} target="_blank" rel="noreferrer noopener" className="text-sky-400 underline">
-						{match[6]}
+						{match[13]}
 					</a>
 				) : (
-					<span key={key++}>{match[6]}</span>
+					<span key={key++}>{match[13]}</span>
 				),
 			);
 		}
@@ -45,42 +77,96 @@ export function renderRichText(text: string): ReactNode[] {
 	return nodes;
 }
 
-/**
- * 轻量 Markdown 渲染（v0.15.0 增强）：标题 1–6、有序/无序列表、代码块、引用、分隔线、
- * 管道表格、行内代码/加粗/链接。刻意不引第三方库，避免体积与 XSS 面。
- */
+/** 代码块：语言标签 + 复制按钮。 */
+function CodeBlock({ code, lang }: { code: string; lang: string }) {
+	const [copied, setCopied] = useState(false);
+	const copy = () => {
+		void navigator.clipboard?.writeText(code).then(
+			() => {
+				setCopied(true);
+				window.setTimeout(() => setCopied(false), 1400);
+			},
+			() => {},
+		);
+	};
+	return (
+		<div className="my-2 overflow-hidden rounded-lg border border-slate-700 bg-slate-950/70">
+			<div className="flex items-center justify-between border-b border-slate-800 px-3 py-1">
+				<span className="font-mono text-[11px] uppercase tracking-wide text-slate-500">{lang || "text"}</span>
+				<button
+					type="button"
+					onClick={copy}
+					className="rounded px-1.5 py-0.5 text-[11px] text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
+				>
+					{copied ? "已复制" : "复制"}
+				</button>
+			</div>
+			<pre className="overflow-x-auto p-3 text-[12.5px] leading-relaxed">
+				<code className="font-mono text-slate-200">{code}</code>
+			</pre>
+		</div>
+	);
+}
+
+type ListItem = { text: string; indent: number; task?: boolean; checked?: boolean };
+
+/** 把收集到的列表项（含缩进）渲染成嵌套列表。 */
+function renderList(items: ListItem[], ordered: boolean, keyBase: string): ReactNode {
+	// 按缩进建树：只处理一层嵌套，更深的折叠到同层（Markdown 常见 2 空格/4 空格）
+	const roots: { item: ListItem; children: ListItem[] }[] = [];
+	for (const item of items) {
+		if (item.indent === 0 || roots.length === 0) roots.push({ item, children: [] });
+		else roots[roots.length - 1]!.children.push(item);
+	}
+
+	const renderItemMarker = (item: ListItem) =>
+		item.task === true ? (
+			<span aria-hidden className={`mr-1 ${item.checked ? "text-emerald-400" : "text-slate-500"}`}>
+				{item.checked ? "☑" : "☐"}
+			</span>
+		) : null;
+
+	const ListTag = ordered ? "ol" : "ul";
+	return (
+		<ListTag
+			key={keyBase}
+			className={`my-1 space-y-0.5 pl-5 ${ordered ? "list-decimal" : "list-disc"} marker:text-slate-500`}
+		>
+			{roots.map(({ item, children }, index) => (
+				<li key={index} className={item.task ? "list-none" : undefined}>
+					{renderItemMarker(item)}
+					{renderRichText(item.text)}
+					{children.length > 0 && renderList(children, ordered, `${keyBase}-${index}`)}
+				</li>
+			))}
+		</ListTag>
+	);
+}
+
+/** 表格对齐：`:---` 左、`:---:` 中、`---:` 右。 */
+function parseAlign(cell: string): "left" | "center" | "right" | undefined {
+	const t = cell.trim();
+	if (!/^:?-{2,}:?$/.test(t)) return undefined;
+	const l = t.startsWith(":");
+	const r = t.endsWith(":");
+	return l && r ? "center" : r ? "right" : l ? "left" : undefined;
+}
+
 export function renderMarkdown(text: string): ReactNode[] {
 	const lines = text.replace(/\r\n?/g, "\n").split("\n");
 	const nodes: ReactNode[] = [];
-	let bullets: string[] = [];
-	let ordered: string[] = [];
+	let list: ListItem[] = [];
+	let listOrdered = false;
 	let table: string[] = [];
 	let quote: string[] = [];
 	let key = 0;
 
-	const flushBullets = () => {
-		if (!bullets.length) return;
-		const items = bullets;
-		bullets = [];
-		nodes.push(
-			<ul key={key++} className="my-1 list-disc space-y-0.5 pl-5 marker:text-slate-500">
-				{items.map((item, index) => (
-					<li key={index}>{renderRichText(item)}</li>
-				))}
-			</ul>,
-		);
-	};
-	const flushOrdered = () => {
-		if (!ordered.length) return;
-		const items = ordered;
-		ordered = [];
-		nodes.push(
-			<ol key={key++} className="my-1 list-decimal space-y-0.5 pl-5 marker:text-slate-500">
-				{items.map((item, index) => (
-					<li key={index}>{renderRichText(item)}</li>
-				))}
-			</ol>,
-		);
+	const flushList = () => {
+		if (!list.length) return;
+		const items = list;
+		const ordered = listOrdered;
+		list = [];
+		nodes.push(renderList(items, ordered, `l${key++}`));
 	};
 	const flushQuote = () => {
 		if (!quote.length) return;
@@ -106,14 +192,19 @@ export function renderMarkdown(text: string): ReactNode[] {
 		);
 		table = [];
 		const header = rows[0] ?? [];
-		const body = rows.filter((row, index) => index > 0 && !row.every((cell) => /^:?-{2,}:?$/.test(cell)));
+		const aligns = (rows[1] ?? []).map(parseAlign);
+		const body = rows.filter((row, index) => index > 0 && !row.every((cell) => parseAlign(cell)));
 		nodes.push(
-			<div key={key++} className="my-2 overflow-x-auto">
+			<div key={key++} className="my-2 overflow-x-auto rounded-lg border border-slate-700">
 				<table className="w-full border-collapse text-[13px]">
 					<thead>
 						<tr>
 							{header.map((cell, index) => (
-								<th key={index} className="border border-slate-700 bg-slate-800/60 px-2 py-1 text-left font-medium">
+								<th
+									key={index}
+									style={{ textAlign: aligns[index] }}
+									className="border-b border-slate-700 bg-slate-800/60 px-2 py-1 font-medium"
+								>
 									{renderRichText(cell)}
 								</th>
 							))}
@@ -121,9 +212,13 @@ export function renderMarkdown(text: string): ReactNode[] {
 					</thead>
 					<tbody>
 						{body.map((row, rIndex) => (
-							<tr key={rIndex}>
+							<tr key={rIndex} className="even:bg-slate-800/20">
 								{row.map((cell, cIndex) => (
-									<td key={cIndex} className="border border-slate-700 px-2 py-1">
+									<td
+										key={cIndex}
+										style={{ textAlign: aligns[cIndex] }}
+										className="border-b border-slate-800 px-2 py-1 align-top"
+									>
 										{renderRichText(cell)}
 									</td>
 								))}
@@ -135,33 +230,26 @@ export function renderMarkdown(text: string): ReactNode[] {
 		);
 	};
 	const flushAll = () => {
-		flushBullets();
-		flushOrdered();
+		flushList();
 		flushQuote();
 		flushTable();
 	};
 
 	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i]!.trimEnd();
+		const line = lines[i]!.replace(/\s+$/, "");
 
 		// 代码块
-		const fence = /^```(\w+)?\s*$/.exec(line.trim());
+		const fence = /^\s*```(\S*)\s*$/.exec(line);
 		if (fence) {
 			flushAll();
 			const lang = fence[1] ?? "";
 			const body: string[] = [];
 			i++;
-			while (i < lines.length && !/^```\s*$/.test(lines[i]!.trim())) {
+			while (i < lines.length && !/^\s*```\s*$/.test(lines[i]!)) {
 				body.push(lines[i]!);
 				i++;
 			}
-			nodes.push(
-				<pre key={key++} className="my-2 overflow-x-auto rounded-lg border border-slate-700 bg-slate-950/70 p-3 text-[12.5px] leading-relaxed">
-					<code className="font-mono text-slate-200" data-lang={lang}>
-						{body.join("\n")}
-					</code>
-				</pre>,
-			);
+			nodes.push(<CodeBlock key={key++} code={body.join("\n")} lang={lang} />);
 			continue;
 		}
 
@@ -177,7 +265,7 @@ export function renderMarkdown(text: string): ReactNode[] {
 			continue;
 		}
 
-		// 标题 1–6
+		// 标题
 		const heading = /^(#{1,6})\s+(.+)$/.exec(line);
 		if (heading) {
 			flushAll();
@@ -201,8 +289,7 @@ export function renderMarkdown(text: string): ReactNode[] {
 
 		// 管道表格
 		if (/^\s*\|.*\|\s*$/.test(line)) {
-			flushBullets();
-			flushOrdered();
+			flushList();
 			flushQuote();
 			table.push(line);
 			continue;
@@ -212,29 +299,35 @@ export function renderMarkdown(text: string): ReactNode[] {
 		// 引用
 		const quoteLine = /^>\s?(.*)$/.exec(line);
 		if (quoteLine) {
-			flushBullets();
-			flushOrdered();
+			flushList();
 			quote.push(quoteLine[1] ?? "");
 			continue;
 		}
 		flushQuote();
 
-		// 列表
-		const bullet = /^\s*[-*+]\s+(.+)$/.exec(line);
-		if (bullet) {
-			flushOrdered();
-			bullets.push(bullet[1] ?? "");
-			continue;
-		}
-		const numbered = /^\s*\d+[.)]\s+(.+)$/.exec(line);
-		if (numbered) {
-			flushBullets();
-			ordered.push(numbered[1] ?? "");
+		// 列表（支持缩进嵌套与任务列表）
+		const bullet = /^(\s*)[-*+]\s+(.*)$/.exec(line);
+		const numbered = /^(\s*)\d+[.)]\s+(.*)$/.exec(line);
+		if (bullet || numbered) {
+			const m = (bullet ?? numbered)!;
+			const indent = Math.floor((m[1] ?? "").length / 2);
+			let body = m[2] ?? "";
+			let task: boolean | undefined;
+			let checked: boolean | undefined;
+			const taskMatch = /^\[([ xX])\]\s+(.*)$/.exec(body);
+			if (taskMatch) {
+				task = true;
+				checked = taskMatch[1]!.toLowerCase() === "x";
+				body = taskMatch[2] ?? "";
+			}
+			const ordered = Boolean(numbered);
+			if (list.length > 0 && ordered !== listOrdered) flushList();
+			listOrdered = ordered;
+			list.push({ text: body, indent: Math.min(indent, 3), task, checked });
 			continue;
 		}
 
-		flushBullets();
-		flushOrdered();
+		flushAll();
 		nodes.push(
 			<p key={key++} className="my-0.5">
 				{renderRichText(line)}

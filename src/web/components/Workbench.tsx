@@ -17,6 +17,8 @@ interface WorkbenchProps {
 	/** Bumped after each chat round / deletion so an open file re-fetches fresh content. */
 	refreshTick: number;
 	onDeleteFile: (name: string) => Promise<boolean>;
+	/** 从聊天里的文件卡请求打开某个文件（v0.22.0）。 */
+	openRequest?: { name: string; tick: number } | null;
 }
 
 /** The file list: virtual files produced by the agent's write_file tool. */
@@ -219,15 +221,26 @@ export function Workbench({
 	onFileOpenChange,
 	refreshTick,
 	onDeleteFile,
+	openRequest,
 }: WorkbenchProps) {
 	const [openName, setOpenName] = useState<string | null>(null);
 
-	// If the open file disappears from the list (deleted elsewhere / reset), fall back to the list
+	// 聊天里的文件卡 → 直接打开（v0.22.0）
 	useEffect(() => {
+		if (!openRequest?.name) return;
+		setOpenName(openRequest.name);
+		onFileOpenChange(true);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [openRequest?.tick]);
+
+	// If the open file disappears from the list (deleted elsewhere / reset), fall back to the list.
+	// 列表还在加载时不要关，否则刚打开的文件会被误关。
+	useEffect(() => {
+		if (filesLoading) return;
 		if (openName && !files.some((file) => file.name === openName)) {
 			setOpenName(null);
 		}
-	}, [files, openName]);
+	}, [files, openName, filesLoading]);
 
 	const handleOpenFile = (name: string) => {
 		setOpenName(name);
