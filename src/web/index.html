@@ -3,12 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#020617" />
     <meta name="description" content="π Harness —— Cloudflare Worker 上的 pi-durable 会话前端。" />
     <title>π Harness</title>
   </head>
   <body>
+    <script>
+      // 首屏应用主题，避免闪烁（v0.11.0）
+      try {
+        var param = new URLSearchParams(location.search).get("theme");
+        var saved = param || localStorage.getItem("pi-theme") || "dark";
+        var prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+        if (saved === "light" || (saved === "system" && prefersLight)) {
+          document.documentElement.classList.add("theme-light");
+          document.querySelector('meta[name="color-scheme"]').content = "light";
+          document.querySelector('meta[name="theme-color"]').content = "#f8fafc";
+        }
+      } catch (e) {}
+    </script>
     <div id="root"></div>
     <script type="module" src="/main.tsx"></script>
   </body>

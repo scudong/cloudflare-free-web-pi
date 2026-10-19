@@ -48,6 +48,13 @@ export default function App() {
 	// Session list
 	const [sessionId, setSessionId] = useState("1");
 	const [sessions, setSessions] = useState<SessionListItem[]>([]);
+	const [light, setLight] = useState(() => {
+		try {
+			return document.documentElement.classList.contains("theme-light");
+		} catch {
+			return false;
+		}
+	});
 	const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean } | null>(null);
 	const [loginError, setLoginError] = useState<string | null>(null);
 	const [models, setModels] = useState<string[]>([]);
@@ -479,6 +486,24 @@ export default function App() {
 		[sessionId],
 	);
 
+	/** 主题切换：浅色/深色，写入 localStorage 供首屏脚本使用。 */
+	const handleToggleTheme = useCallback(() => {
+		setLight((prev) => {
+			const next = !prev;
+			try {
+				document.documentElement.classList.toggle("theme-light", next);
+				localStorage.setItem("pi-theme", next ? "light" : "dark");
+				const scheme = document.querySelector('meta[name="color-scheme"]');
+				if (scheme) scheme.setAttribute("content", next ? "light" : "dark");
+				const themeColor = document.querySelector('meta[name="theme-color"]');
+				if (themeColor) themeColor.setAttribute("content", next ? "#f8fafc" : "#020617");
+			} catch {
+				// 无 localStorage 时仅本次会话生效
+			}
+			return next;
+		});
+	}, []);
+
 	/** 分享：生成只读链接并复制到剪贴板。 */
 	const handleShare = useCallback(() => {
 		void (async () => {
@@ -656,6 +681,8 @@ export default function App() {
 				onOpenDrawer={() => setDrawerOpen(true)}
 				onExport={handleExport}
 				onShare={handleShare}
+				light={light}
+				onToggleTheme={handleToggleTheme}
 			/>
 
 			<div className="flex min-h-0 flex-1">

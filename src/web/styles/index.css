@@ -15,8 +15,8 @@ body,
 
 body {
 	margin: 0;
-	background-color: #020617; /* slate-950 */
-	color: #f1f5f9; /* slate-100 */
+	background-color: var(--color-slate-950);
+	color: var(--color-slate-100);
 	font-family: var(--font-sans);
 	-webkit-font-smoothing: antialiased;
 	overscroll-behavior-y: none;
@@ -37,4 +37,54 @@ body {
 }
 *::-webkit-scrollbar-track {
 	background: transparent;
+}
+
+/*
+ * 浅色主题（v0.11.0）：直接反转 Tailwind v4 的 slate/sky/rose/amber 调色板变量。
+ * 组件里写的 bg-slate-900 / text-slate-100 等都编译成 var(--color-slate-*)，因此无需改任何组件。
+ */
+.theme-light {
+	color-scheme: light;
+	--color-slate-950: #f8fafc;
+	--color-slate-900: #ffffff;
+	--color-slate-800: #e8eef6;
+	--color-slate-700: #cfd9e6;
+	--color-slate-600: #9aa9bb;
+	--color-slate-500: #6b7c92;
+	--color-slate-400: #4b5a6e;
+	--color-slate-300: #334155;
+	--color-slate-200: #1e293b;
+	--color-slate-100: #0f172a;
+	--color-slate-50: #020617;
+	/* 强调色更深，保证浅底可读 */
+	--color-sky-300: #0369a1;
+	--color-sky-400: #0284c7;
+	--color-sky-500: #0ea5e9;
+	--color-rose-300: #be123c;
+	--color-amber-300: #b45309;
+}
+
+.theme-light * {
+	scrollbar-color: #cfd9e6 transparent;
+}
+.theme-light *::-webkit-scrollbar-thumb {
+	background-color: #cfd9e6;
+}
+
+/* 浅色主题下的对比度修正：
+   组件里 bg-sky-500/15 + text-white 的选中态在浅底上白字不可读，统一改成深色文字；
+   实心主按钮（bg-sky-600 text-white）仍保持白字。 */
+.theme-light .text-white {
+	color: #0f172a;
+}
+.theme-light .bg-sky-600.text-white,
+.theme-light .bg-rose-600.text-white {
+	color: #ffffff;
+}
+
+/* 深色底上的半透明叠色在浅色主题下需要更实的背景 */
+.theme-light .bg-slate-900\/60,
+.theme-light .bg-slate-900\/40,
+.theme-light .bg-slate-900\/80 {
+	background-color: #ffffff;
 }

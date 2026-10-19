@@ -10,6 +10,9 @@ interface TopBarProps {
 	onExport: () => void;
 	/** 生成只读分享链接（v0.9.0）。 */
 	onShare: () => void;
+	/** 当前是否浅色主题（v0.11.0）。 */
+	light: boolean;
+	onToggleTheme: () => void;
 }
 
 /** Collapsed/expanded state icon for a side panel (filled inner bar = expanded). */
@@ -46,7 +49,7 @@ function MenuIcon() {
 const panelButton =
 	"hidden h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 aria-pressed:border-slate-700 aria-pressed:bg-slate-800 aria-pressed:text-sky-300 md:inline-flex";
 
-export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft, onToggleRight, onOpenDrawer, onExport, onShare }: TopBarProps) {
+export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft, onToggleRight, onOpenDrawer, onExport, onShare, light, onToggleTheme }: TopBarProps) {
 	return (
 		<header className="z-20 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/80 px-3 backdrop-blur">
 			<div className="flex min-w-0 items-center gap-2.5">
@@ -75,6 +78,25 @@ export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft
 				{sessionLabel && <span className="hidden min-w-0 truncate text-xs text-slate-500 lg:inline">{sessionLabel}</span>}
 			</div>
 			<div className="flex shrink-0 items-center gap-1">
+				<button
+					type="button"
+					onClick={onToggleTheme}
+					title={light ? "切换到深色" : "切换到浅色"}
+					aria-label={light ? "切换到深色主题" : "切换到浅色主题"}
+					aria-pressed={light}
+					className={panelButton}
+				>
+					{light ? (
+						<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+							<path d="M16 12.2A6.5 6.5 0 0 1 7.8 4a6.5 6.5 0 1 0 8.2 8.2Z" strokeLinejoin="round" />
+						</svg>
+					) : (
+						<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+							<circle cx="10" cy="10" r="3.6" />
+							<path d="M10 2v1.6M10 16.4V18M2 10h1.6M16.4 10H18M4.3 4.3l1.1 1.1M14.6 14.6l1.1 1.1M15.7 4.3l-1.1 1.1M5.4 14.6l-1.1 1.1" strokeLinecap="round" />
+						</svg>
+					)}
+				</button>
 				<button
 					type="button"
 					onClick={onShare}
