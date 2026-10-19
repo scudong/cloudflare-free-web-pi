@@ -1,3 +1,5 @@
+import { useRef } from "react";
+
 interface TopBarProps {
 	online: boolean;
 	sessionLabel: string;
@@ -10,6 +12,9 @@ interface TopBarProps {
 	onExport: () => void;
 	/** 生成只读分享链接（v0.9.0）。 */
 	onShare: () => void;
+	/** 备份/恢复（v0.14.0）。 */
+	onBackup: () => void;
+	onRestore: (file: File) => void;
 	/** 当前是否浅色主题（v0.11.0）。 */
 	light: boolean;
 	onToggleTheme: () => void;
@@ -49,7 +54,8 @@ function MenuIcon() {
 const panelButton =
 	"hidden h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 aria-pressed:border-slate-700 aria-pressed:bg-slate-800 aria-pressed:text-sky-300 md:inline-flex";
 
-export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft, onToggleRight, onOpenDrawer, onExport, onShare, light, onToggleTheme }: TopBarProps) {
+export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft, onToggleRight, onOpenDrawer, onExport, onShare, onBackup, onRestore, light, onToggleTheme }: TopBarProps) {
+	const restoreRef = useRef<HTMLInputElement>(null);
 	return (
 		<header className="z-20 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/80 px-3 backdrop-blur">
 			<div className="flex min-w-0 items-center gap-2.5">
@@ -78,6 +84,42 @@ export function TopBar({ online, sessionLabel, leftOpen, rightOpen, onToggleLeft
 				{sessionLabel && <span className="hidden min-w-0 truncate text-xs text-slate-500 lg:inline">{sessionLabel}</span>}
 			</div>
 			<div className="flex shrink-0 items-center gap-1">
+				<button
+					type="button"
+					onClick={onBackup}
+					title="备份全部数据（JSON）"
+					aria-label="备份数据"
+					className={panelButton}
+				>
+					<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+						<ellipse cx="10" cy="5.5" rx="5.5" ry="2" />
+						<path d="M4.5 5.5v4c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-4" />
+						<path d="M4.5 9.5v4c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-4" />
+					</svg>
+				</button>
+				<button
+					type="button"
+					onClick={() => restoreRef.current?.click()}
+					title="从备份恢复"
+					aria-label="恢复数据"
+					className={panelButton}
+				>
+					<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+						<path d="M10 16v-9m0 0 3 3m-3-3L7 10" strokeLinecap="round" strokeLinejoin="round" />
+						<path d="M4 6V4.75c0-.41.34-.75.75-.75h10.5c.41 0 .75.34.75.75V6" strokeLinecap="round" />
+					</svg>
+				</button>
+				<input
+					ref={restoreRef}
+					type="file"
+					accept="application/json,.json"
+					hidden
+					onChange={(event) => {
+						const file = event.target.files?.[0];
+						if (file) onRestore(file);
+						event.target.value = "";
+					}}
+				/>
 				<button
 					type="button"
 					onClick={onToggleTheme}

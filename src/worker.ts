@@ -500,6 +500,91 @@ export class SpikeAgent extends DurableObject {
 		await this.scheduleNextAlarm();
 	}
 
+	/** 全量备份：记忆、文件、定时任务、MCP 配置、会话元数据（不含对话正文，正文走 /api/export）。 */
+	async backup(): Promise<{ version: number; exportedAt: string; data: Record<string, unknown> }> {
+		await this.open();
+		const q = (sql: string) => sqlFacade!.exec(sql).toArray();
+		return {
+			version: 1,
+			exportedAt: new Date().toISOString(),
+			data: {
+				memories: q("SELECT id, content, created_at, source FROM pi_mem ORDER BY id"),
+				files: q("SELECT conversation_id, name, content, updated_at FROM vfs_v2 ORDER BY conversation_id, name"),
+				automations: q("SELECT id, name, prompt, session_id, schedule, enabled, next_run_at FROM automations"),
+				mcpServers: q("SELECT id, name, url, headers FROM mcp_servers"),
+				sessions: q("SELECT id, title, created_at, updated_at, model FROM sessions_meta WHERE deleted = 0"),
+				shares: q("SELECT token, kind, session_id, name, created_at FROM shares"),
+			},
+		};
+	}
+
+	/** 从备份恢复：按主键 upsert，不删除现有数据。返回各类写入条数。 */
+	async restore(payload: unknown): Promise<Record<string, number>> {
+		await this.open();
+		const data = (payload as { data?: Record<string, unknown[]> })?.data;
+		if (!data || typeof data !== "object") throw new Error("备份格式不正确");
+		const counts: Record<string, number> = {};
+		const rows = (key: string) => (Array.isArray(data[key]) ? (data[key] as Record<string, unknown>[]) : []);
+		const str = (v: unknown) => (typeof v === "string" ? v : String(v ?? ""));
+		const num = (v: unknown) => (typeof v === "number" ? v : Number(v ?? 0) || 0);
+
+		for (const m of rows("memories")) {
+			const content = str(m.content).trim();
+			if (!content) continue;
+			const dup = sqlFacade!.exec("SELECT id FROM pi_mem WHERE content = ?", content).toArray();
+			if (dup.length) continue;
+			sqlFacade!.exec(
+				"INSERT INTO pi_mem (content, created_at, source) VALUES (?, ?, ?)",
+				content, str(m.created_at) || new Date().toISOString(), str(m.source) || "manual",
+			);
+			counts.memories = (counts.memories ?? 0) + 1;
+		}
+		for (const f of rows("files")) {
+			const name = str(f.name).trim();
+			if (!name) continue;
+			sqlFacade!.exec(
+				"INSERT INTO vfs_v2 (conversation_id, name, content, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(conversation_id, name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
+				str(f.conversation_id) || "1", name, str(f.content), str(f.updated_at) || new Date().toISOString(),
+			);
+			counts.files = (counts.files ?? 0) + 1;
+		}
+		for (const a of rows("automations")) {
+			const id = str(a.id);
+			if (!id) continue;
+			sqlFacade!.exec(
+				"INSERT INTO automations (id, name, prompt, session_id, schedule, enabled, created_at, next_run_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, prompt = excluded.prompt, schedule = excluded.schedule, enabled = excluded.enabled",
+				id, str(a.name), str(a.prompt), str(a.session_id), str(a.schedule) || '{"kind":"daily","time":"09:00"}',
+				num(a.enabled) ? 1 : 0, new Date().toISOString(), num(a.next_run_at) || Date.now() + 60_000,
+			);
+			counts.automations = (counts.automations ?? 0) + 1;
+		}
+		for (const s of rows("mcpServers")) {
+			const id = str(s.id);
+			if (!id) continue;
+			sqlFacade!.exec(
+				"INSERT INTO mcp_servers (id, name, url, headers, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, url = excluded.url, headers = excluded.headers",
+				id, str(s.name), str(s.url), str(s.headers) || "{}", new Date().toISOString(),
+			);
+			counts.mcpServers = (counts.mcpServers ?? 0) + 1;
+		}
+		mcpCache.clear();
+		const rebuilt = await buildMcpExtension(sqlFacade!);
+		if (rebuilt) {
+			this.mcpExt = rebuilt as never;
+			if (this.registryRef) this.registryRef.install(rebuilt);
+		}
+		for (const s of rows("sessions")) {
+			const id = str(s.id);
+			if (!id) continue;
+			sqlFacade!.exec(
+				"INSERT INTO sessions_meta (id, title, created_at, updated_at, model) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, model = excluded.model",
+				id, str(s.title) || `会话 ${id}`, str(s.created_at) || new Date().toISOString(), str(s.updated_at) || new Date().toISOString(), str(s.model) || "deepseek-flash",
+			);
+			counts.sessions = (counts.sessions ?? 0) + 1;
+		}
+		return counts;
+	}
+
 	/** 生成分享链接（只读）。token 为随机串，记录在 shares 表。 */
 	async createShare(sessionId: string | undefined, kind: "conversation" | "file", name?: string): Promise<{ token: string }> {
 		await this.open();
@@ -929,6 +1014,16 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
+			}
+			if (url.pathname === "/backup" && request.method === "GET") {
+				return Response.json(await this.backup());
+			}
+			if (url.pathname === "/restore" && request.method === "POST") {
+				try {
+					return Response.json({ ok: true, counts: await this.restore(await request.json()) });
+				} catch (err) {
+					return Response.json({ error: String(err).slice(0, 200) }, { status: 400 });
+				}
 			}
 			if (url.pathname === "/share" && request.method === "POST") {
 				const body = (await request.json()) as { sessionId?: string; kind?: "conversation" | "file"; name?: string };

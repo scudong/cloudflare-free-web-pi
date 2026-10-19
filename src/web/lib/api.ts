@@ -144,6 +144,11 @@ export const api = {
 
 	logout: () => requestJson<{ ok?: boolean }>("/api/logout", { method: "POST" }),
 
+	backup: () => requestJson<unknown>("/api/backup"),
+
+	restore: (payload: unknown) =>
+		requestJson<{ ok?: boolean; counts?: Record<string, number>; error?: string }>("/api/restore", jsonPost(payload)),
+
 	models: () => requestJson<{ models?: string[]; default?: string }>("/api/models"),
 
 	setModel: (sessionId: string, modelId: string) =>

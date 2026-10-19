@@ -507,6 +507,32 @@ export default function App() {
 		});
 	}, []);
 
+	/** 备份：下载全量 JSON。 */
+	const handleBackup = useCallback(() => {
+		const link = document.createElement("a");
+		link.href = "/api/backup";
+		link.download = `pi-harness-backup-${new Date().toISOString().slice(0, 10)}.json`;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+	}, []);
+
+	/** 恢复：读取上传的 JSON 并回传后端。 */
+	const handleRestore = useCallback((file: File) => {
+		void (async () => {
+			try {
+				const payload = JSON.parse(await file.text()) as unknown;
+				const result = await api.restore(payload);
+				const counts = result.counts ?? {};
+				const text = Object.entries(counts).map(([k, v]) => `${k} ${v}`).join("，");
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `恢复完成：${text || "无新增"}` }]);
+				setPanelTick((tick) => tick + 1);
+			} catch {
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "恢复失败，文件格式不正确。" }]);
+			}
+		})();
+	}, [nextId]);
+
 	/** 分享：生成只读链接并复制到剪贴板。 */
 	const handleShare = useCallback(() => {
 		void (async () => {
@@ -684,6 +710,8 @@ export default function App() {
 				onOpenDrawer={() => setDrawerOpen(true)}
 				onExport={handleExport}
 				onShare={handleShare}
+				onBackup={handleBackup}
+				onRestore={handleRestore}
 				light={light}
 				onToggleTheme={handleToggleTheme}
 			/>
