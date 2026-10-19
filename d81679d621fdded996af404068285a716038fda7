@@ -1,0 +1,93 @@
+src/web/components/LeftPanels.tsx
+  00512495ff504ece 1-476
+src/web/lib/collections.ts
+  00512495ff504ece 72
+README.md
+  00512495ff504ece 25,130,143
+CHANGELOG.md
+  00512495ff504ece 5-14
+src/web/lib/format.ts
+  00512495ff504ece 1-16
+src/web/components/Rail.tsx
+  00512495ff504ece 1-61
+src/web/types.ts
+  00512495ff504ece 36-37
+src/web/App.tsx
+  00512495ff504ece 8-9,23,59-60,790,844-845,848,850,861-895,909-914,966-967,989-992,1006-1009,1021-1022,1024,1035,1040-1049
+src/web/components/Workbench.tsx
+  00512495ff504ece 4-5,22,90,189-196,199-204,211,246,263-265,267
+src/web/components/Sidebar.tsx
+  00512495ff504ece 22-23,40
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 2-3,22-26,78-81,167-200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "d81679d621fdded996af404068285a716038fda7",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 729,
+      "total_deletions": 808,
+      "accepted_lines": 726,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 476,
+          "accepted_lines": 476
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 45,
+          "accepted_lines": 45
+        },
+        "src/web/components/Workbench.tsx": {
+          "additions": 24,
+          "deletions": 703,
+          "accepted_lines": 24
+        },
+        "src/web/App.tsx": {
+          "additions": 88,
+          "deletions": 67,
+          "accepted_lines": 85
+        },
+        "src/web/lib/format.ts": {
+          "additions": 16,
+          "accepted_lines": 16
+        },
+        "CHANGELOG.md": {
+          "additions": 10,
+          "accepted_lines": 10
+        },
+        "src/web/components/Sidebar.tsx": {
+          "additions": 3,
+          "deletions": 35,
+          "accepted_lines": 3
+        },
+        "README.md": {
+          "additions": 3,
+          "deletions": 3,
+          "accepted_lines": 3
+        },
+        "src/web/components/Rail.tsx": {
+          "additions": 61,
+          "accepted_lines": 61
+        },
+        "src/web/types.ts": {
+          "additions": 2,
+          "accepted_lines": 2
+        }
+      }
+    }
+  }
+}
