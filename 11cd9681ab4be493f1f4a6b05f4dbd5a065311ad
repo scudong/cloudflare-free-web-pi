@@ -1,0 +1,67 @@
+tests/README.md
+  00512495ff504ece 77
+tests/api/api.test.ts
+  00512495ff504ece 398-419
+src/web/lib/api.ts
+  00512495ff504ece 255-261
+src/web/App.tsx
+  00512495ff504ece 13,20,96-98,348-349,382,393,507-536,728-736,1495-1497
+src/worker.ts
+  00512495ff504ece 83-84,383-415,424,875-939,1775-1777,2240-2244,2369-2373,2780-2788,2790-2818
+src/web/types.ts
+  00512495ff504ece 109-124
+src/web/components/AskUserCard.tsx
+  00512495ff504ece 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "11cd9681ab4be493f1f4a6b05f4dbd5a065311ad",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 366,
+      "total_deletions": 2,
+      "accepted_lines": 366,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/types.ts": {
+          "additions": 16,
+          "accepted_lines": 16
+        },
+        "src/worker.ts": {
+          "additions": 158,
+          "deletions": 1,
+          "accepted_lines": 158
+        },
+        "src/web/App.tsx": {
+          "additions": 58,
+          "deletions": 1,
+          "accepted_lines": 58
+        },
+        "src/web/components/AskUserCard.tsx": {
+          "additions": 104,
+          "accepted_lines": 104
+        },
+        "tests/README.md": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "tests/api/api.test.ts": {
+          "additions": 22,
+          "accepted_lines": 22
+        },
+        "src/web/lib/api.ts": {
+          "additions": 7,
+          "accepted_lines": 7
+        }
+      }
+    }
+  }
+}
