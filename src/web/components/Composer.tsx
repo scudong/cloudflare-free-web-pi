@@ -579,7 +579,7 @@ export function Composer({
 						pending ? (onInterject ? "生成中：输入内容可插话，Enter 插入本轮" : "等待回复中…") : "输入消息，/ 调用技能或模板，Enter 发送"
 					}
 					aria-label="消息输入框"
-					className="min-h-[44px] flex-1 resize-none rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-[16px] leading-relaxed text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-sky-500/70 focus:ring-1 focus:ring-sky-500/40"
+					className="min-h-[44px] flex-1 resize-none rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-[16px] leading-relaxed text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-sky-500/70 focus:ring-1 focus:ring-sky-500/40 sm:text-[15px]"
 				/>
 				{pending && onInterject && text.trim() && (
 					<button

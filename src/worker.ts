@@ -2246,7 +2246,22 @@ export class SpikeAgent extends DurableObject {
 		return list;
 	}
 
+	/** pi-durable 在存储错误后会把会话标记为 SessionFailed：必须 close + reopen 再重试一次（v0.46.1）。 */
+	private async retryOnSessionError<T>(harness: Harness, run: (h: Harness) => Promise<T>): Promise<T> {
+		try {
+			return await run(harness);
+		} catch (err) {
+			if (!/SessionFailed|storage error/i.test(String(err))) throw err;
+			await this.recoverSession();
+			return run(await this.open());
+		}
+	}
+
 	private async conversationFor(harness: Awaited<ReturnType<typeof this.open>>, sessionId?: string) {
+		return this.retryOnSessionError(harness, (h) => this.findConversation(h, sessionId));
+	}
+
+	private async findConversation(harness: Awaited<ReturnType<typeof this.open>>, sessionId?: string) {
 		const agentChange = {
 			model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 			extensions: this.agentExtensions() as never,
@@ -2264,12 +2279,14 @@ export class SpikeAgent extends DurableObject {
 	/** 新建会话，返回 id。 */
 	async newSession(): Promise<{ id: string; title: string }> {
 		const harness = await this.open();
-		const conversation = await harness.createConversation(
-			{
-				ownership: { kind: "ownerless" },
-				agent: { model: { provider: this.providerId(), modelId: this.defaultModelId() }, extensions: this.agentExtensions() as never },
-			},
-			ctx,
+		const conversation = await this.retryOnSessionError(harness, (h) =>
+			h.createConversation(
+				{
+					ownership: { kind: "ownerless" },
+					agent: { model: { provider: this.providerId(), modelId: this.defaultModelId() }, extensions: this.agentExtensions() as never },
+				},
+				ctx,
+			),
 		);
 		const now = new Date().toISOString();
 		sqlFacade!.exec(
@@ -2315,7 +2332,7 @@ export class SpikeAgent extends DurableObject {
 	}> {
 		ensureTables(sqlFacade!);
 		const harness = await this.open();
-		const root = await harness.root(ctx);
+		const root = await this.retryOnSessionError(harness, (h) => h.root(ctx));
 		const rows = sqlFacade!.exec(
 			"SELECT id, title, created_at, updated_at, model, parent_id, fork_at FROM sessions_meta WHERE deleted = 0 AND hidden = 0 ORDER BY updated_at DESC",
 		).toArray() as {
@@ -3351,7 +3368,7 @@ export class SpikeAgent extends DurableObject {
 			}
 			if (request.method === "GET" && url.pathname === "/debug/agent") {
 				const harness = await this.open();
-				const root = await harness.root(ctx);
+				const root = await this.retryOnSessionError(harness, (h) => h.root(ctx));
 				const mcpExtDbg = await buildMcpExtension(sqlFacade!);
 				if (mcpExtDbg && this.registryRef) this.registryRef.install(mcpExtDbg);
 				if (!this.customExt) this.customExt = buildCustomToolsExtension(sqlFacade!) as never;

@@ -4,6 +4,11 @@
 
 ## 2026-10-20（多用户）
 
+### 输入框字号 + 会话失败自愈（v0.46.1）
+- 聊天输入框（Composer）在桌面端从 16px 调到 15px，与消息正文一致；移动端保持 16px，避免 iOS 聚焦时自动放大页面
+- 修复：部署或存储中断后 pi-durable 进入 `SessionFailed`，`/api/sessions` 持续 500，必须重启 DO 才能恢复
+- 现在 `root` / `conversation` / `newSession` 遇到 `SessionFailed | storage error` 会自动 `close + reopen` 并重试一次，会话列表与调试接口自愈
+
 ### 知识库每轮预检索（v0.46.0）
 - 每轮发送前用用户消息检索知识库，命中时把前 3 段（每段 ≤600 字）作为「知识库参考资料」注入本轮 instructions；没命中不增加内容
 - 默认开启；设置 → 对话 → 「知识库预检索」可关闭，关闭后模型仍可主动调用 `kb_search`
