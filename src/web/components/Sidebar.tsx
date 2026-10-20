@@ -1,4 +1,5 @@
 import type { SessionListItem } from "../types";
+import { flattenSessions } from "../lib/sessionTree";
 
 interface SidebarProps {
 	sessions: SessionListItem[];
@@ -9,6 +10,8 @@ interface SidebarProps {
 	onSelect: (id: string) => void;
 	onRename: (id: string, title: string) => void;
 	onDelete: (id: string) => void;
+	/** 收起会话栏（v0.32.0）。 */
+	onCollapse?: () => void;
 }
 
 function formatSessionTime(iso: string): string {
@@ -31,13 +34,29 @@ export function Sidebar({
 	onSelect,
 	onRename,
 	onDelete,
+	onCollapse,
 }: SidebarProps) {
 	const keyword = query.trim().toLowerCase();
 	const filtered = keyword ? sessions.filter((s) => s.title.toLowerCase().includes(keyword) || s.id.includes(keyword)) : sessions;
+	const tree = flattenSessions(filtered);
 
 	return (
 		<div className="flex h-full w-full flex-col bg-slate-900/60">
 			<div className="shrink-0 border-b border-slate-800/70 p-3">
+				<div className="mb-2 flex items-center justify-between">
+					<span className="text-[11px] font-medium uppercase tracking-wider text-slate-500">会话</span>
+					{onCollapse && (
+						<button
+							type="button"
+							onClick={onCollapse}
+							title="收起会话栏"
+							aria-label="收起会话栏"
+							className="rounded px-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
+						>
+							«
+						</button>
+					)}
+				</div>
 				<input
 					type="search"
 					value={query}
@@ -49,7 +68,6 @@ export function Sidebar({
 			</div>
 
 			<div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-				<p className="px-1.5 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-slate-500">会话</p>
 				{sessionsLoading && filtered.length === 0 && (
 					<p className="px-1.5 py-2 text-xs text-slate-500">正在加载会话…</p>
 				)}
@@ -57,7 +75,7 @@ export function Sidebar({
 					<p className="px-1.5 py-2 text-xs text-slate-500">{keyword ? "没有匹配的会话。" : "暂无会话。"}</p>
 				)}
 				<ul className="space-y-0.5">
-					{filtered.map((session) => {
+					{tree.map(({ session, depth }) => {
 						const current = session.id === currentId;
 						return (
 							<li key={session.id} className="group relative">
@@ -65,14 +83,19 @@ export function Sidebar({
 									type="button"
 									onClick={() => onSelect(session.id)}
 									aria-current={current ? "true" : undefined}
+									style={depth > 0 ? { paddingLeft: 10 + depth * 14 } : undefined}
 									className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 pr-12 text-left transition-colors ${
 										current
 											? "border-sky-500/40 bg-sky-500/15 text-white"
 											: "border-transparent text-slate-300 hover:bg-slate-800 hover:text-slate-100"
 									}`}
 								>
-									<span aria-hidden className="shrink-0 text-sm">
-										{current ? "💬" : "○"}
+									<span
+										aria-hidden
+										className={`shrink-0 text-sm ${depth > 0 ? "text-violet-300/80" : ""}`}
+										title={depth > 0 ? `分支：来自会话 ${session.parentId}` : undefined}
+									>
+										{depth > 0 ? "⑂" : current ? "💬" : "○"}
 									</span>
 									<span className="min-w-0 flex-1">
 										<span className="block truncate text-sm">{session.title}</span>

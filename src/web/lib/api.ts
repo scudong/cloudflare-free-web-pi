@@ -84,6 +84,13 @@ export const api = {
 	/** POST /api/sessions — create a new conversation and return its id. */
 	createSession: () => requestJson<{ id?: string; title?: string }>("/api/sessions", { method: "POST" }),
 
+	/** POST /api/branches — 从某条历史消息分叉出新会话（v0.32.0）。 */
+	branch: (sessionId: string, entryId: number, title?: string) =>
+		requestJson<{ ok?: boolean; id?: string; title?: string; error?: string }>(
+			"/api/branches",
+			jsonPost({ sessionId, entryId, title }),
+		),
+
 	/**
 	 * POST /api/chat/stream — SSE。事件：
 	 * thinking_start / thinking{delta}（思考过程）

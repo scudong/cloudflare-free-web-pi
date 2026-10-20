@@ -53,6 +53,17 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	} catch {
 		// 列已存在
 	}
+	// v0.32.0：会话分支——记录分叉来源与分叉点条目
+	try {
+		sql.exec(`ALTER TABLE sessions_meta ADD COLUMN parent_id TEXT`);
+	} catch {
+		// 列已存在
+	}
+	try {
+		sql.exec(`ALTER TABLE sessions_meta ADD COLUMN fork_at INTEGER`);
+	} catch {
+		// 列已存在
+	}
 	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS skills (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS shares (token TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`);
@@ -1100,13 +1111,47 @@ export class SpikeAgent extends DurableObject {
 		return { id: String(conversation.id), title: "新会话" };
 	}
 
+	/**
+	 * 会话分支（v0.32.0）：在指定消息**之前**分叉出一个新会话。
+	 * pi-durable 的 fork 共享分叉点之前的历史，之后各自追加，互不影响。
+	 * 取「这条消息之前的最新一条」作为分叉点，这样新会话的历史停在上一条，用户可以直接问别的。
+	 */
+	async forkSession(sessionId: string, entryId: number, title?: string): Promise<{ id: string; title: string }> {
+		const harness = await this.open();
+		const parent = await this.conversationFor(harness, sessionId);
+		const typed = parent as unknown as {
+			id: number;
+			entries(q: object, limit: number, cursor: undefined, c: unknown): Promise<{ items: readonly { id?: unknown }[] }>;
+			fork(at: number, options: { ownership: { kind: string } }, c: unknown): Promise<{ id: unknown }>;
+		};
+		const before = await typed.entries({ maxEntryId: entryId - 1 }, 1, undefined, ctx);
+		const at = Number((before.items[0] as { id?: unknown } | undefined)?.id);
+		if (!Number.isFinite(at) || at <= 0) throw new Error("这条消息之前没有历史，无法分叉");
+		const fork = await typed.fork(at, { ownership: { kind: "ownerless" } }, ctx);
+		const parentRow = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", String(typed.id)).toArray() as { title?: string }[];
+		const now = new Date().toISOString();
+		const fallback = `⑂ ${parentRow[0]?.title || `会话 ${typed.id}`}`;
+		const finalTitle = (title ?? "").trim().slice(0, 60) || fallback;
+		sqlFacade!.exec(
+			`INSERT INTO sessions_meta (id, title, created_at, updated_at, model, parent_id, fork_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET title = excluded.title, parent_id = excluded.parent_id, fork_at = excluded.fork_at, updated_at = excluded.updated_at`,
+			String(fork.id), finalTitle, now, now, this.modelFor(sessionId), String(typed.id), at,
+		);
+		return { id: String(fork.id), title: finalTitle };
+	}
+
 	/** 会话列表：元数据表为准，缺失的从存储枚举补齐（含根会话）。 */
-	async listSessions(): Promise<{ sessions: { id: string; title: string; created_at: string; updated_at: string }[] }> {
+	async listSessions(): Promise<{
+		sessions: { id: string; title: string; created_at: string; updated_at: string; model?: string; parent_id?: string | null; fork_at?: number | null }[];
+	}> {
 		ensureTables(sqlFacade!);
 		const harness = await this.open();
 		const root = await harness.root(ctx);
-		const rows = sqlFacade!.exec("SELECT id, title, created_at, updated_at, model FROM sessions_meta WHERE deleted = 0 AND hidden = 0 ORDER BY updated_at DESC").toArray() as {
-			id: string; title: string; created_at: string; updated_at: string; model?: string;
+		const rows = sqlFacade!.exec(
+			"SELECT id, title, created_at, updated_at, model, parent_id, fork_at FROM sessions_meta WHERE deleted = 0 AND hidden = 0 ORDER BY updated_at DESC",
+		).toArray() as {
+			id: string; title: string; created_at: string; updated_at: string; model?: string; parent_id?: string | null; fork_at?: number | null;
 		}[];
 		const known = new Set(rows.map((r) => r.id));
 		// 存储里存在但元数据缺失的会话（例如根会话）补一条。
@@ -1996,6 +2041,20 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 			}
 			if (request.method === "POST" && url.pathname === "/sessions") {
 				return Response.json(await this.newSession());
+			}
+			/* ---- 会话分支（v0.32.0）：从某条历史消息分叉 ---- */
+			if (request.method === "POST" && url.pathname === "/branches") {
+				const body = (await request.json().catch(() => ({}))) as { sessionId?: string; entryId?: number; title?: string };
+				const entryId = Math.floor(Number(body.entryId));
+				if (!Number.isFinite(entryId) || entryId <= 0) {
+					return Response.json({ error: "缺少有效的 entryId" }, { status: 400 });
+				}
+				try {
+					const created = await this.forkSession(String(body.sessionId ?? "1"), entryId, body.title);
+					return Response.json({ ok: true, ...created });
+				} catch (err) {
+					return Response.json({ error: `分支创建失败：${String(err).slice(0, 200)}` }, { status: 400 });
+				}
 			}
 			if (request.method === "PATCH" && url.pathname === "/sessions") {
 				const { id, title } = (await request.json()) as { id?: string; title?: string };

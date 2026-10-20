@@ -53,6 +53,11 @@ export default function App() {
 	const [workbenchWide, setWorkbenchWide] = useState(false);
 	const rightWidthRef = useRef(rightWidth);
 	rightWidthRef.current = rightWidth;
+	// 左栏宽度（v0.32.0）：可拖拽
+	const [leftWidth, setLeftWidth] = useState(() => {
+		const saved = typeof window === "undefined" ? null : Number(localStorage.getItem("pi-left-width") ?? "");
+		return Number.isFinite(saved) && saved && saved >= 200 ? saved : 240;
+	});
 	/** 打开文件前的右栏宽度：关闭文件时还原（null = 无需还原）。 */
 	const widthBeforeFileRef = useRef<number | null>(null);
 
@@ -426,6 +431,30 @@ export default function App() {
 			}
 		},
 		[sessionId, handleSend],
+	);
+
+	/** 从某条用户消息分叉出新会话（v0.32.0）。 */
+	const handleBranch = useCallback(
+		(entryId: number) => {
+			if (resetting || pending) return;
+			abortRef.current?.abort();
+			generationRef.current += 1;
+			void (async () => {
+				try {
+					const res = await api.branch(sessionId, entryId);
+					if (!res.id) throw new Error(res.error || "分支创建失败");
+					setSessionId(res.id);
+					setMessages([]);
+					setPending(false);
+					setElapsed(0);
+					setPanelTick((tick) => tick + 1);
+				} catch (err) {
+					const detail = err instanceof Error ? err.message : String(err);
+					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `分支出错：${detail}` }]);
+				}
+			})();
+		},
+		[sessionId, resetting, pending, nextId],
 	);
 
 	/** 停止目标的自动续转（保留记录）。 */
@@ -863,9 +892,10 @@ export default function App() {
 		event.preventDefault();
 		const startX = event.clientX;
 		const startWidth = rightWidth;
+		let current = startWidth;
 		const onMove = (e: PointerEvent) => {
-			const next = Math.min(Math.max(260, startWidth - (e.clientX - startX)), Math.round(window.innerWidth * 0.65));
-			setRightWidth(next);
+			current = Math.min(Math.max(260, startWidth - (e.clientX - startX)), Math.round(window.innerWidth * 0.65));
+			setRightWidth(current);
 		};
 		const onUp = () => {
 			window.removeEventListener("pointermove", onMove);
@@ -873,7 +903,7 @@ export default function App() {
 			// 用户手动调过宽度：关闭文件时不要再还原成打开前的值
 			widthBeforeFileRef.current = null;
 			try {
-				localStorage.setItem("pi-right-width", String(rightWidthRef.current));
+				localStorage.setItem("pi-right-width", String(current));
 			} catch {
 				// 忽略存储失败
 			}
@@ -881,6 +911,29 @@ export default function App() {
 		window.addEventListener("pointermove", onMove);
 		window.addEventListener("pointerup", onUp);
 	}, [rightWidth]);
+
+	/** 拖拽分隔条调整左栏宽度（限制在 200px ~ 视口 45%）。 */
+	const handleLeftResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = leftWidth;
+		let current = startWidth;
+		const onMove = (e: PointerEvent) => {
+			current = Math.min(Math.max(200, startWidth + (e.clientX - startX)), Math.round(window.innerWidth * 0.45));
+			setLeftWidth(current);
+		};
+		const onUp = () => {
+			window.removeEventListener("pointermove", onMove);
+			window.removeEventListener("pointerup", onUp);
+			try {
+				localStorage.setItem("pi-left-width", String(current));
+			} catch {
+				// 忽略存储失败
+			}
+		};
+		window.addEventListener("pointermove", onMove);
+		window.addEventListener("pointerup", onUp);
+	}, [leftWidth]);
 
 	/**
 	 * 打开文件时自动加宽，保证文档可读（v0.16.0）；
@@ -1153,6 +1206,7 @@ export default function App() {
 			onSelect={handleSelectSession}
 			onRename={handleRenameSession}
 			onDelete={handleDeleteSession}
+			onCollapse={toggleLeft}
 		/>
 	);
 
@@ -1160,7 +1214,7 @@ export default function App() {
 		railView === "sessions" ? (
 			sidebar
 		) : railView === "mcp" ? (
-			<McpPanel servers={mcpServers} loading={mcpLoading} error={mcpError} onAdd={handleAddMcp} onDelete={handleDeleteMcp} />
+			<McpPanel servers={mcpServers} loading={mcpLoading} error={mcpError} onAdd={handleAddMcp} onDelete={handleDeleteMcp} onCollapse={toggleLeft} />
 		) : railView === "automations" ? (
 			<AutomationPanel
 				items={automations}
@@ -1169,6 +1223,7 @@ export default function App() {
 				onAdd={handleAddAutomation}
 				onToggle={handleToggleAutomation}
 				onDelete={handleDeleteAutomation}
+				onCollapse={toggleLeft}
 			/>
 		) : (
 			<SkillPanel
@@ -1185,6 +1240,7 @@ export default function App() {
 				onAddRule={handleAddRule}
 				onToggleRule={handleToggleRule}
 				onDeleteRule={handleDeleteRule}
+				onCollapse={toggleLeft}
 			/>
 		);
 
@@ -1210,9 +1266,21 @@ export default function App() {
 			<div className="flex min-h-0 flex-1">
 				{isDesktop && rail}
 				{showLeftContent && (
-					<div className={`min-w-0 shrink-0 border-r border-slate-800 ${railView === "sessions" ? "w-60" : "w-80"}`}>
-						{leftContent}
-					</div>
+					<>
+						<div
+							className="min-w-0 shrink-0"
+							style={{ width: railView === "sessions" ? leftWidth : Math.max(leftWidth, 300) }}
+						>
+							{leftContent}
+						</div>
+						<div
+							role="separator"
+							aria-orientation="vertical"
+							aria-label="调整会话栏宽度"
+							onPointerDown={handleLeftResizeStart}
+							className="w-1 shrink-0 cursor-col-resize bg-slate-800/40 transition-colors hover:bg-sky-500/50"
+						/>
+					</>
 				)}
 
 				{showChat && (
@@ -1226,6 +1294,10 @@ export default function App() {
 							onModelChange={handleModelChange}
 							onOpenGoal={() => setGoalDialogOpen(true)}
 							goalActive={goal?.status === "active"}
+							leftCollapsed={!leftOpen}
+							rightCollapsed={!rightOpen}
+							onToggleLeft={toggleLeft}
+							onToggleRight={toggleRight}
 						/>
 						<MessageList
 							messages={messages}
@@ -1237,6 +1309,7 @@ export default function App() {
 							plan={plan}
 							files={files}
 							onOpenFile={handleOpenFileFromChat}
+							onBranch={handleBranch}
 						/>
 						{goal && <GoalBar goal={goal} onStop={() => void handleStopGoal()} onNew={() => setGoalDialogOpen(true)} />}
 						<Composer pending={pending} onSend={handleSend} onStop={handleStop} skills={skills} prompts={prompts} />
@@ -1274,6 +1347,7 @@ export default function App() {
 							refreshTick={panelTick}
 							onDeleteFile={handleDeleteFile}
 							openRequest={fileRequest}
+							onCollapse={toggleRight}
 						/>
 					</div>
 				)}

@@ -8,9 +8,16 @@ import { ArtifactCard } from "./ArtifactCard";
 
 const AUTO_SCROLL_THRESHOLD = 80;
 
-function UserBubble({ message }: { message: Extract<ChatMessage, { role: "user" }> }) {
+function UserBubble({
+	message,
+	onBranch,
+}: {
+	message: Extract<ChatMessage, { role: "user" }>;
+	/** 从这条消息分叉（v0.32.0）：这条消息之前的历史会带到新会话。 */
+	onBranch?: (entryId: number) => void;
+}) {
 	return (
-		<div className="flex flex-col items-end gap-1.5">
+		<div className="group flex flex-col items-end gap-1.5">
 			{message.images && message.images.length > 0 && (
 				<div className="flex max-w-[85%] flex-wrap justify-end gap-1.5 sm:max-w-[72%]">
 					{message.images.map((src, index) => (
@@ -24,8 +31,21 @@ function UserBubble({ message }: { message: Extract<ChatMessage, { role: "user" 
 				</div>
 			)}
 			{message.text && message.text !== "（图片）" && (
-				<div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-sky-600 px-4 py-2.5 text-[15px] leading-relaxed text-white sm:max-w-[72%]">
-					{renderRichText(message.text)}
+				<div className="flex max-w-[85%] items-start justify-end gap-1.5 sm:max-w-[72%]">
+					{onBranch && message.entryId !== undefined && (
+						<button
+							type="button"
+							onClick={() => onBranch(message.entryId as number)}
+							title="从这里分叉：新建一个会话，带上这条消息之前的对话"
+							aria-label="从这条消息分叉"
+							className="mt-1.5 shrink-0 rounded-md px-1.5 py-1 text-[11px] text-slate-500 opacity-0 transition-opacity hover:bg-slate-800 hover:text-sky-300 focus-visible:opacity-100 group-hover:opacity-100"
+						>
+							⑂ 分支
+						</button>
+					)}
+					<div className="min-w-0 whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-sky-600 px-4 py-2.5 text-[15px] leading-relaxed text-white">
+						{renderRichText(message.text)}
+					</div>
 				</div>
 			)}
 		</div>
@@ -152,9 +172,11 @@ interface MessageListProps {
 	files?: FileInfo[];
 	/** 打开某个产出文件（右栏预览）。 */
 	onOpenFile?: (name: string) => void;
+	/** 从某条用户消息分叉出新会话（v0.32.0）。 */
+	onBranch?: (entryId: number) => void;
 }
 
-export function MessageList({ messages, pending, elapsed, loading, loadError, onRetry, plan, files = [], onOpenFile }: MessageListProps) {
+export function MessageList({ messages, pending, elapsed, loading, loadError, onRetry, plan, files = [], onOpenFile, onBranch }: MessageListProps) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const stickToBottomRef = useRef(true);
 
@@ -215,10 +237,11 @@ export function MessageList({ messages, pending, elapsed, loading, loadError, on
 
 				<PlanPanel plan={plan} />
 
-				{messages.map((message) => {
+				{messages.map((message, index) => {
 					switch (message.role) {
 						case "user":
-							return <UserBubble key={message.id} message={message} />;
+							// 第一条消息之前没有历史，不能分叉（v0.32.0）
+							return <UserBubble key={message.id} message={message} onBranch={index > 0 ? onBranch : undefined} />;
 						case "assistant": {
 							const isLast = message.id === lastAssistantIdAll;
 							return (

@@ -152,7 +152,15 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			const images = imagesOf(body);
 			if (!text && images.length === 0) continue;
 			flushStandaloneTools();
-			messages.push({ id: `u${seq++}`, role: "user", text: text || "（图片）", ...(images.length ? { images } : {}) });
+			const entryId = typeof entry.id === "number" ? entry.id : undefined;
+			messages.push({
+				id: `u${seq++}`,
+				role: "user",
+				text: text || "（图片）",
+				...(images.length ? { images } : {}),
+				// 分支（v0.32.0）：保留真实条目 id，供「从这里分支」使用
+				...(entryId !== undefined ? { entryId } : {}),
+			});
 		} else if (kind === "assistant") {
 			const text = textOf(entry.model ?? entry.content ?? entry.text).trim();
 			const thinking = thinkingOf(entry.model ?? entry.content ?? entry.text).trim();

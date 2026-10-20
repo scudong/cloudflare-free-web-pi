@@ -28,7 +28,7 @@ export interface FileArtifact {
 
 /** Message list entry. notice = system hint (stopped / reset failed...); tool = orphan tool activity row. */
 export type ChatMessage =
-	| { id: string; role: "user"; text: string; images?: string[] }
+	| { id: string; role: "user"; text: string; images?: string[]; /** 后端条目 id（v0.32.0：分支用）。 */ entryId?: number }
 	| {
 			id: string;
 			role: "assistant";
@@ -50,6 +50,10 @@ export interface SessionListItem {
 	createdAt: string;
 	/** 该会话使用的模型（v6）；旧数据可能为空。 */
 	model?: string;
+	/** 分支来源会话（v0.32.0）：有值表示这是从某个会话分叉出来的。 */
+	parentId?: string;
+	/** 分叉点条目 id（v0.32.0）。 */
+	forkAt?: number;
 }
 
 /** Virtual file produced by the agent's write_file tool. */

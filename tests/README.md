@@ -69,3 +69,4 @@ tests/
 | **规则文件** | `api/api.test.ts` · 规则文件 |
 | **上下文压缩（提示）** | `unit/entries.test.ts` · 上下文压缩 |
 | **目标模式** | `api/api.test.ts` · 目标模式 + 工具注册（防回归） |
+| **会话分支** | `unit/sessionTree.test.ts` + `api/api.test.ts` · 会话分支 |

@@ -350,6 +350,43 @@ describe("目标模式", () => {
 	});
 });
 
+describe("会话分支", () => {
+	it("无效 entryId 被拒绝", async () => {
+		const res = await post("/api/branches", { sessionId: "1", entryId: 0 });
+		expect(res.status).toBe(400);
+	});
+
+	it("创建分支 → 记录来源 → 子会话带历史", async () => {
+		const created = await post("/api/sessions", {});
+		const sid: string = created.json.id;
+		await post("/api/reset", { sessionId: sid });
+		await post("/api/reset", { sessionId: sid });
+
+		const entries = await api(`/api/entries?sessionId=${sid}`);
+		const ids: number[] = entries.json.map((e: { id: number }) => e.id);
+		const maxId = Math.max(...ids);
+
+		const res = await post("/api/branches", { sessionId: sid, entryId: maxId });
+		expect(res.json.ok).toBe(true);
+		const childId: string = res.json.id;
+		expect(childId).not.toBe(sid);
+
+		const sessions = await api("/api/sessions");
+		const child = sessions.json.sessions.find((s: { id: string }) => s.id === childId);
+		expect(child.parent_id).toBe(sid);
+		expect(child.fork_at).toBeGreaterThan(0);
+		expect(child.fork_at).toBeLessThan(maxId);
+
+		// 分叉点之前的历史被继承，且不包含被点的那条消息
+		const childEntries = await api(`/api/entries?sessionId=${childId}`);
+		expect(childEntries.json.length).toBeGreaterThan(0);
+		expect(Math.max(...childEntries.json.map((e: { id: number }) => e.id))).toBeLessThanOrEqual(child.fork_at);
+
+		await api(`/api/sessions?id=${childId}`, { method: "DELETE" });
+		await api(`/api/sessions?id=${sid}`, { method: "DELETE" });
+	});
+});
+
 describe("导出与版本", () => {
 	it("导出 Markdown 返回文本", async () => {
 		const res = await fetch(`${BASE}/api/export?format=md&sessionId=1`);

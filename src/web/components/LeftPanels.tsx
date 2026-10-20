@@ -3,13 +3,26 @@ import { api } from "../lib/api";
 import { renderMarkdown } from "../lib/rich";
 import type { AutomationInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
 
-function PanelHeader({ title, count }: { title: string; count?: number }) {
+function PanelHeader({ title, count, onCollapse }: { title: string; count?: number; onCollapse?: () => void }) {
 	return (
 		<div className="flex shrink-0 items-center justify-between border-b border-slate-800/70 px-3 py-2">
 			<span className="text-[12.5px] font-medium text-slate-300">{title}</span>
-			{typeof count === "number" && (
-				<span className="rounded-full bg-slate-700/80 px-1.5 text-[10px] tabular-nums text-slate-300">{count}</span>
-			)}
+			<span className="flex items-center gap-1.5">
+				{typeof count === "number" && (
+					<span className="rounded-full bg-slate-700/80 px-1.5 text-[10px] tabular-nums text-slate-300">{count}</span>
+				)}
+				{onCollapse && (
+					<button
+						type="button"
+						onClick={onCollapse}
+						title="收起左栏"
+						aria-label="收起左栏"
+						className="rounded px-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
+					>
+						«
+					</button>
+				)}
+			</span>
 		</div>
 	);
 }
@@ -21,12 +34,14 @@ export function McpPanel({
 	error,
 	onAdd,
 	onDelete,
+	onCollapse,
 }: {
 	servers: McpServerInfo[];
 	loading: boolean;
 	error: string | null;
 	onAdd: (name: string, url: string, headers?: Record<string, string>) => Promise<boolean>;
 	onDelete: (id: string) => Promise<boolean>;
+	onCollapse?: () => void;
 }) {
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
@@ -52,7 +67,7 @@ export function McpPanel({
 
 	return (
 		<div className="flex h-full w-full flex-col bg-slate-900/60">
-			<PanelHeader title="连接 · MCP" count={servers.length} />
+			<PanelHeader title="连接 · MCP" count={servers.length} onCollapse={onCollapse} />
 			<div className="shrink-0 space-y-1.5 border-b border-slate-800/70 p-3">
 				<input
 					value={name}
@@ -136,6 +151,7 @@ export function AutomationPanel({
 	onAdd,
 	onToggle,
 	onDelete,
+	onCollapse,
 }: {
 	items: AutomationInfo[];
 	loading: boolean;
@@ -143,6 +159,7 @@ export function AutomationPanel({
 	onAdd: (name: string, prompt: string, schedule: { kind: string; time?: string; minutes?: number }) => Promise<boolean>;
 	onToggle: (id: string, enabled: boolean) => Promise<boolean>;
 	onDelete: (id: string) => Promise<boolean>;
+	onCollapse?: () => void;
 }) {
 	const [name, setName] = useState("");
 	const [prompt, setPrompt] = useState("");
@@ -170,7 +187,7 @@ export function AutomationPanel({
 
 	return (
 		<div className="flex h-full w-full flex-col bg-slate-900/60">
-			<PanelHeader title="定时任务" count={items.length} />
+			<PanelHeader title="定时任务" count={items.length} onCollapse={onCollapse} />
 			<div className="shrink-0 space-y-1.5 border-b border-slate-800/70 p-3">
 				<input
 					value={name}
@@ -291,6 +308,7 @@ export function SkillPanel({
 	onAddRule,
 	onToggleRule,
 	onDeleteRule,
+	onCollapse,
 }: {
 	items: SkillInfo[];
 	loading: boolean;
@@ -306,6 +324,7 @@ export function SkillPanel({
 	onAddRule: (name: string, content: string) => Promise<boolean>;
 	onToggleRule: (name: string, enabled: boolean) => Promise<boolean>;
 	onDeleteRule: (name: string) => Promise<boolean>;
+	onCollapse?: () => void;
 }) {
 	const [name, setName] = useState("");
 	const [importUrl, setImportUrl] = useState("");
@@ -347,7 +366,7 @@ export function SkillPanel({
 
 	return (
 		<div className="flex h-full w-full flex-col bg-slate-900/60">
-			<PanelHeader title="技能" count={items.length} />
+			<PanelHeader title="技能" count={items.length} onCollapse={onCollapse} />
 			<div className="min-h-0 flex-1 overflow-y-auto">
 				<div className="space-y-1.5 border-b border-slate-800/70 p-3">
 					<input

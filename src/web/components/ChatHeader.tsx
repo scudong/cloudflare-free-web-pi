@@ -10,13 +10,42 @@ interface ChatHeaderProps {
 	onOpenGoal?: () => void;
 	/** 当前会话目标是否进行中（按钮高亮）。 */
 	goalActive?: boolean;
+	/** 左栏/右栏收起时在聊天栏两端提供展开按钮（v0.32.0）。 */
+	leftCollapsed?: boolean;
+	rightCollapsed?: boolean;
+	onToggleLeft?: () => void;
+	onToggleRight?: () => void;
 }
 
 /** Slim status strip on top of the chat column: current model + session id. */
-export function ChatHeader({ sessionId, sessionTitle, pending, models, model, onModelChange, onOpenGoal, goalActive }: ChatHeaderProps) {
+export function ChatHeader({
+	sessionId,
+	sessionTitle,
+	pending,
+	models,
+	model,
+	onModelChange,
+	onOpenGoal,
+	goalActive,
+	leftCollapsed,
+	rightCollapsed,
+	onToggleLeft,
+	onToggleRight,
+}: ChatHeaderProps) {
 	return (
 		<div className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-slate-800/70 bg-slate-900/40 px-4 text-xs">
 			<div className="flex shrink-0 items-center gap-2">
+				{leftCollapsed && onToggleLeft && (
+					<button
+						type="button"
+						onClick={onToggleLeft}
+						title="展开会话栏"
+						aria-label="展开会话栏"
+						className="rounded-md border border-slate-700 px-1.5 py-0.5 text-slate-400 transition-colors hover:border-sky-500/40 hover:text-sky-300"
+					>
+						»
+					</button>
+				)}
 				<label className="flex items-center gap-1.5">
 					<select
 						value={model}
@@ -53,6 +82,17 @@ export function ChatHeader({ sessionId, sessionTitle, pending, models, model, on
 					会话 #{sessionId}
 					{sessionTitle ? ` · ${sessionTitle}` : ""}
 				</span>
+				{rightCollapsed && onToggleRight && (
+					<button
+						type="button"
+						onClick={onToggleRight}
+						title="展开工作台"
+						aria-label="展开工作台"
+						className="shrink-0 rounded-md border border-slate-700 px-1.5 py-0.5 text-slate-400 transition-colors hover:border-sky-500/40 hover:text-sky-300"
+					>
+						«
+					</button>
+				)}
 			</div>
 		</div>
 	);

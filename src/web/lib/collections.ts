@@ -46,6 +46,9 @@ export function parseSessions(raw: unknown): SessionListItem[] {
 		title: pickString(entry, ["title", "name", "label"]) || `会话 ${index + 1}`,
 		createdAt: pickString(entry, ["created_at", "createdAt", "updated_at"]),
 		model: pickString(entry, ["model", "model_id"]) || undefined,
+		// 分支来源（v0.32.0）
+		parentId: pickString(entry, ["parent_id", "parentId"]) || undefined,
+		forkAt: pickNumber(entry, ["fork_at", "forkAt"]) || undefined,
 	}));
 }
 

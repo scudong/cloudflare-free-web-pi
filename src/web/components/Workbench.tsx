@@ -19,6 +19,8 @@ interface WorkbenchProps {
 	onDeleteFile: (name: string) => Promise<boolean>;
 	/** 从聊天里的文件卡请求打开某个文件（v0.22.0）。 */
 	openRequest?: { name: string; tick: number } | null;
+	/** 收起工作台（v0.32.0）。 */
+	onCollapse?: () => void;
 }
 
 /** The file list: virtual files produced by the agent's write_file tool. */
@@ -99,6 +101,7 @@ function FileView({
 	wide,
 	onToggleWide,
 	dockRight,
+	onCollapse,
 }: {
 	sessionId: string;
 	name: string;
@@ -108,6 +111,7 @@ function FileView({
 	wide: boolean;
 	onToggleWide: () => void;
 	dockRight: boolean;
+	onCollapse?: () => void;
 }) {
 	const [mode, setMode] = useState<"preview" | "source">("preview");
 	// HTML 文件用 sandbox iframe 渲染，其余走 Markdown（v0.15.0）
@@ -166,6 +170,17 @@ function FileView({
 						</button>
 					))}
 				</div>
+				{onCollapse && (
+					<button
+						type="button"
+						onClick={onCollapse}
+						aria-label="收起工作台"
+						title="收起工作台"
+						className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
+					>
+						»
+					</button>
+				)}
 				<button
 					type="button"
 					onClick={onToggleWide}
@@ -227,6 +242,7 @@ export function Workbench({
 	refreshTick,
 	onDeleteFile,
 	openRequest,
+	onCollapse,
 }: WorkbenchProps) {
 	const [openName, setOpenName] = useState<string | null>(null);
 
@@ -280,12 +296,26 @@ export function Workbench({
 					wide={wide}
 					onToggleWide={onToggleWide}
 					dockRight={wide}
+					onCollapse={onCollapse}
 				/>
 			) : (
 				<>
 					<div className="flex shrink-0 items-center justify-between border-b border-slate-800/70 px-3 py-2">
 						<span className="text-[12.5px] font-medium text-slate-300">文件</span>
-						<span className="rounded-full bg-slate-700/80 px-1.5 text-[10px] tabular-nums text-slate-300">{files.length}</span>
+						<span className="flex items-center gap-1.5">
+							<span className="rounded-full bg-slate-700/80 px-1.5 text-[10px] tabular-nums text-slate-300">{files.length}</span>
+							{onCollapse && (
+								<button
+									type="button"
+									onClick={onCollapse}
+									aria-label="收起工作台"
+									title="收起工作台"
+									className="rounded px-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
+								>
+									»
+								</button>
+							)}
+						</span>
 					</div>
 					<FileList files={files} loading={filesLoading} error={filesError} onOpen={handleOpenFile} onDelete={handleDeleteFile} />
 				</>
