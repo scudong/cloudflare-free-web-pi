@@ -2,6 +2,19 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-20（pi 内核版本管理）
+
+### 内核版本可见 + 手动/自动升级 + 兼容性门禁（v0.35.0）
+- **运行时可见**：`GET /api/kernel` 返回四个内核包（pi-durable / pi-ai / pi-mcp / pi-codemode）的声明版本、npm 最新版本、是否可升级；最新版本缓存 6 小时，`?refresh=1` 强刷
+- **设置 → 通用 → pi 内核**：显示每个包的版本，发现新版本时标黄并给出升级路径，带「检查更新」按钮
+- **手动升级**：`npm run upgrade:pi`（`scripts/upgrade-pi.mjs`）——查最新版 → 安装 → `build:web` → 全部金标 → `wrangler deploy --dry-run` 打包校验；**任何一步失败自动回滚 package.json / package-lock.json**
+- **自动升级**：`.github/workflows/pi-upgrade.yml`，每周一 09:00 UTC 检查，有更新就开 PR（也可在 Actions 手动触发）；PR 合并后走既有部署流水线
+- **兼容性**：升级脚本把「构建 + 80 条金标 + Workers 打包校验」作为硬门禁；`tests/unit/kernel.test.ts` 额外守住四个包版本锁步、升级入口与工作流存在
+- 顺带把 `@earendil-works/pi-codemode` 显式写进 dependencies（此前是传递依赖但直接 import）
+
+### 金标
+- 新增 4 条（内核包声明 / 版本锁步 / 升级入口 / 脚本与工作流存在），总计 **80 条**
+
 ## 2026-10-20（生成中插话）
 
 ### 流式插话：生成中补一句话（v0.34.0）

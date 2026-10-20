@@ -134,6 +134,29 @@ export function SettingsDialog({
 	const [clearing, setClearing] = useState(false);
 	/** 工具清单（v0.33.0）：打开「对话」tab 时读取，用于逐工具覆盖。 */
 	const [toolList, setToolList] = useState<{ name: string; category: string; policy: string; override: string }[]>([]);
+	/** pi 内核版本（v0.35.0）。 */
+	const [kernel, setKernel] = useState<{
+		current?: Record<string, string>;
+		latest?: Record<string, string>;
+		checkedAt?: string;
+		updateAvailable?: boolean;
+		outdated?: string[];
+		upgrade?: { manual?: string; auto?: string };
+	} | null>(null);
+	const [kernelBusy, setKernelBusy] = useState(false);
+
+	const loadKernel = async (refresh: boolean) => {
+		setKernelBusy(true);
+		try {
+			const data = await api.kernel(refresh);
+			setKernel(data);
+		} catch {
+			setKernel(null);
+		} finally {
+			setKernelBusy(false);
+		}
+	};
+
 	/** 手动压缩（v0.31.0）。 */
 	const [compactState, setCompactState] = useState<"idle" | "running" | "done" | "error">("idle");
 	const [compactMessage, setCompactMessage] = useState("");
@@ -155,6 +178,23 @@ export function SettingsDialog({
 			setCompactMessage(err instanceof Error ? err.message : String(err));
 		}
 	};
+
+	// pi 内核版本（v0.35.0）：打开设置时读一次（走 6 小时缓存）
+	useEffect(() => {
+		if (!open) return;
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.kernel(false);
+				if (alive) setKernel(data);
+			} catch {
+				// 接口不可用时保持空
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [open]);
 
 	// 工具清单（v0.33.0）
 	useEffect(() => {
@@ -376,6 +416,54 @@ export function SettingsDialog({
 								</Section>
 							)}
 						</>
+					)}
+
+					{tab === "general" && (
+						<Section title="pi 内核">
+							<p className="mb-2 text-xs leading-relaxed text-slate-500">
+								内核是 pi-durable / pi-ai / pi-mcp / pi-codemode 四个包。升级后构建、金标与打包校验全部通过才会部署。
+							</p>
+							<ul className="space-y-0.5 text-xs">
+								{Object.entries(kernel?.current ?? {}).map(([name, version]) => {
+									const latest = kernel?.latest?.[name];
+									const outdated = kernel?.outdated?.includes(name);
+									return (
+										<li key={name} className="flex items-center justify-between gap-2">
+											<span className="truncate text-slate-300">{name.replace("@earendil-works/", "")}</span>
+											<span className={outdated ? "text-amber-300" : "text-slate-500"}>
+												{version}
+												{outdated && latest ? ` → ${latest}` : ""}
+											</span>
+										</li>
+									);
+								})}
+								{!kernel && <li className="text-slate-500">正在读取版本…</li>}
+							</ul>
+							<div className="mt-3 flex flex-wrap items-center gap-2">
+								<button
+									type="button"
+									onClick={() => void loadKernel(true)}
+									disabled={kernelBusy}
+									className="rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-300 transition-colors hover:bg-sky-500/20 disabled:opacity-50"
+								>
+									{kernelBusy ? "检查中…" : "检查更新"}
+								</button>
+								{kernel?.checkedAt && (
+									<span className="text-[11px] text-slate-500">
+										上次检查：{new Date(kernel.checkedAt).toLocaleString("zh-CN", { hour12: false })}
+									</span>
+								)}
+							</div>
+							{kernel?.updateAvailable ? (
+								<div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-200">
+									<p>发现新版本：{(kernel.outdated ?? []).join("、")}</p>
+									<p className="mt-1 text-amber-200/80">手动：{kernel.upgrade?.manual ?? "npm run upgrade:pi"}</p>
+									<p className="mt-0.5 text-amber-200/80">自动：{kernel.upgrade?.auto ?? "每周自动开 PR"}</p>
+								</div>
+							) : (
+								kernel && !kernel.updateAvailable && <p className="mt-2 text-xs text-emerald-300">已是最新版本。</p>
+							)}
+						</Section>
 					)}
 
 					{tab === "chat" && (

@@ -19,6 +19,8 @@ import { watchEvents } from "@earendil-works/pi-durable";
 import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
 import { McpClient, StreamableHttpTransport, toLlmContent } from "@earendil-works/pi-mcp";
 import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
+// 构建期注入：内核依赖版本（v0.35.0）
+import packageJson from "../package.json";
 
 const ctx = BACKGROUND_CONTEXT;
 
@@ -395,6 +397,60 @@ function listPrompts(): { name: string; description: string; content: string }[]
 		}[];
 	} catch {
 		return [];
+	}
+}
+
+/* ---------------- pi 内核版本（v0.35.0） ---------------- */
+
+/** 我们直接 import 的 pi 内核包。升级脚本与自动 PR 都以这份清单为准。 */
+const PI_PACKAGES = [
+	"@earendil-works/pi-durable",
+	"@earendil-works/pi-ai",
+	"@earendil-works/pi-mcp",
+	"@earendil-works/pi-codemode",
+];
+
+/** package.json 里声明的版本范围（构建期内联）。 */
+function declaredKernelVersions(): Record<string, string> {
+	const deps = { ...(packageJson as { dependencies?: Record<string, string> }).dependencies } as Record<string, string>;
+	const out: Record<string, string> = {};
+	for (const name of PI_PACKAGES) out[name] = deps[name] ?? "(传递依赖)";
+	return out;
+}
+
+/** 去掉 ^ ~ 等前缀，得到可比较的数字段。 */
+function semverParts(v: string): number[] {
+	return v
+		.replace(/^[^0-9]*/, "")
+		.split("-")[0]!
+		.split(".")
+		.map((n) => Number(n) || 0);
+}
+
+/** a 是否比 b 新（只比较主版本号）。 */
+function semverGreater(a: string, b: string): boolean {
+	const pa = semverParts(a);
+	const pb = semverParts(b);
+	for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+		const x = pa[i] ?? 0;
+		const y = pb[i] ?? 0;
+		if (x !== y) return x > y;
+	}
+	return false;
+}
+
+/** 查 npm 上的最新版本；失败返回 null（不阻塞页面）。 */
+async function fetchLatestVersion(name: string): Promise<string | null> {
+	try {
+		const res = await fetch(`https://registry.npmjs.org/${name.replace("/", "%2F")}/latest`, {
+			headers: { accept: "application/json" },
+			signal: AbortSignal.timeout(5000),
+		});
+		if (!res.ok) return null;
+		const data = (await res.json()) as { version?: unknown };
+		return typeof data.version === "string" ? data.version : null;
+	} catch {
+		return null;
 	}
 }
 
@@ -2496,6 +2552,46 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 						{ key: "data", label: "数据能力", items: data },
 						{ key: "protocol", label: "协议接入", items: protocol },
 					],
+				});
+			}
+			/* ---- pi 内核版本（v0.35.0）：当前声明版本 + npm 最新版本（缓存 6 小时） ---- */
+			if (url.pathname === "/kernel" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const current = declaredKernelVersions();
+				const refresh = url.searchParams.get("refresh") === "1";
+				const cachedAt = getSetting("kernel_checked_at", "");
+				const fresh = cachedAt !== "" && Date.now() - new Date(cachedAt).getTime() < 6 * 3600_000;
+				let latest: Record<string, string> = {};
+				try {
+					latest = JSON.parse(getSetting("kernel_latest", "{}")) as Record<string, string>;
+				} catch {
+					latest = {};
+				}
+				let checkedAt = cachedAt;
+				if (refresh || !fresh) {
+					const results = await Promise.all(PI_PACKAGES.map(async (name) => [name, await fetchLatestVersion(name)] as const));
+					latest = {};
+					for (const [name, version] of results) if (version) latest[name] = version;
+					checkedAt = new Date().toISOString();
+					if (Object.keys(latest).length) {
+						setSetting("kernel_latest", JSON.stringify(latest));
+						setSetting("kernel_checked_at", checkedAt);
+					}
+				}
+				// 只比较声明了版本的包；传递依赖不计入「可升级」
+				const outdated = PI_PACKAGES.filter(
+					(name) => latest[name] && /\d/.test(current[name] ?? "") && semverGreater(latest[name]!, current[name]!),
+				);
+				return Response.json({
+					current,
+					latest,
+					checkedAt,
+					updateAvailable: outdated.length > 0,
+					outdated,
+					upgrade: {
+						manual: "npm run upgrade:pi",
+						auto: "每周一 09:00 UTC 自动检查并开 PR（.github/workflows/pi-upgrade.yml），也可在 Actions 里手动触发",
+					},
 				});
 			}
 			/* ---- 生成中插话（v0.34.0） ---- */

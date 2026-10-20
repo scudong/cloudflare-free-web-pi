@@ -1,0 +1,49 @@
+name: pi-upgrade
+
+# 每周一 09:00 UTC 自动检查 pi 内核更新；也可以在 Actions 页面手动触发。
+# 升级脚本自带回滚：构建 / 金标 / 打包校验任一失败都不会留下半升级状态。
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: 升级 pi 内核并校验（失败自动回滚）
+        run: node scripts/upgrade-pi.mjs
+
+      - name: 有变化就开 PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- package.json package-lock.json; then
+            echo "没有可升级的版本"
+            exit 0
+          fi
+          git config user.name "pi-harness-bot"
+          git config user.email "bot@users.noreply.github.com"
+          BRANCH="pi-upgrade/$(date -u +%Y%m%d-%H%M)"
+          git checkout -b "$BRANCH"
+          git add package.json package-lock.json
+          git commit -m "chore: 升级 pi 内核（自动）"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "chore: pi 内核自动升级" \
+            --base main \
+            --head "$BRANCH" \
+            --body "由 \`pi-upgrade\` 工作流自动创建。升级脚本已跑过 \`build:web\`、全部金标用例和 \`wrangler deploy --dry-run\`，全部通过才会开这个 PR。合并即自动部署。"

@@ -252,6 +252,17 @@ export const api = {
 		approvalTools?: Record<string, string>;
 	}) => requestJson<{ ok?: boolean }>("/api/settings", jsonPost(patch)),
 
+	/** pi 内核版本（v0.35.0）：当前声明版本 + npm 最新版本。 */
+	kernel: (refresh = false) =>
+		requestJson<{
+			current?: Record<string, string>;
+			latest?: Record<string, string>;
+			checkedAt?: string;
+			updateAvailable?: boolean;
+			outdated?: string[];
+			upgrade?: { manual?: string; auto?: string };
+		}>(refresh ? "/api/kernel?refresh=1" : "/api/kernel"),
+
 	/** 工具清单与生效策略（v0.33.0）。 */
 	tools: () =>
 		requestJson<{

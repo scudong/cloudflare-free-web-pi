@@ -72,3 +72,4 @@ tests/
 | **会话分支** | `unit/sessionTree.test.ts` + `api/api.test.ts` · 会话分支 |
 | **工具审批** | `api/api.test.ts` · 工具审批 |
 | **生成中插话** | `api/api.test.ts` · 生成中插话 |
+| **pi 内核版本** | `unit/kernel.test.ts` |
