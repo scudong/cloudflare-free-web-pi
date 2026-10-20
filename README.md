@@ -18,11 +18,12 @@
 | 执行 | `codemode`：模型写 JavaScript 在 QuickJS 沙箱里跑，脚本内可 `await tools.<name>()` 调用其它工具；`dispatch_tasks`：2–4 个独立子任务并行分派给子代理后汇总 |
 | 网页 | `web_search` 联网搜索 + `web_fetch_page` 抓取正文（DeepSeek 搜索 API，设置中可开关）；`http_fetch` 直接抓取；**Browserbase MCP** 云端浏览器（导航/点击/提取，无需本地 Chrome） |
 | 记忆 | `remember` / `recall` + 每 6 条自动 `reflect` 抽取长期事实（带去重） |
-| 文件 | 按会话隔离的虚拟文件系统（`write_file` / `read_file` / `list_files`），右栏可预览 Markdown 与 HTML；**Markdown / HTML 可生成带有效期的公开分享链接** |
+| 文件 | 按会话隔离的虚拟文件系统（`write_file` / `read_file` / `list_files`），右栏可预览 Markdown 与 HTML；**左栏「全部文件」跨会话汇总当前用户的所有产出**；Markdown / HTML 可生成带有效期的公开分享链接 |
+| 知识库 | **每个用户独立的知识库**（每人一个 DO）：粘贴资料自动分块 + 中文全文索引（FTS5 / bm25），模型侧 `kb_search` / `kb_add` / `kb_list` / `kb_delete`；左栏「知识库」可检索、查看全文、删除 |
 | 能力 | **能力注册表**（内置/数据/协议三类汇总）、**提示模板**（`/` 展开，支持 `$1` 占位）、**规则文件**（每轮注入）、自定义技能（`SKILL.md` 规范）+ 一键安装 `badlogic/pi-skills` 社区技能；模型按需 `load_skill`，也可在输入框用 `/技能名` 显式调用 |
 | 扩展 | 任意 **MCP** 服务器（Streamable HTTP，支持自定义请求头） |
 | 定时 | Durable Object alarm 驱动的定时任务（每天 HH:MM / 每隔 N 分钟） |
-| 其他 | **左侧工具栏**（新会话/会话/连接/定时/技能/用户/设置）、**设置页**（分 tab：通用/对话/模型/记忆/数据）、**模型供应商管理**（任意 OpenAI 兼容端点，CCswitch 式切换）、一键清空记忆、只读分享链接（会话 / Markdown / HTML，可设有效期）、Markdown 导出、全量备份/恢复、四套主题（深色/浅色/米黄/午夜蓝，Arco 字节色卡）、访问密码 + 邀请码多用户（独立空间） |
+| 其他 | **左侧工具栏**（新会话/全部文件/知识库/会话/连接/定时/技能/用户/设置）、**设置页**（分 tab：通用/对话/模型/记忆/数据）、**模型供应商管理**（任意 OpenAI 兼容端点，CCswitch 式切换）、一键清空记忆、只读分享链接（会话 / Markdown / HTML，可设有效期）、Markdown 导出、全量备份/恢复、四套主题（深色/浅色/米黄/午夜蓝，Arco 字节色卡）、访问密码 + 邀请码多用户（独立空间） |
 
 ---
 
@@ -94,6 +95,9 @@ npx wrangler deploy
 | GET | `/api/entries?sessionId=` | 会话转录 |
 | GET | `/api/files?sessionId=` | 工作台文件列表 |
 | GET | `/api/files/content?sessionId=&name=` | 文件内容 |
+| GET | `/api/files/all?q=` | 当前用户所有会话的文件（跨会话总览） |
+| GET / POST / DELETE | `/api/kb` | 用户知识库：文档列表 / 入库 / 删除 |
+| GET | `/api/kb/doc?id=` · `/api/kb/search?q=` | 知识库文档全文 / 检索片段 |
 | GET / POST / DELETE | `/api/skills` | 技能增删查 |
 | GET | `/api/skills/community` | 社区技能目录（badlogic/pi-skills） |
 | POST | `/api/skills/import` | `{url}` 从 GitHub/raw/任意 md 导入技能 |
@@ -114,7 +118,7 @@ npx wrangler deploy
 
 ## 内置工具
 
-`now` · `remember` · `recall` · `update_plan` · `dispatch_tasks` · `list_skills` · `load_skill` · `web_search` · `web_fetch_page` · `http_fetch` · `write_file` · `read_file` · `list_files` · `codemode` · `tool_search`，以及所有已配置 MCP 服务器的工具（`mcp__<服务器>__<工具>`）。
+`now` · `remember` · `recall` · `kb_search` · `kb_add` · `kb_list` · `kb_delete` · `update_plan` · `dispatch_tasks` · `list_skills` · `load_skill` · `web_search` · `web_fetch_page` · `http_fetch` · `write_file` · `read_file` · `list_files` · `codemode` · `tool_search`，以及所有已配置 MCP 服务器的工具（`mcp__<服务器>__<工具>`）。
 
 ---
 
@@ -122,7 +126,7 @@ npx wrangler deploy
 
 - **Durable Object 换代码有延迟**：部署后旧实例可能继续运行旧代码 **5–10 分钟**，且持续请求会让它不驱逐。判断线上是否真的更新，看 `GET /api/version` 返回的 git SHA，不要凭「功能没生效」下结论。
 - **访问密码与邀请码**：`ACCESS_PASSWORD` 是主人密码；左栏「用户」可生成邀请码，邀请码登录后进入独立空间（自己的会话 / 文件 / 记忆）。删除用户后其登录态立即失效；改密码会让所有设备立即退出（邀请码仍可重新登录）。
-- **数据隔离**：主人沿用历史数据所在的 Durable Object；每个邀请用户使用独立的 `user:<id>` Durable Object，互不可见。
+- **数据隔离**：主人沿用历史数据所在的 Durable Object；每个邀请用户使用独立的 `user:<id>` Durable Object，互不可见。会话、文件、记忆、知识库、分享链接都按这套边界隔离。
 - **密钥落库**：MCP 的请求头（如 `x-bb-api-key`）存在 DO 数据库里，**会随 `/api/backup` 导出**，分享备份时注意。
 - **免费额度**：Workers / DO / QuickJS 均在免费额度内；DeepSeek 与 Browserbase 按量计费。
 

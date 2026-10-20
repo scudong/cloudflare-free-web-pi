@@ -9,6 +9,8 @@ import type { FileInfo } from "../types";
 interface WorkbenchProps {
 	sessionId: string;
 	files: FileInfo[];
+	/** files 对应的会话（v0.45.0）：跨会话打开时等新列表加载完再判断文件是否存在。 */
+	filesForSession?: string;
 	filesLoading: boolean;
 	filesError: string | null;
 	/** 最大化阅读（v0.16.0）。 */
@@ -251,6 +253,7 @@ function FileView({
 export function Workbench({
 	sessionId,
 	files,
+	filesForSession,
 	filesLoading,
 	filesError,
 	wide,
@@ -275,12 +278,14 @@ export function Workbench({
 	// 列表还在加载时不要关，否则刚打开的文件会被误关。
 	useEffect(() => {
 		if (filesLoading) return;
+		// 刚切换会话、新列表还没到时不要判断，否则跨会话打开的刚打开的文件会被误关（v0.45.0）
+		if (filesForSession && filesForSession !== sessionId) return;
 		if (openName && !files.some((file) => file.name === openName)) {
 			setOpenName(null);
 			onFileOpenChange(false); // 同步通知外层还原宽度 / 退出全宽
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [files, openName, filesLoading]);
+	}, [files, openName, filesLoading, filesForSession, sessionId]);
 
 	const handleOpenFile = (name: string) => {
 		setOpenName(name);

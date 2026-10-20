@@ -173,6 +173,21 @@ export const api = {
 	deleteFile: (sessionId: string, name: string) =>
 		requestJson<{ ok: boolean }>(withQuery("/api/files", { sessionId, name }), { method: "DELETE" }),
 
+	/** 当前用户所有会话产出的文件（v0.45.0）。 */
+	filesAll: (q?: string) => requestJson<{ files?: unknown[] }>(withQuery("/api/files/all", { q: q ?? "" })),
+
+	/** 用户知识库（v0.45.0）：每人独立，接口自动落在当前用户 DO。 */
+	kbDocs: () => requestJson<{ docs?: unknown[] }>("/api/kb"),
+	kbAdd: (title: string, content: string, source?: string, tags?: string) =>
+		requestJson<{ ok?: boolean; id?: number; chunks?: number; error?: string }>(
+			"/api/kb",
+			jsonPost({ title, content, source: source ?? "", tags: tags ?? "" }),
+		),
+	kbSearch: (q: string) => requestJson<{ hits?: unknown[] }>(withQuery("/api/kb/search", { q })),
+	kbDoc: (id: number) =>
+		requestJson<{ id?: number; title?: string; content?: string; error?: string }>(withQuery("/api/kb/doc", { id: String(id) })),
+	kbDelete: (id: number) => requestJson<{ ok?: boolean }>(withQuery("/api/kb", { id: String(id) }), { method: "DELETE" }),
+
 	auth: () => requestJson<{ required?: boolean; authenticated?: boolean; owner?: boolean }>("/api/auth"),
 
 	login: (password: string) =>

@@ -108,7 +108,7 @@ await check("GET /api/capabilities", async () => {
 await check("GET /api/tools", async () => {
 	const { json } = await call("/api/tools");
 	const names = (json?.tools ?? []).map((t) => t.name);
-	for (const required of ["codemode", "write_file", "read_file", "web_search", "update_plan", "dispatch_tasks", "ask_user", "set_goal", "install_skill"]) {
+	for (const required of ["codemode", "write_file", "read_file", "web_search", "update_plan", "dispatch_tasks", "ask_user", "set_goal", "install_skill", "kb_add", "kb_search"]) {
 		expect(names.includes(required), `缺少工具 ${required}`);
 	}
 	return `${names.length} 个工具`;

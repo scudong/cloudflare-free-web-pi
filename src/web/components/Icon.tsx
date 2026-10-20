@@ -1,5 +1,6 @@
 import {
 	Archive,
+	BookOpen,
 	Brain,
 	BrainCircuit,
 	Check,
@@ -71,6 +72,7 @@ const ICONS = {
 	skills: Sparkles,
 	file: FileText,
 	folder: FolderOpen,
+	kb: BookOpen,
 	trash: Trash2,
 	edit: Pencil,
 	branch: GitBranch,

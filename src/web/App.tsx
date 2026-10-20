@@ -12,6 +12,8 @@ import { GoalBar, GoalDialog } from "./components/GoalBar";
 import { ApprovalBar } from "./components/ApprovalBar";
 import { AskUserCard } from "./components/AskUserCard";
 import { UsersPanel } from "./components/UsersPanel";
+import { FilesPanel } from "./components/FilesPanel";
+import { KnowledgePanel } from "./components/KnowledgePanel";
 import { Icon } from "./components/Icon";
 import { api } from "./lib/api";
 import { shareUrlFor } from "./lib/format";
@@ -121,6 +123,8 @@ export default function App() {
 
 	// Workbench data
 	const [files, setFiles] = useState<FileInfo[]>([]);
+	/** files 数组对应的会话：跨会话打开文件时避免被「文件不存在」守卫误关（v0.45.0）。 */
+	const [filesForSession, setFilesForSession] = useState(sessionId);
 	const [filesState, setFilesState] = useState<PanelState>("loading");
 	const [filesError, setFilesError] = useState<string | null>(null);
 	const [memories, setMemories] = useState<MemoryInfo[]>([]);
@@ -212,6 +216,7 @@ export default function App() {
 			if (!alive) return;
 			if (filesRes.status === "fulfilled") {
 				setFiles(parseFiles(filesRes.value.files));
+				setFilesForSession(sessionId);
 				setFilesError(null);
 				setFilesState("ready");
 			} else {
@@ -1072,6 +1077,20 @@ export default function App() {
 		saveBool(RIGHT_OPEN_KEY, true);
 	}, []);
 
+	/** 从「全部文件」跨会话打开：先切会话，再请求右栏打开（v0.45.0）。 */
+	const handleOpenFileAcrossSessions = useCallback(
+		(targetSession: string, name: string) => {
+			if (!name) return;
+			if (targetSession && targetSession !== sessionId) handleSelectSession(targetSession);
+			setFileRequest((prev) => ({ name, tick: (prev?.tick ?? 0) + 1 }));
+			setWorkbenchWide(false);
+			setRightOpen(true);
+			saveBool(RIGHT_OPEN_KEY, true);
+			if (!isDesktop) setMobileTab("files");
+		},
+		[sessionId, handleSelectSession, isDesktop],
+	);
+
 	/** 拖拽分隔条调整右栏宽度（限制在 260px ~ 视口 65%）。 */
 	const handleRightResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
 		event.preventDefault();
@@ -1408,6 +1427,15 @@ export default function App() {
 	const leftContent =
 		activeRailView === "sessions" ? (
 			sidebar
+		) : activeRailView === "files" ? (
+			<FilesPanel
+				refreshTick={panelTick}
+				onOpen={handleOpenFileAcrossSessions}
+				onChanged={() => setPanelTick((tick) => tick + 1)}
+				onCollapse={toggleLeft}
+			/>
+		) : activeRailView === "kb" ? (
+			<KnowledgePanel onCollapse={toggleLeft} />
 		) : activeRailView === "mcp" ? (
 			<McpPanel servers={mcpServers} loading={mcpLoading} error={mcpError} onAdd={handleAddMcp} onDelete={handleDeleteMcp} onCollapse={toggleLeft} />
 		) : activeRailView === "automations" ? (
@@ -1555,6 +1583,7 @@ export default function App() {
 						<Workbench
 							sessionId={sessionId}
 							files={files}
+							filesForSession={filesForSession}
 							filesLoading={filesState === "loading"}
 							filesError={filesError}
 							wide={workbenchWide}

@@ -162,3 +162,33 @@ export interface SkillInfo {
 	description: string;
 	content: string;
 }
+
+/** 全部文件总览条目（v0.45.0）：文件 + 所属会话。 */
+export interface AllFileInfo extends FileInfo {
+	sessionId: string;
+	sessionTitle: string;
+}
+
+/** 知识库文档（v0.45.0）：每个用户独立。 */
+export interface KbDocInfo {
+	id: number;
+	title: string;
+	source: string;
+	tags: string;
+	/** 正文字符数。 */
+	size: number;
+	/** 分块数（检索单位）。 */
+	chunks: number;
+	createdAt: string;
+	updatedAt: string;
+}
+
+/** 知识库检索命中片段（v0.45.0）。 */
+export interface KbHit {
+	docId: number;
+	title: string;
+	source: string;
+	text: string;
+	chunkSeq: number;
+	score: number;
+}

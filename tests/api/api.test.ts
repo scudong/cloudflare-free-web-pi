@@ -256,7 +256,7 @@ describe("备份与恢复", () => {
 	it("备份包含各类数据键", async () => {
 		const { json } = await api("/api/backup");
 		expect(json.version).toBe(1);
-		for (const key of ["memories", "files", "automations", "mcpServers", "sessions", "skills", "settings", "plans", "providers", "prompts", "rules"]) {
+		for (const key of ["memories", "files", "automations", "mcpServers", "sessions", "skills", "settings", "plans", "providers", "prompts", "rules", "kbDocs"]) {
 			expect(json.data).toHaveProperty(key);
 		}
 	});
@@ -276,6 +276,110 @@ describe("备份与恢复", () => {
 		expect(list.json.providers.some((p: { id: string }) => p.id === "golden-provider")).toBe(true);
 
 		await api("/api/providers?id=golden-provider", { method: "DELETE" });
+	});
+});
+
+describe("知识库", () => {
+	let docId = 0;
+	const CONTENT = "信用债研究笔记\n\n久期是衡量利率风险的核心指标。组合久期 3.2 年，AA+ 城投占比 40%。\n\nEnglish note: duration and spread duration.";
+
+	it("空库返回空列表", async () => {
+		const res = await api("/api/kb");
+		expect(res.status).toBe(200);
+		expect(Array.isArray(res.json.docs)).toBe(true);
+	});
+
+	it("入库后自动分块并建立索引", async () => {
+		const res = await post("/api/kb", { title: "债券研究笔记", content: CONTENT, source: "金标用例", tags: "固收" });
+		expect(res.status).toBe(200);
+		expect(res.json.chunks).toBeGreaterThanOrEqual(1);
+		docId = res.json.id;
+
+		const list = await api("/api/kb");
+		const doc = list.json.docs.find((d: { id: number }) => d.id === docId);
+		expect(doc).toMatchObject({ title: "债券研究笔记", source: "金标用例", tags: "固收" });
+		expect(doc.chunks).toBeGreaterThanOrEqual(1);
+		expect(doc.size).toBeGreaterThan(0);
+	});
+
+	it("中文两字词也能检索", async () => {
+		const res = await api(`/api/kb/search?q=${encodeURIComponent("久期")}`);
+		expect(res.json.hits.length).toBeGreaterThan(0);
+		expect(res.json.hits[0].title).toBe("债券研究笔记");
+		expect(res.json.hits[0].text).toContain("久期");
+	});
+
+	it("英文检索不区分大小写", async () => {
+		const res = await api(`/api/kb/search?q=${encodeURIComponent("DURATION")}`);
+		expect(res.json.hits.length).toBeGreaterThan(0);
+	});
+
+	it("未命中返回空", async () => {
+		const res = await api(`/api/kb/search?q=${encodeURIComponent("量子纠缠")}`);
+		expect(res.json.hits).toEqual([]);
+	});
+
+	it("读取全文", async () => {
+		const res = await api(`/api/kb/doc?id=${docId}`);
+		expect(res.json.title).toBe("债券研究笔记");
+		expect(res.json.content).toContain("久期");
+	});
+
+	it("标题与正文必填", async () => {
+		const res = await post("/api/kb", { title: "只有标题" });
+		expect(res.status).toBe(400);
+	});
+
+	it("删除后不再可检索", async () => {
+		const res = await api(`/api/kb?id=${docId}`, { method: "DELETE" });
+		expect(res.json.ok).toBe(true);
+		const search = await api(`/api/kb/search?q=${encodeURIComponent("久期")}`);
+		expect(search.json.hits.length).toBe(0);
+	});
+});
+
+describe("全部文件", () => {
+	let childSession = "";
+	let childTitle = "";
+
+	beforeAll(async () => {
+		const created = await post("/api/sessions", {});
+		childSession = created.json.id as string;
+		childTitle = (created.json.title as string) ?? "";
+		await post("/api/restore", {
+			version: 1,
+			data: {
+				files: [
+					{ conversation_id: "1", name: "all-files-root.md", content: "# root", updated_at: new Date().toISOString() },
+					{ conversation_id: childSession, name: "all-files-child.md", content: "# child", updated_at: new Date().toISOString() },
+				],
+			},
+		});
+	});
+
+	it("跨会话汇总并带会话信息", async () => {
+		const res = await api("/api/files/all");
+		expect(res.status).toBe(200);
+		const child = res.json.files.find((f: { name: string; sessionId: string }) => f.name === "all-files-child.md");
+		expect(child.sessionId).toBe(childSession);
+		expect(child.sessionTitle).toBe(childTitle);
+		const root = res.json.files.find((f: { name: string }) => f.name === "all-files-root.md");
+		expect(root.sessionId).toBe("1");
+	});
+
+	it("按文件名筛选", async () => {
+		const res = await api(`/api/files/all?q=${encodeURIComponent("child")}`);
+		expect(res.json.files.map((f: { name: string }) => f.name)).toEqual(["all-files-child.md"]);
+	});
+
+	it("同名文件按会话区分", async () => {
+		await post("/api/restore", {
+			version: 1,
+			data: { files: [{ conversation_id: childSession, name: "all-files-root.md", content: "# child copy", updated_at: new Date().toISOString() }] },
+		});
+		const res = await api(`/api/files/all?q=${encodeURIComponent("all-files-root")}`);
+		const sessions = (res.json.files as { sessionId: string }[]).map((f) => f.sessionId).sort();
+		expect(sessions).toEqual(["1", childSession].sort());
 	});
 });
 
@@ -491,6 +595,10 @@ describe("工具注册（防回归）", () => {
 		const { json } = await api("/api/debug/agent");
 		const tools: string[] = json.tools ?? [];
 		for (const name of ["dispatch_tasks", "update_plan", "web_search", "web_fetch_page", "write_file", "codemode", "remember", "recall", "install_skill"]) {
+			expect(tools).toContain(name);
+		}
+		// 用户知识库（v0.45.0）
+		for (const name of ["kb_add", "kb_search", "kb_list", "kb_delete"]) {
 			expect(tools).toContain(name);
 		}
 		// 目标模式（v0.31.0）

@@ -1,6 +1,6 @@
 import { Icon, type IconName } from "./Icon";
 
-export type RailView = "sessions" | "mcp" | "automations" | "skills" | "users";
+export type RailView = "sessions" | "files" | "kb" | "mcp" | "automations" | "skills" | "users";
 
 interface RailProps {
 	view: RailView;
@@ -47,6 +47,8 @@ export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onO
 			</button>
 			<div aria-hidden className="my-1 h-px w-6 bg-slate-800" />
 			{item("sessions", "会话", "sessions")}
+			{item("files", "全部文件", "folder")}
+			{item("kb", "知识库", "kb")}
 			{item("mcp", "连接", "connection")}
 			{item("automations", "定时", "clock")}
 			{item("skills", "能力", "skills")}

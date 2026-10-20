@@ -111,6 +111,12 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	// 提示模板与规则文件（v0.31.0）：纯数据能力，运行时加载
 	sql.exec(`CREATE TABLE IF NOT EXISTS prompts (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS rules (name TEXT PRIMARY KEY, content TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`);
+	// 用户知识库（v0.45.0）：每个用户一个独立 DO，文档、分块与 FTS5 索引都落在自己的库
+	sql.exec(`CREATE TABLE IF NOT EXISTS kb_docs (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, source TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS kb_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT, doc_id INTEGER NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL)`);
+	sql.exec(`CREATE INDEX IF NOT EXISTS kb_chunks_doc ON kb_chunks(doc_id)`);
+	// rowid 复用 kb_chunks.id；标题与正文分列，bm25 可分别加权
+	sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(title_tokens, body_tokens)`);
 	// 目标模式（v0.31.0）：一个会话一个目标，active 时按 token 预算与轮次自动续转
 	sql.exec(`CREATE TABLE IF NOT EXISTS goals (session_id TEXT PRIMARY KEY, objective TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', token_budget INTEGER NOT NULL DEFAULT 200000, baseline_tokens INTEGER NOT NULL DEFAULT 0, tokens_used INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0, max_turns INTEGER NOT NULL DEFAULT 12, summary TEXT NOT NULL DEFAULT '', next_run_at INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 	// 交互式问答（v0.37.0）：ask_user 工具提出的问题，等用户点选后带回模型
@@ -278,6 +284,10 @@ const TOOL_CATEGORY: Record<string, ApprovalCategory> = {
 	install_skill: "write",
 	read_file: "read",
 	list_files: "read",
+	kb_search: "read",
+	kb_list: "read",
+	kb_add: "write",
+	kb_delete: "write",
 	web_search: "read",
 	web_fetch_page: "read",
 	http_fetch: "read",
@@ -451,6 +461,7 @@ const CUSTOM_TOOL_NAME = /^[a-zA-Z][a-zA-Z0-9_]{1,40}$/;
 /** 保留名：不能覆盖内置工具。 */
 const RESERVED_TOOL_NAMES = new Set([
 	"now", "remember", "recall", "list_skills", "load_skill", "install_skill", "read_file", "list_files", "write_file",
+	"kb_search", "kb_add", "kb_list", "kb_delete",
 	"update_plan", "dispatch_tasks", "web_search", "web_fetch_page", "http_fetch", "tool_search",
 	"codemode", "set_goal", "complete_goal", "report_goal", "ask_user",
 ]);
@@ -705,6 +716,145 @@ const stripHtml = (html: string) =>
 		.replace(/\s+/g, " ")
 		.trim()
 		.slice(0, 6000);
+
+/* ---------------- 用户知识库（v0.45.0） ----------------
+ * 数据落在每个用户自己的 DO SQLite 里，天然按用户隔离。
+ * 中文没有空格：索引时把连续汉字切成重叠二元组（「知识库」→ 知识/识库），
+ * 查询用同样的切法做 AND 匹配；单个汉字不进索引，退回 LIKE。
+ */
+const KB_MAX_CONTENT = 200_000;
+const KB_CHUNK_CHARS = 800;
+const KB_CHUNK_OVERLAP = 80;
+const KB_MAX_CHUNKS = 2_000;
+
+/** 中文二元组 + 英文/数字词，供 FTS5 使用。 */
+function kbTokens(text: string): string[] {
+	const tokens: string[] = [];
+	const normalized = text.normalize("NFKC").toLowerCase();
+	for (const run of normalized.match(/[㐀-鿿豈-﫿]+|[a-z0-9_]+/g) ?? []) {
+		if (/^[㐀-鿿豈-﫿]/.test(run)) {
+			if (run.length === 1) tokens.push(run);
+			else for (let i = 0; i + 1 < run.length; i++) tokens.push(run.slice(i, i + 2));
+		} else {
+			tokens.push(run);
+		}
+	}
+	return tokens;
+}
+
+/** 查询串 → FTS5 MATCH 表达式；单字返回 null（索引只有二元组）。 */
+function kbFtsQuery(query: string): string | null {
+	const tokens = [...new Set(kbTokens(query))].slice(0, 32);
+	if (!tokens.length || (tokens.length === 1 && tokens[0]!.length < 2)) return null;
+	return tokens.map((token) => `"${token}"`).join(" AND ");
+}
+
+/** 按段落聚合成约 800 字的片段，超长段落按 720 字步长切分并留 80 字重叠。 */
+function kbChunkText(text: string): string[] {
+	if (!text) return [];
+	const out: string[] = [];
+	let buf = "";
+	const flush = () => {
+		const trimmed = buf.trim();
+		if (trimmed) out.push(trimmed);
+		buf = "";
+	};
+	for (const raw of text.split(/\n{2,}/)) {
+		const para = raw.trim();
+		if (!para) continue;
+		if (para.length > KB_CHUNK_CHARS) {
+			flush();
+			const step = KB_CHUNK_CHARS - KB_CHUNK_OVERLAP;
+			for (let i = 0; i < para.length; i += step) {
+				const piece = para.slice(i, i + KB_CHUNK_CHARS).trim();
+				if (piece) out.push(piece);
+				if (out.length >= KB_MAX_CHUNKS) return out;
+			}
+			continue;
+		}
+		if (buf.length + para.length + 2 > KB_CHUNK_CHARS) flush();
+		buf += (buf ? "\n\n" : "") + para;
+	}
+	flush();
+	return out;
+}
+
+type KbDocRow = { id: number; title: string; source: string; tags: string; size: number; chunks: number; createdAt: string; updatedAt: string };
+type KbHit = { chunkId: number; docId: number; title: string; source: string; chunkSeq: number; text: string; score: number };
+
+function kbListDocs(): KbDocRow[] {
+	return sqlFacade!
+		.exec(
+			"SELECT id, title, source, tags, length(content) AS size, created_at AS createdAt, updated_at AS updatedAt, " +
+				"(SELECT COUNT(*) FROM kb_chunks WHERE kb_chunks.doc_id = kb_docs.id) AS chunks FROM kb_docs ORDER BY updated_at DESC",
+		)
+		.toArray() as KbDocRow[];
+}
+
+function kbIndexDoc(docId: number, title: string, source: string, tags: string, chunks: string[]): void {
+	const titleTokens = [...new Set(kbTokens(`${title} ${source} ${tags}`))].join(" ");
+	for (let seq = 0; seq < chunks.length; seq++) {
+		const text = chunks[seq]!;
+		sqlFacade!.exec("INSERT INTO kb_chunks (doc_id, seq, text) VALUES (?, ?, ?)", docId, seq, text);
+		const chunkId = Number((sqlFacade!.exec("SELECT last_insert_rowid() AS id").toArray() as { id: number }[])[0]?.id ?? 0);
+		if (!chunkId) continue;
+		sqlFacade!.exec("INSERT INTO kb_fts (rowid, title_tokens, body_tokens) VALUES (?, ?, ?)", chunkId, titleTokens, [...new Set(kbTokens(text))].join(" "));
+	}
+}
+
+function kbAddDoc(title: string, content: string, source = "", tags = ""): { id: number; chunks: number } {
+	const clean = content.replace(/\r\n/g, "\n").trim().slice(0, KB_MAX_CONTENT);
+	const chunks = kbChunkText(clean).slice(0, KB_MAX_CHUNKS);
+	const now = new Date().toISOString();
+	sqlFacade!.exec(
+		"INSERT INTO kb_docs (title, source, tags, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		title, source, tags, clean, now, now,
+	);
+	const id = Number((sqlFacade!.exec("SELECT last_insert_rowid() AS id").toArray() as { id: number }[])[0]?.id ?? 0);
+	if (!id) throw new Error("知识库写入失败");
+	kbIndexDoc(id, title, source, tags, chunks);
+	return { id, chunks: chunks.length };
+}
+
+function kbDeleteDoc(id: number): boolean {
+	if (!sqlFacade!.exec("SELECT id FROM kb_docs WHERE id = ?", id).toArray().length) return false;
+	for (const row of sqlFacade!.exec("SELECT id FROM kb_chunks WHERE doc_id = ?", id).toArray() as { id: number }[]) {
+		sqlFacade!.exec("DELETE FROM kb_fts WHERE rowid = ?", row.id);
+	}
+	sqlFacade!.exec("DELETE FROM kb_chunks WHERE doc_id = ?", id);
+	sqlFacade!.exec("DELETE FROM kb_docs WHERE id = ?", id);
+	return true;
+}
+
+function kbSearch(query: string, limit = 6): KbHit[] {
+	const q = query.trim().slice(0, 200);
+	if (!q) return [];
+	const capped = Math.max(1, Math.min(Number(limit) || 6, 20));
+	const match = kbFtsQuery(q);
+	if (match) {
+		try {
+			return sqlFacade!
+				.exec(
+					"SELECT kb_fts.rowid AS chunkId, kb_chunks.doc_id AS docId, kb_chunks.seq AS chunkSeq, kb_chunks.text AS text, " +
+						"kb_docs.title AS title, kb_docs.source AS source, bm25(kb_fts, 6.0, 1.0) AS score " +
+						"FROM kb_fts JOIN kb_chunks ON kb_chunks.id = kb_fts.rowid JOIN kb_docs ON kb_docs.id = kb_chunks.doc_id " +
+						"WHERE kb_fts MATCH ? ORDER BY score LIMIT ?",
+					match, capped,
+				)
+				.toArray() as KbHit[];
+		} catch (err) {
+			console.warn("kb fts search failed", String(err).slice(0, 120));
+		}
+	}
+	const like = `%${q.replace(/[%_]/g, "")}%`;
+	return sqlFacade!
+		.exec(
+			"SELECT 0 AS chunkId, id AS docId, 0 AS chunkSeq, content AS text, title, source, 0 AS score " +
+				"FROM kb_docs WHERE title LIKE ? OR content LIKE ? ORDER BY updated_at DESC LIMIT ?",
+			like, like, capped,
+		)
+		.toArray() as KbHit[];
+}
 
 const baseSpikeExtension = defineExtension({
 	name: "spike",
@@ -1251,6 +1401,72 @@ const baseSpikeExtension = defineExtension({
 				const rows = sqlFacade!.exec("SELECT name, length(content) AS size, updated_at FROM vfs_v2 WHERE conversation_id = ? ORDER BY updated_at DESC", String(api.conversationId)).toArray() as { name: string; size: number; updated_at: string }[];
 				const text = rows.length ? rows.map((r) => `${r.name} · ${r.size} 字符 · ${r.updated_at.slice(0, 16).replace("T", " ")}`).join("\n") : "工作台还没有文件。";
 				return { output: [{ type: "text", text }] };
+			},
+		}),
+		defineTool({
+			name: "kb_search",
+			description:
+				"检索当前用户的知识库（用户上传的资料、长期参考文档）。回答涉及用户私人资料或历史资料时先检索；返回命中的片段与文档名。",
+			parameters: Type.Object({
+				query: Type.String({ description: "检索词，用用户问题里的关键词" }),
+				limit: Type.Optional(Type.Number({ description: "返回片段数，默认 6，最多 20" })),
+			}),
+			execute: async (args) => {
+				const a = args as { query?: unknown; limit?: unknown };
+				const query = String(a.query ?? "").trim();
+				if (!query) return { output: [{ type: "text", text: "检索词不能为空。" }] };
+				const hits = kbSearch(query, Number(a.limit) || 6);
+				if (!hits.length) return { output: [{ type: "text", text: `知识库里没有匹配「${query}」的内容。可用 kb_list 查看已有哪些文档。` }] };
+				const lines = hits.map(
+					(hit, i) => `[${i + 1}] ${hit.title}${hit.source ? `（${hit.source}）` : ""} · 片段 ${hit.chunkSeq + 1}\n${String(hit.text).slice(0, 900)}`,
+				);
+				return { output: [{ type: "text", text: `命中 ${hits.length} 段：\n\n${lines.join("\n\n---\n\n")}` }] };
+			},
+		}),
+		defineTool({
+			name: "kb_add",
+			description:
+				"把资料保存进当前用户的知识库（写操作）：自动分块、建立中文全文索引，之后可用 kb_search 检索。适合用户贴的资料、报告、长期参考；工作台文件不会被检索。",
+			parameters: Type.Object({
+				title: Type.String({ description: "文档标题" }),
+				content: Type.String({ description: "文档正文（纯文本或 Markdown）" }),
+				source: Type.Optional(Type.String({ description: "来源，如 URL 或文件名" })),
+				tags: Type.Optional(Type.String({ description: "标签，逗号分隔" })),
+			}),
+			execute: async (args) => {
+				const a = args as { title?: unknown; content?: unknown; source?: unknown; tags?: unknown };
+				const title = String(a.title ?? "").trim().slice(0, 120);
+				const content = String(a.content ?? "").trim();
+				if (!title || !content) return { output: [{ type: "text", text: "标题和正文都不能为空。" }] };
+				const { id, chunks } = kbAddDoc(
+					title,
+					content,
+					String(a.source ?? "").trim().slice(0, 300),
+					String(a.tags ?? "").trim().slice(0, 120),
+				);
+				return { output: [{ type: "text", text: `已存入知识库：${title}（id=${id}，${chunks} 个片段，${content.length} 字符）。` }] };
+			},
+		}),
+		defineTool({
+			name: "kb_list",
+			description: "列出当前用户知识库里的文档",
+			parameters: Type.Object({}),
+			execute: async () => {
+				const docs = kbListDocs();
+				const text = docs.length
+					? docs.map((doc) => `- [${doc.id}] ${doc.title}${doc.source ? ` · ${doc.source}` : ""} · ${doc.chunks} 段 · ${doc.size} 字符`).join("\n")
+					: "知识库还是空的。用户贴资料时可以调用 kb_add 保存。";
+				return { output: [{ type: "text", text }] };
+			},
+		}),
+		defineTool({
+			name: "kb_delete",
+			description: "从当前用户的知识库删除一篇文档（写操作，不可撤销）",
+			parameters: Type.Object({ id: Type.Number({ description: "文档 id（来自 kb_list）" }) }),
+			execute: async (args) => {
+				const id = Number((args as { id?: unknown }).id ?? 0);
+				if (!id) return { output: [{ type: "text", text: "需要一个有效的文档 id。" }] };
+				return { output: [{ type: "text", text: kbDeleteDoc(id) ? `已删除文档 ${id}。` : `文档 ${id} 不存在。` }] };
 			},
 		}),
 	],
@@ -2250,6 +2466,9 @@ export class SpikeAgent extends DurableObject {
 			out = `${out}\n\n可用技能（需要时调用 load_skill 读取完整说明后再执行）：\n${lines}`;
 		}
 		out += "\n安装技能：用户给出 SKILL.md 链接时，直接调用 install_skill({ url }) 安装；不要用 write_file 往工作台复制技能文件，工作台文件不会被注册。";
+		// 用户知识库（v0.45.0）：每个用户独立，和工作台文件是两套存储
+		out +=
+			"\n用户资料与长期知识用知识库：先 kb_search 检索；用户要求「存到知识库 / 记到资料库」时用 kb_add。工作台文件不会被知识库检索到。";
 		// 网页搜索开启时才在提示词里引导模型使用；关闭时工具会返回开启指引。
 		if (getSetting("web_search", "1") === "1") {
 			out += "\n需要联网查资料时优先用 web_search 搜索、web_fetch_page 抓取正文（比 http_fetch 更干净）。";
@@ -2315,6 +2534,7 @@ export class SpikeAgent extends DurableObject {
 				prompts: q("SELECT name, description, content FROM prompts"),
 				rules: q("SELECT name, content, enabled FROM rules"),
 				goals: q("SELECT session_id, objective, status, token_budget, baseline_tokens, tokens_used, turns, max_turns, summary, next_run_at, created_at, updated_at FROM goals"),
+				kbDocs: q("SELECT id, title, source, tags, content, created_at, updated_at FROM kb_docs ORDER BY id"),
 			},
 		};
 	}
@@ -2367,6 +2587,15 @@ export class SpikeAgent extends DurableObject {
 				name, str(k.description), str(k.content), new Date().toISOString(),
 			);
 			counts.skills = (counts.skills ?? 0) + 1;
+		}
+		// 知识库只备份文档正文；恢复时分块并重建 FTS 索引（v0.45.0）
+		for (const doc of rows("kbDocs")) {
+			const title = str(doc.title).trim();
+			const content = str(doc.content).trim();
+			if (!title || !content) continue;
+			if (sqlFacade!.exec("SELECT id FROM kb_docs WHERE title = ? AND content = ?", title, content).toArray().length) continue;
+			kbAddDoc(title, content, str(doc.source), str(doc.tags));
+			counts.kbDocs = (counts.kbDocs ?? 0) + 1;
 		}
 		for (const s of rows("mcpServers")) {
 			const id = str(s.id);
@@ -3155,6 +3384,55 @@ export class SpikeAgent extends DurableObject {
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
+			}
+			// 全部文件（v0.45.0）：当前用户 DO 内所有会话的产物，带会话标题
+			if (url.pathname === "/files/all" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const q = (url.searchParams.get("q") ?? "").trim().slice(0, 100).toLowerCase();
+				const rows = sqlFacade!
+					.exec(
+						`SELECT v.conversation_id AS sessionId, v.name AS name, length(v.content) AS size, v.updated_at AS updatedAt,
+							COALESCE(s.title, '') AS sessionTitle
+						FROM vfs_v2 v LEFT JOIN sessions_meta s ON s.id = v.conversation_id
+						WHERE (? = '' OR lower(v.name) LIKE ? OR lower(COALESCE(s.title, '')) LIKE ?)
+						ORDER BY v.updated_at DESC LIMIT 500`,
+						q, `%${q}%`, `%${q}%`,
+					)
+					.toArray();
+				return Response.json({ files: rows });
+			}
+			// 用户知识库（v0.45.0）：每人独立 DO，天然隔离
+			if (url.pathname === "/kb" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				return Response.json({ docs: kbListDocs() });
+			}
+			if (url.pathname === "/kb" && request.method === "POST") {
+				ensureTables(sqlFacade!);
+				const body = (await request.json().catch(() => ({}))) as { title?: string; content?: string; source?: string; tags?: string };
+				const title = String(body.title ?? "").trim().slice(0, 120);
+				const content = String(body.content ?? "").trim();
+				if (!title || !content) return Response.json({ error: "标题和正文都不能为空" }, { status: 400 });
+				const result = kbAddDoc(title, content, String(body.source ?? "").trim().slice(0, 300), String(body.tags ?? "").trim().slice(0, 120));
+				return Response.json({ ok: true, ...result });
+			}
+			if (url.pathname === "/kb/doc" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const id = Number(url.searchParams.get("id") ?? 0);
+				const rows = sqlFacade!.exec("SELECT id, title, source, tags, content, created_at AS createdAt, updated_at AS updatedAt FROM kb_docs WHERE id = ?", id).toArray();
+				if (!rows[0]) return Response.json({ error: "文档不存在" }, { status: 404 });
+				return Response.json(rows[0]);
+			}
+			if (url.pathname === "/kb/search" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const q = url.searchParams.get("q") ?? "";
+				if (!q.trim()) return Response.json({ hits: [] });
+				return Response.json({ hits: kbSearch(q, Number(url.searchParams.get("limit") ?? 8)) });
+			}
+			if (url.pathname === "/kb" && request.method === "DELETE") {
+				ensureTables(sqlFacade!);
+				const id = Number(url.searchParams.get("id") ?? 0);
+				if (!id) return Response.json({ error: "缺少文档 id" }, { status: 400 });
+				return Response.json({ ok: kbDeleteDoc(id) });
 			}
 			if (url.pathname === "/skills/community" && request.method === "GET") {
 				return Response.json({

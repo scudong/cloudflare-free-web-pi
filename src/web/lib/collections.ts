@@ -1,4 +1,4 @@
-import type { AutomationInfo, CustomToolInfo, FileInfo, MemoryInfo, PromptInfo, RuleInfo, SessionListItem, SkillInfo } from "../types";
+import type { AllFileInfo, AutomationInfo, CustomToolInfo, FileInfo, KbDocInfo, KbHit, MemoryInfo, PromptInfo, RuleInfo, SessionListItem, SkillInfo } from "../types";
 
 /**
  * Tolerant parsers for panel data (sessions / files / memories).
@@ -144,5 +144,45 @@ export function parseRules(raw: unknown): RuleInfo[] {
 		name: pickString(entry, ["name"]) || "未命名规则",
 		content: pickString(entry, ["content"]),
 		enabled: entry.enabled !== 0 && entry.enabled !== false,
+	}));
+}
+
+/** GET /api/files/all → 当前用户所有会话的文件（v0.45.0）。 */
+export function parseAllFiles(raw: unknown): AllFileInfo[] {
+	const list = arrayOf(raw, ["files"]).filter(isObject);
+	return list.map((entry) => ({
+		name: pickString(entry, ["name"]),
+		size: pickNumber(entry, ["size"]),
+		updatedAt: pickString(entry, ["updated_at", "updatedAt"]),
+		sessionId: pickString(entry, ["sessionId", "session_id", "conversation_id"]) || "1",
+		sessionTitle: pickString(entry, ["sessionTitle", "session_title"]) || "未命名会话",
+	}));
+}
+
+/** GET /api/kb → 知识库文档列表（v0.45.0）。 */
+export function parseKbDocs(raw: unknown): KbDocInfo[] {
+	const list = arrayOf(raw, ["docs"]).filter(isObject);
+	return list.map((entry, index) => ({
+		id: pickNumber(entry, ["id"]) || -(index + 1),
+		title: pickString(entry, ["title"]) || "未命名文档",
+		source: pickString(entry, ["source"]),
+		tags: pickString(entry, ["tags"]),
+		size: pickNumber(entry, ["size"]),
+		chunks: pickNumber(entry, ["chunks"]),
+		createdAt: pickString(entry, ["createdAt", "created_at"]),
+		updatedAt: pickString(entry, ["updatedAt", "updated_at"]),
+	}));
+}
+
+/** GET /api/kb/search → 命中片段（v0.45.0）。 */
+export function parseKbHits(raw: unknown): KbHit[] {
+	const list = arrayOf(raw, ["hits"]).filter(isObject);
+	return list.map((entry) => ({
+		docId: pickNumber(entry, ["docId", "doc_id"]),
+		title: pickString(entry, ["title"]) || "未命名文档",
+		source: pickString(entry, ["source"]),
+		text: pickString(entry, ["text", "content"]),
+		chunkSeq: pickNumber(entry, ["chunkSeq", "chunk_seq", "seq"]),
+		score: pickNumber(entry, ["score"]),
 	}));
 }
