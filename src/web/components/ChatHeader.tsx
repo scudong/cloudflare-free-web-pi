@@ -1,3 +1,5 @@
+import { Icon } from "./Icon";
+
 interface ChatHeaderProps {
 	sessionId: string;
 	sessionTitle: string;
@@ -41,9 +43,9 @@ export function ChatHeader({
 						onClick={onToggleLeft}
 						title="展开会话栏"
 						aria-label="展开会话栏"
-						className="rounded-md border border-slate-700 px-1.5 py-0.5 text-slate-400 transition-colors hover:border-sky-500/40 hover:text-sky-300"
+						className="inline-flex items-center justify-center rounded-md border border-slate-700 px-1.5 py-0.5 text-slate-400 transition-colors hover:border-sky-500/40 hover:text-sky-300"
 					>
-						»
+						<Icon name="chevronsRight" className="h-3.5 w-3.5" />
 					</button>
 				)}
 				<label className="flex items-center gap-1.5">
@@ -66,13 +68,14 @@ export function ChatHeader({
 						type="button"
 						onClick={onOpenGoal}
 						title="设定目标：让模型自己一轮轮推进直到完成"
-						className={`rounded-md border px-2 py-0.5 transition-colors ${
+						className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 transition-colors ${
 							goalActive
 								? "border-amber-500/50 bg-amber-500/15 text-amber-300"
 								: "border-slate-700 text-slate-400 hover:border-amber-500/40 hover:text-amber-300"
 						}`}
 					>
-						🎯 目标
+						<Icon name="goal" className="h-3.5 w-3.5" />
+						目标
 					</button>
 				)}
 			</div>
@@ -88,9 +91,9 @@ export function ChatHeader({
 						onClick={onToggleRight}
 						title="展开工作台"
 						aria-label="展开工作台"
-						className="shrink-0 rounded-md border border-slate-700 px-1.5 py-0.5 text-slate-400 transition-colors hover:border-sky-500/40 hover:text-sky-300"
+						className="inline-flex shrink-0 items-center justify-center rounded-md border border-slate-700 px-1.5 py-0.5 text-slate-400 transition-colors hover:border-sky-500/40 hover:text-sky-300"
 					>
-						«
+						<Icon name="chevronsLeft" className="h-3.5 w-3.5" />
 					</button>
 				)}
 			</div>

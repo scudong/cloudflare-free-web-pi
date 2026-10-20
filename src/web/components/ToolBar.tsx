@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { renderMarkdown } from "../lib/rich";
+import { Icon } from "./Icon";
 import type { ToolCallInfo } from "../types";
 
 /** 折叠态下省略的子调用数量提示。 */
@@ -42,7 +43,7 @@ function ToolPill({ tool, all }: { tool: ToolCallInfo; all: ToolCallInfo[] }) {
 				className="flex w-full items-center gap-1.5 rounded-[inherit] px-3 py-1 text-left transition-colors enabled:hover:bg-emerald-500/10"
 			>
 				<span aria-hidden className={running ? "animate-pulse" : ""}>
-					{running ? "⏳" : "🔧"}
+					<Icon name={running ? "loader" : "tool"} className={`h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
 				</span>
 				<span className="shrink-0 font-medium text-emerald-200">{tool.name}</span>
 				{tool.summary && <span className="min-w-0 truncate">· {tool.summary}</span>}
@@ -58,7 +59,7 @@ function ToolPill({ tool, all }: { tool: ToolCallInfo; all: ToolCallInfo[] }) {
 				)}
 				{expandable && (
 					<span aria-hidden className="ml-0.5 shrink-0 text-emerald-400/70">
-						{open ? "▾" : "▸"}
+						<Icon name={open ? "chevronDown" : "chevronRight"} className="h-3.5 w-3.5" />
 					</span>
 				)}
 			</button>
@@ -69,7 +70,7 @@ function ToolPill({ tool, all }: { tool: ToolCallInfo; all: ToolCallInfo[] }) {
 							{taskTitles.map((title, index) => (
 								<li key={`${title}-${index}`} className="flex items-start gap-1.5 text-[11px] text-emerald-200/80">
 									<span aria-hidden className="shrink-0 text-emerald-400">
-										◈
+										<Icon name="subagent" className="h-3.5 w-3.5" />
 									</span>
 									<span className="min-w-0 flex-1">{title}</span>
 								</li>
@@ -89,7 +90,12 @@ function ToolPill({ tool, all }: { tool: ToolCallInfo; all: ToolCallInfo[] }) {
 						<ul className="mt-1 space-y-0.5 border-l border-emerald-500/20 pl-2.5">
 							{children.map((child, index) => (
 								<li key={`${child.id}-${index}`} className="flex items-center gap-1.5 text-[11px] text-emerald-200/70">
-									<span aria-hidden>{child.status === "running" ? "⏳" : child.status === "error" ? "⚠️" : "·"}</span>
+									<span aria-hidden className={child.status === "running" ? "text-emerald-300" : child.status === "error" ? "text-rose-300" : "text-emerald-400/70"}>
+										<Icon
+											name={child.status === "running" ? "loader" : child.status === "error" ? "error" : "check"}
+											className={`h-3 w-3 ${child.status === "running" ? "animate-spin" : ""}`}
+										/>
+									</span>
 									<span className="font-medium">{child.name}</span>
 									{child.summary && <span className="min-w-0 truncate opacity-70">{child.summary}</span>}
 								</li>

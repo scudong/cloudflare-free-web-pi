@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Icon } from "./Icon";
 import type { GoalInfo } from "../types";
 
 /** 目标状态的中文标签。 */
@@ -33,9 +34,7 @@ export function GoalBar({ goal, onStop, onNew }: GoalBarProps) {
 	return (
 		<div className="shrink-0 border-t border-slate-800/70 bg-slate-900/50 px-4 py-2" aria-label="目标状态">
 			<div className="mx-auto flex max-w-3xl items-start gap-3">
-				<span aria-hidden className="mt-0.5 text-base leading-none">
-					🎯
-				</span>
+				<Icon name="goal" className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
 				<div className="min-w-0 flex-1">
 					<div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
 						<span className={active ? "font-medium text-amber-300" : "font-medium text-slate-300"}>
@@ -132,7 +131,10 @@ export function GoalDialog({ open, onClose, onSubmit }: GoalDialogProps) {
 				className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl"
 				onClick={(e) => e.stopPropagation()}
 			>
-				<h2 className="text-base font-semibold text-slate-100">🎯 设定目标</h2>
+				<h2 className="flex items-center gap-1.5 text-base font-semibold text-slate-100">
+					<Icon name="goal" className="h-4 w-4 text-amber-400" />
+					设定目标
+				</h2>
 				<p className="mt-1 text-xs leading-relaxed text-slate-500">
 					设定后模型会自己一轮轮推进，直到完成（需给出验证证据）、预算用尽或报告受阻。每一轮都可以在聊天里看到。
 				</p>

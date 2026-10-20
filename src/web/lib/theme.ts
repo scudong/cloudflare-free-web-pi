@@ -9,7 +9,6 @@ export type ThemeId = "dark" | "light" | "sepia" | "midnight";
 export interface ThemeMeta {
 	id: ThemeId;
 	label: string;
-	icon: string;
 	scheme: "dark" | "light";
 	/** 浏览器地址栏 / 状态栏颜色。 */
 	color: string;
@@ -18,10 +17,10 @@ export interface ThemeMeta {
 }
 
 export const THEMES: ThemeMeta[] = [
-	{ id: "dark", label: "深色", icon: "🌙", scheme: "dark", color: "#17171a", swatch: "#232324" },
-	{ id: "light", label: "浅色", icon: "☀️", scheme: "light", color: "#f7f8fa", swatch: "#f7f8fa" },
-	{ id: "sepia", label: "米黄", icon: "📜", scheme: "light", color: "#fcf8ec", swatch: "#f7efd9" },
-	{ id: "midnight", label: "午夜蓝", icon: "🌌", scheme: "dark", color: "#0b1220", swatch: "#1a2440" },
+	{ id: "dark", label: "深色", scheme: "dark", color: "#17171a", swatch: "#232324" },
+	{ id: "light", label: "浅色", scheme: "light", color: "#f7f8fa", swatch: "#f7f8fa" },
+	{ id: "sepia", label: "米黄", scheme: "light", color: "#fcf8ec", swatch: "#f7efd9" },
+	{ id: "midnight", label: "午夜蓝", scheme: "dark", color: "#0b1220", swatch: "#1a2440" },
 ];
 
 export const THEME_KEY = "pi-theme";

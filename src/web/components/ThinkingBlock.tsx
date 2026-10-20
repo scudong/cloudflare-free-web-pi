@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "./Icon";
 
 interface ThinkingBlockProps {
 	text: string;
@@ -34,13 +35,11 @@ export function ThinkingBlock({ text, streaming }: ThinkingBlockProps) {
 				aria-expanded={open}
 				className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-violet-200/90 transition-colors hover:bg-violet-500/10"
 			>
-				<span aria-hidden className={streaming ? "animate-pulse" : ""}>
-					🧠
-				</span>
+				<Icon name="thinking" className={`h-4 w-4 ${streaming ? "animate-pulse" : ""}`} />
 				<span className="font-medium">{streaming ? "思考中…" : "思考过程"}</span>
 				<span className="tabular-nums text-violet-300/60">{chars} 字</span>
 				<span aria-hidden className="ml-auto shrink-0 text-violet-300/70">
-					{open ? "▾" : "▸"}
+					<Icon name={open ? "chevronDown" : "chevronRight"} className="h-3.5 w-3.5" />
 				</span>
 			</button>
 			{open && (

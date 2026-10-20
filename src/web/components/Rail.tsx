@@ -1,3 +1,5 @@
+import { Icon, type IconName } from "./Icon";
+
 export type RailView = "sessions" | "mcp" | "automations" | "skills";
 
 interface RailProps {
@@ -13,7 +15,7 @@ const railButton =
 
 /** 最左侧固定工具栏（v0.21.0）：新会话 + 会话/连接/定时/技能切换 + 设置。 */
 export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onOpenSettings }: RailProps) {
-	const item = (value: RailView, label: string, icon: string) => (
+	const item = (value: RailView, label: string, icon: IconName) => (
 		<button
 			key={value}
 			type="button"
@@ -23,9 +25,7 @@ export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onO
 			aria-label={label}
 			className={railButton}
 		>
-			<span aria-hidden className="text-base leading-none">
-				{icon}
-			</span>
+			<Icon name={icon} className="h-[18px] w-[18px]" />
 		</button>
 	);
 	return (
@@ -41,20 +41,16 @@ export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onO
 				aria-label="新建会话"
 				className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-600/90 text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
 			>
-				<span aria-hidden className="text-lg leading-none">
-					＋
-				</span>
+				<Icon name="plus" className="h-5 w-5" />
 			</button>
 			<div aria-hidden className="my-1 h-px w-6 bg-slate-800" />
-			{item("sessions", "会话", "💬")}
-			{item("mcp", "连接", "🔌")}
-			{item("automations", "定时", "⏰")}
-			{item("skills", "能力", "⚡")}
+			{item("sessions", "会话", "sessions")}
+			{item("mcp", "连接", "connection")}
+			{item("automations", "定时", "clock")}
+			{item("skills", "能力", "skills")}
 			<div aria-hidden className="flex-1" />
 			<button type="button" onClick={onOpenSettings} title="设置" aria-label="打开设置" className={railButton}>
-				<span aria-hidden className="text-base leading-none">
-					⚙️
-				</span>
+				<Icon name="settings" className="h-[18px] w-[18px]" />
 			</button>
 		</nav>
 	);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { expandTemplate } from "../lib/template";
+import { Icon } from "./Icon";
 import type { PromptInfo, SkillInfo } from "../types";
 
 interface ComposerProps {
@@ -209,7 +210,7 @@ export function Composer({ pending, onSend, onStop, onInterject, skills, prompts
 		setSkillIndex(0);
 	};
 
-	/** 点 ⚡：在光标处插入「/」并展开菜单。 */
+	/** 点技能按钮：在光标处插入「/」并展开菜单。 */
 	const openSkillMenu = () => {
 		if (!skills.length && !prompts.length) {
 			setNotice("还没有技能或模板，先在左侧「能力」面板里添加。");
@@ -276,8 +277,8 @@ export function Composer({ pending, onSend, onStop, onInterject, skills, prompts
 									index === skillIndex ? "bg-sky-600/20 text-sky-100" : "text-slate-300 hover:bg-slate-800"
 								}`}
 							>
-								<span aria-hidden className="mt-0.5 shrink-0 text-xs">
-									{item.kind === "skill" ? "⚡" : "📝"}
+								<span aria-hidden className="mt-0.5 shrink-0 text-slate-400">
+									<Icon name={item.kind === "skill" ? "skills" : "prompt"} className="h-3.5 w-3.5" />
 								</span>
 								<span className="min-w-0 flex-1">
 									<span className="block truncate text-[13px] font-medium">{item.name}</span>
@@ -294,9 +295,9 @@ export function Composer({ pending, onSend, onStop, onInterject, skills, prompts
 					onClick={openSkillMenu}
 					title="调用技能（也可以直接输入 /）"
 					aria-label="调用技能"
-					className="mb-1 h-[36px] w-[36px] shrink-0 rounded-lg border border-slate-700 text-slate-400 transition-colors hover:text-slate-100"
+					className="mb-1 inline-flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-lg border border-slate-700 text-slate-400 transition-colors hover:text-slate-100"
 				>
-					⚡
+					<Icon name="skills" className="h-4 w-4" />
 				</button>
 				<button
 					type="button"
@@ -304,9 +305,9 @@ export function Composer({ pending, onSend, onStop, onInterject, skills, prompts
 					disabled={busy || images.length >= MAX_IMAGES}
 					title="添加图片"
 					aria-label="添加图片"
-					className="mb-1 h-[36px] w-[36px] shrink-0 rounded-lg border border-slate-700 text-slate-400 transition-colors hover:text-slate-100 disabled:opacity-40"
+					className="mb-1 inline-flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-lg border border-slate-700 text-slate-400 transition-colors hover:text-slate-100 disabled:opacity-40"
 				>
-					📎
+					<Icon name="attach" className="h-4 w-4" />
 				</button>
 				<input
 					ref={fileRef}

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Icon } from "../components/Icon";
 
 /**
  * 轻量 Markdown 渲染（v0.22.0 增强）：标题 1–6、有序/无序/**嵌套**列表、
@@ -121,8 +122,8 @@ function renderList(items: ListItem[], ordered: boolean, keyBase: string): React
 
 	const renderItemMarker = (item: ListItem) =>
 		item.task === true ? (
-			<span aria-hidden className={`mr-1 ${item.checked ? "text-emerald-400" : "text-slate-500"}`}>
-				{item.checked ? "☑" : "☐"}
+			<span aria-hidden className={`mr-1 inline-flex align-middle ${item.checked ? "text-emerald-400" : "text-slate-500"}`}>
+				<Icon name={item.checked ? "checkboxOn" : "checkboxOff"} className="h-3.5 w-3.5" />
 			</span>
 		) : null;
 

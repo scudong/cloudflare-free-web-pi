@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
 import { formatTime } from "../lib/format";
 import { THEMES, type ThemeId } from "../lib/theme";
+import { Icon, type IconName } from "./Icon";
 import type { MemoryInfo } from "../types";
 
 type ProviderInfo = {
@@ -86,15 +87,23 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 const actionButton =
-	"rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-200 shadow-sm transition-colors hover:bg-slate-700/60 hover:text-white";
+	"inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-200 shadow-sm transition-colors hover:bg-slate-700/60 hover:text-white";
 
-const TABS: { key: SettingsTab; label: string; icon: string }[] = [
-	{ key: "general", label: "通用", icon: "⚙️" },
-	{ key: "chat", label: "对话", icon: "💬" },
-	{ key: "model", label: "模型", icon: "🧩" },
-	{ key: "memory", label: "记忆", icon: "🧠" },
-	{ key: "data", label: "数据", icon: "💾" },
+const TABS: { key: SettingsTab; label: string; icon: IconName }[] = [
+	{ key: "general", label: "通用", icon: "settings" },
+	{ key: "chat", label: "对话", icon: "chat" },
+	{ key: "model", label: "模型", icon: "model" },
+	{ key: "memory", label: "记忆", icon: "memory" },
+	{ key: "data", label: "数据", icon: "data" },
 ];
+
+/** 主题图标（v0.39.0：统一线性图标）。 */
+const THEME_ICONS: Record<ThemeId, IconName> = {
+	dark: "themeDark",
+	light: "themeLight",
+	sepia: "themeSepia",
+	midnight: "themeMidnight",
+};
 
 /** 设置弹窗（v0.26.0：按子功能分 tab）。 */
 export function SettingsDialog({
@@ -332,9 +341,7 @@ export function SettingsDialog({
 						aria-label="关闭"
 						className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
 					>
-						<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-							<path d="m5.5 5.5 9 9m0-9-9 9" strokeLinecap="round" />
-						</svg>
+						<Icon name="close" className="h-4 w-4" />
 					</button>
 				</div>
 
@@ -353,7 +360,7 @@ export function SettingsDialog({
 									: "border-transparent text-slate-400 hover:border-slate-700 hover:text-slate-200"
 							}`}
 						>
-							<span aria-hidden>{item.icon}</span>
+						<Icon name={item.icon} className="h-3.5 w-3.5" />
 							{item.label}
 						</button>
 					))}
@@ -383,7 +390,7 @@ export function SettingsDialog({
 												style={{ backgroundColor: option.swatch }}
 											/>
 											<span className="flex items-center gap-1">
-												<span aria-hidden>{option.icon}</span>
+												<Icon name={THEME_ICONS[option.id]} className="h-3.5 w-3.5" />
 												{option.label}
 											</span>
 										</button>
@@ -636,7 +643,7 @@ export function SettingsDialog({
 										}`}
 									>
 										<div className="flex items-center gap-2">
-											<span aria-hidden>🌐</span>
+											<Icon name="globe" className="h-4 w-4 shrink-0 text-sky-400" />
 											<span className="min-w-0 flex-1">
 												<span className="block truncate text-[13px] font-medium text-slate-100">
 													{defaultProvider?.name ?? "DeepSeek 官方"}
@@ -667,7 +674,7 @@ export function SettingsDialog({
 											}`}
 										>
 											<div className="flex items-center gap-2">
-												<span aria-hidden>🧩</span>
+												<Icon name="puzzle" className="h-4 w-4 shrink-0 text-sky-400" />
 												<span className="min-w-0 flex-1">
 													<span className="block truncate text-[13px] font-medium text-slate-100">
 														{item.name}
@@ -831,16 +838,20 @@ export function SettingsDialog({
 						<Section title="数据">
 							<div className="grid grid-cols-2 gap-2">
 								<button type="button" onClick={onShare} className={actionButton}>
-									🔗 分享当前会话
+									<Icon name="share" className="h-4 w-4" />
+									分享当前会话
 								</button>
 								<button type="button" onClick={onExport} className={actionButton}>
-									📥 导出 Markdown
+									<Icon name="download" className="h-4 w-4" />
+									导出 Markdown
 								</button>
 								<button type="button" onClick={onBackup} className={actionButton}>
-									💾 备份数据
+									<Icon name="backup" className="h-4 w-4" />
+									备份数据
 								</button>
 								<button type="button" onClick={() => restoreRef.current?.click()} className={actionButton}>
-									♻️ 恢复备份
+									<Icon name="restore" className="h-4 w-4" />
+									恢复备份
 								</button>
 							</div>
 							<input

@@ -5,6 +5,7 @@ import { ToolBar } from "./ToolBar";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { PlanCard } from "./PlanCard";
 import { ArtifactCard } from "./ArtifactCard";
+import { Icon } from "./Icon";
 
 const AUTO_SCROLL_THRESHOLD = 80;
 
@@ -115,10 +116,16 @@ function PlanPanel({ plan }: { plan: PlanStep[] }) {
 	const body =
 		done === plan.length ? (
 			<details className="rounded-xl border border-emerald-500/25 bg-emerald-950/20 px-3 py-1.5 text-xs text-emerald-200/80">
-				<summary className="cursor-pointer">✅ 计划已完成（{plan.length} 步）</summary>
+				<summary className="inline-flex cursor-pointer items-center gap-1.5">
+					<Icon name="done" className="h-3.5 w-3.5 text-emerald-400" />
+					计划已完成（{plan.length} 步）
+				</summary>
 				<ul className="mt-1.5 space-y-0.5 text-[12.5px] text-slate-400">
 					{plan.map((step, index) => (
-						<li key={`${index}-${step.title}`}>✓ {step.title}</li>
+						<li key={`${index}-${step.title}`} className="flex items-start gap-1.5">
+							<Icon name="check" className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400/80" />
+							<span>{step.title}</span>
+						</li>
 					))}
 				</ul>
 			</details>
@@ -135,9 +142,7 @@ function ArtifactSummary({ files, onOpen }: { files: FileInfo[]; onOpen?: (name:
 	return (
 		<div className="w-full rounded-xl border border-cyan-500/35 bg-cyan-950/40">
 			<div className="flex items-center gap-2 border-b border-cyan-500/25 px-3 py-1.5">
-				<span aria-hidden className="text-cyan-400">
-					📁
-				</span>
+				<Icon name="folder" className="h-4 w-4 text-cyan-400" />
 				<span className="text-xs font-medium text-slate-200">产出文件</span>
 				<span className="tabular-nums text-[11px] text-cyan-300/80">{files.length}</span>
 			</div>

@@ -40,10 +40,12 @@ describe("renderMarkdown · 表格", () => {
 describe("renderMarkdown · 列表", () => {
 	it("任务列表渲染成勾选框", () => {
 		const out = renderMarkdown("- [ ] 待办\n- [x] 已完成");
-		const text = textOf(out);
-		expect(text).toContain("☐");
-		expect(text).toContain("☑");
-		expect(text).toContain("待办");
+		const icons = findAll(
+			out,
+			(el) => typeof el.type === "function" && (el.props?.name === "checkboxOn" || el.props?.name === "checkboxOff"),
+		);
+		expect(icons.map((el) => el.props.name)).toEqual(["checkboxOff", "checkboxOn"]);
+		expect(textOf(out)).toContain("待办");
 	});
 
 	it("嵌套列表挂到父项下", () => {

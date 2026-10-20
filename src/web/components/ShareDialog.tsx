@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { shareUrlFor } from "../lib/format";
+import { Icon } from "./Icon";
 
 interface ShareDialogProps {
 	sessionId: string;
@@ -96,7 +97,7 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 						aria-label="关闭"
 						className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
 					>
-						✕
+						<Icon name="close" className="h-4 w-4" />
 					</button>
 				</div>
 
@@ -156,7 +157,8 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 								rel="noopener noreferrer"
 								className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-md border border-slate-600 px-2.5 py-1.5 text-[11px] text-slate-200 transition-colors hover:bg-slate-800"
 							>
-								在新窗口打开 ↗
+								<Icon name="external" className="h-3.5 w-3.5" />
+								在新窗口打开
 							</a>
 							<p className="mt-1.5 text-[11px] text-emerald-200/70">
 								{result.expiresAt > 0

@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import { renderMarkdown } from "../lib/rich";
 import { formatSize, formatTime } from "../lib/format";
 import { ShareDialog } from "./ShareDialog";
+import { Icon } from "./Icon";
 import type { FileInfo } from "../types";
 
 interface WorkbenchProps {
@@ -63,8 +64,8 @@ function FileList({
 							onClick={() => onOpen(file.name)}
 							className="flex min-w-0 flex-1 items-center gap-2 text-left"
 						>
-							<span aria-hidden className="shrink-0 text-sm">
-								📄
+							<span aria-hidden className="shrink-0 text-slate-400">
+								<Icon name="file" className="h-4 w-4" />
 							</span>
 							<span className="min-w-0 flex-1">
 								<span className="block truncate text-[13px] text-slate-100">{file.name}</span>
@@ -79,9 +80,9 @@ function FileList({
 							onClick={() => onDelete(file.name)}
 							aria-label={`删除文件 ${file.name}`}
 							title={`删除 ${file.name}`}
-							className="shrink-0 rounded-md px-1.5 py-1 text-xs text-slate-500 opacity-0 transition-all hover:bg-red-950/60 hover:text-red-300 focus-visible:opacity-100 group-hover:opacity-100"
+							className="shrink-0 rounded-md px-1.5 py-1 text-slate-500 opacity-0 transition-all hover:bg-red-950/60 hover:text-red-300 focus-visible:opacity-100 group-hover:opacity-100"
 						>
-							✕
+							<Icon name="trash" className="h-3.5 w-3.5" />
 						</button>
 					</li>
 				))}
@@ -156,7 +157,7 @@ function FileView({
 					title="关闭"
 					className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
 				>
-					✕
+					<Icon name="close" className="h-4 w-4" />
 				</button>
 				<span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-100">{name}</span>
 				<div className="flex shrink-0 overflow-hidden rounded-lg border border-slate-700">
@@ -182,7 +183,7 @@ function FileView({
 						title="收起工作台"
 						className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
 					>
-						»
+						<Icon name="chevronsRight" className="h-4 w-4" />
 					</button>
 				)}
 				<button
@@ -193,7 +194,7 @@ function FileView({
 					title={wide ? "退出全宽阅读" : "全宽阅读"}
 					className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
 				>
-					{wide ? "⤡" : "⤢"}
+					<Icon name={wide ? "restoreSize" : "maximize"} className="h-4 w-4" />
 				</button>
 				{canShare && (
 					<button
@@ -203,7 +204,7 @@ function FileView({
 						title="分享链接"
 						className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
 					>
-						🔗
+						<Icon name="share" className="h-4 w-4" />
 					</button>
 				)}
 				<button
@@ -213,7 +214,7 @@ function FileView({
 					title="删除文件"
 					className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-950/60 hover:text-red-300"
 				>
-					🗑
+					<Icon name="trash" className="h-4 w-4" />
 				</button>
 			</div>
 			<div className={`min-h-0 flex-1 overflow-y-auto p-3 ${dockRight ? "md:px-8" : ""}`}>
@@ -326,9 +327,9 @@ export function Workbench({
 									onClick={onCollapse}
 									aria-label="收起工作台"
 									title="收起工作台"
-									className="rounded px-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
+									className="inline-flex items-center justify-center rounded p-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
 								>
-									»
+									<Icon name="chevronsRight" className="h-4 w-4" />
 								</button>
 							)}
 						</span>

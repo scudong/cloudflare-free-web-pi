@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import type { SessionListItem } from "../types";
 import { flattenSessions } from "../lib/sessionTree";
 
@@ -51,9 +52,9 @@ export function Sidebar({
 							onClick={onCollapse}
 							title="收起会话栏"
 							aria-label="收起会话栏"
-							className="rounded px-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
+							className="inline-flex items-center justify-center rounded p-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
 						>
-							«
+							<Icon name="chevronsLeft" className="h-4 w-4" />
 						</button>
 					)}
 				</div>
@@ -92,10 +93,12 @@ export function Sidebar({
 								>
 									<span
 										aria-hidden
-										className={`shrink-0 text-sm ${depth > 0 ? "text-violet-300/80" : ""}`}
+										className={`shrink-0 ${
+											depth > 0 ? "text-violet-300/80" : current ? "text-sky-300" : "text-slate-500"
+										}`}
 										title={depth > 0 ? `分支：来自会话 ${session.parentId}` : undefined}
 									>
-										{depth > 0 ? "⑂" : current ? "💬" : "○"}
+										<Icon name={depth > 0 ? "branch" : "chat"} className="h-3.5 w-3.5" />
 									</span>
 									<span className="min-w-0 flex-1">
 										<span className="block truncate text-sm">{session.title}</span>
@@ -116,7 +119,7 @@ export function Sidebar({
 										}}
 										className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-slate-100"
 									>
-										✎
+										<Icon name="edit" className="h-3.5 w-3.5" />
 									</button>
 									<button
 										type="button"
@@ -128,7 +131,7 @@ export function Sidebar({
 										}}
 										className="rounded p-1 text-slate-400 hover:bg-rose-500/20 hover:text-rose-300"
 									>
-										🗑
+										<Icon name="trash" className="h-3.5 w-3.5" />
 									</button>
 								</span>
 							</li>

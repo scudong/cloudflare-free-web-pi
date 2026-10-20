@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { renderMarkdown } from "../lib/rich";
+import { Icon } from "./Icon";
 import type { AutomationInfo, CustomToolInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
 
 function PanelHeader({ title, count, onCollapse }: { title: string; count?: number; onCollapse?: () => void }) {
@@ -17,9 +18,9 @@ function PanelHeader({ title, count, onCollapse }: { title: string; count?: numb
 						onClick={onCollapse}
 						title="收起左栏"
 						aria-label="收起左栏"
-						className="rounded px-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
+						className="inline-flex items-center justify-center rounded p-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
 					>
-						«
+						<Icon name="chevronsLeft" className="h-4 w-4" />
 					</button>
 				)}
 			</span>
@@ -117,8 +118,8 @@ export function McpPanel({
 				<ul className="space-y-1">
 					{servers.map((server) => (
 						<li key={server.id} className="flex items-start gap-2 rounded-lg bg-slate-800/50 px-2.5 py-2">
-							<span aria-hidden className="mt-0.5 text-xs">
-								🔌
+							<span aria-hidden className="mt-0.5 shrink-0 text-slate-400">
+								<Icon name="connection" className="h-3.5 w-3.5" />
 							</span>
 							<span className="min-w-0 flex-1">
 								<span className="block truncate text-[13px] text-slate-100">{server.name}</span>
@@ -133,7 +134,7 @@ export function McpPanel({
 								}}
 								className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
 							>
-								🗑
+								<Icon name="trash" className="h-3.5 w-3.5" />
 							</button>
 						</li>
 					))}
@@ -277,7 +278,7 @@ export function AutomationPanel({
 									}}
 									className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
 								>
-									🗑
+									<Icon name="trash" className="h-3.5 w-3.5" />
 								</button>
 							</div>
 							<p className="mt-1 line-clamp-2 text-[11px] text-slate-500">{job.prompt}</p>
@@ -485,9 +486,13 @@ export function SkillPanel({
 										type="button"
 										onClick={() => setOpenName(openName === skill.name ? null : skill.name)}
 										aria-expanded={openName === skill.name}
-										className="min-w-0 flex-1 truncate text-left text-[13px] text-slate-100"
+										className="flex min-w-0 flex-1 items-center gap-1 truncate text-left text-[13px] text-slate-100"
 									>
-										{openName === skill.name ? "▾" : "▸"} {skill.name}
+										<Icon
+											name={openName === skill.name ? "chevronDown" : "chevronRight"}
+											className="h-3.5 w-3.5 shrink-0 text-slate-400"
+										/>
+										<span className="truncate">{skill.name}</span>
 									</button>
 									<button
 										type="button"
@@ -498,7 +503,7 @@ export function SkillPanel({
 										}}
 										className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
 									>
-										🗑
+										<Icon name="trash" className="h-3.5 w-3.5" />
 									</button>
 								</div>
 								{skill.description && <p className="mt-0.5 text-[11px] text-slate-500">{skill.description}</p>}
@@ -514,8 +519,9 @@ export function SkillPanel({
 
 				{/* 自定义工具（v0.36.0） */}
 				<details className="border-t border-slate-800/70 p-3">
-					<summary className="cursor-pointer text-xs font-medium text-slate-300">
-						🧩 自定义工具 <span className="tabular-nums text-slate-500">{customTools.length}</span>
+					<summary className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-slate-300">
+						<Icon name="puzzle" className="h-3.5 w-3.5 text-slate-400" />
+						自定义工具 <span className="tabular-nums text-slate-500">{customTools.length}</span>
 					</summary>
 					<p className="mt-1 text-[11px] leading-relaxed text-slate-500">
 						贴一段 JavaScript：参数从 <code className="rounded bg-slate-800 px-1">args</code> 取，返回值即工具结果。在 QuickJS 沙箱里执行，默认按「执行级」参与审批。
@@ -539,7 +545,7 @@ export function SkillPanel({
 									}}
 									className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
 								>
-									🗑
+									<Icon name="trash" className="h-3.5 w-3.5" />
 								</button>
 							</li>
 						))}
@@ -547,8 +553,9 @@ export function SkillPanel({
 				</details>
 				{/* 提示模板（v0.31.0） */}
 				<details className="border-t border-slate-800/70 p-3">
-					<summary className="cursor-pointer text-xs font-medium text-slate-300">
-						📝 提示模板 <span className="tabular-nums text-slate-500">{prompts.length}</span>
+					<summary className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-slate-300">
+						<Icon name="prompt" className="h-3.5 w-3.5 text-slate-400" />
+						提示模板 <span className="tabular-nums text-slate-500">{prompts.length}</span>
 					</summary>
 					<p className="mt-1 text-[11px] leading-relaxed text-slate-500">
 						输入框打 <code className="rounded bg-slate-800 px-1">/</code> 即可选中，正文会填进输入框。
@@ -572,7 +579,7 @@ export function SkillPanel({
 									}}
 									className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
 								>
-									🗑
+									<Icon name="trash" className="h-3.5 w-3.5" />
 								</button>
 							</li>
 						))}
@@ -581,8 +588,9 @@ export function SkillPanel({
 
 				{/* 规则文件（v0.31.0） */}
 				<details className="border-t border-slate-800/70 p-3">
-					<summary className="cursor-pointer text-xs font-medium text-slate-300">
-						📏 规则 <span className="tabular-nums text-slate-500">{rules.filter((r) => r.enabled).length}/{rules.length}</span>
+					<summary className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-slate-300">
+						<Icon name="rule" className="h-3.5 w-3.5 text-slate-400" />
+						规则 <span className="tabular-nums text-slate-500">{rules.filter((r) => r.enabled).length}/{rules.length}</span>
 					</summary>
 					<p className="mt-1 text-[11px] leading-relaxed text-slate-500">启用的规则会注入每一轮对话的提示词。</p>
 					<RuleForm onAdd={onAddRule} />
@@ -594,11 +602,11 @@ export function SkillPanel({
 									onClick={() => void onToggleRule(rule.name, !rule.enabled)}
 									aria-pressed={rule.enabled}
 									aria-label={`${rule.enabled ? "停用" : "启用"}规则 ${rule.name}`}
-									className={`mt-0.5 shrink-0 rounded px-1 text-[11px] ${
+									className={`mt-0.5 inline-flex shrink-0 items-center justify-center rounded p-0.5 ${
 										rule.enabled ? "text-emerald-400" : "text-slate-600"
 									}`}
 								>
-									{rule.enabled ? "☑" : "☐"}
+									<Icon name={rule.enabled ? "checkboxOn" : "checkboxOff"} className="h-4 w-4" />
 								</button>
 								<span className="min-w-0 flex-1">
 									<span className="block truncate text-[12.5px] text-slate-100">{rule.name}</span>
@@ -613,7 +621,7 @@ export function SkillPanel({
 									}}
 									className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
 								>
-									🗑
+									<Icon name="trash" className="h-3.5 w-3.5" />
 								</button>
 							</li>
 						))}

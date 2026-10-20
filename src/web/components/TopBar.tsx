@@ -1,32 +1,11 @@
+import { Icon } from "./Icon";
+
 interface TopBarProps {
 	online: boolean;
 	sessionLabel: string;
 	onOpenDrawer: () => void;
 	/** 打开设置弹窗（v0.20.0：主题/分享/导出/备份/恢复/面板开关全部移入设置）。 */
 	onOpenSettings: () => void;
-}
-
-/** Hamburger icon for opening the session drawer on mobile. */
-function MenuIcon() {
-	return (
-		<svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-			<line x1="3" y1="5.5" x2="17" y2="5.5" />
-			<line x1="3" y1="10" x2="17" y2="10" />
-			<line x1="3" y1="14.5" x2="17" y2="14.5" />
-		</svg>
-	);
-}
-
-/** Sliders icon for the settings entry. */
-function SettingsIcon() {
-	return (
-		<svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-			<line x1="3" y1="6.5" x2="17" y2="6.5" />
-			<circle cx="12.5" cy="6.5" r="2.2" />
-			<line x1="3" y1="13.5" x2="17" y2="13.5" />
-			<circle cx="7.5" cy="13.5" r="2.2" />
-		</svg>
-	);
 }
 
 export function TopBar({ online, sessionLabel, onOpenDrawer, onOpenSettings }: TopBarProps) {
@@ -39,7 +18,7 @@ export function TopBar({ online, sessionLabel, onOpenDrawer, onOpenSettings }: T
 					aria-label="打开会话列表"
 					className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-slate-800 hover:text-white md:hidden"
 				>
-					<MenuIcon />
+					<Icon name="menu" className="h-5 w-5" />
 				</button>
 				<span
 					aria-hidden
@@ -65,7 +44,7 @@ export function TopBar({ online, sessionLabel, onOpenDrawer, onOpenSettings }: T
 					aria-label="打开设置"
 					className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
 				>
-					<SettingsIcon />
+					<Icon name="settings" className="h-4 w-4" />
 				</button>
 			</div>
 		</header>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Icon } from "./Icon";
 import type { AskQuestion } from "../types";
 
 interface AskUserCardProps {
@@ -33,7 +34,7 @@ export function AskUserCard({ question, busy, onSubmit }: AskUserCardProps) {
 		<div className="shrink-0 border-t border-sky-500/30 bg-sky-950/30 px-4 py-2" aria-label="等待你回答的问题">
 			<div className="mx-auto max-w-3xl space-y-2">
 				<div className="flex items-center gap-2 text-xs">
-					<span aria-hidden>💬</span>
+					<Icon name="question" className="h-4 w-4 text-sky-300" />
 					<span className="font-medium text-sky-200">{question.title || "需要你的回答"}</span>
 					<span className="text-slate-500">
 						{question.questions.length} 个问题

@@ -11,6 +11,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { GoalBar, GoalDialog } from "./components/GoalBar";
 import { ApprovalBar } from "./components/ApprovalBar";
 import { AskUserCard } from "./components/AskUserCard";
+import { Icon } from "./components/Icon";
 import { api } from "./lib/api";
 import { shareUrlFor } from "./lib/format";
 import { parseEntries, truncateOneLine } from "./lib/entries";
@@ -343,7 +344,7 @@ export default function App() {
 								const next = (event.goal ?? null) as GoalInfo | null;
 								if (next) setGoal(next);
 								if (event.continuing) {
-									startNewRound(`🎯 继续推进目标（第 ${Number(event.round ?? 0) + 1} 轮）`);
+									startNewRound(`继续推进目标（第 ${Number(event.round ?? 0) + 1} 轮）`);
 								} else if (event.finished) {
 									setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "目标已结束。" }]);
 								} else if (event.paused) {
@@ -1606,8 +1607,8 @@ export default function App() {
 				>
 					{(
 						[
-							{ key: "chat", label: "聊天", icon: "💬" },
-							{ key: "files", label: "文件", icon: "📄" },
+							{ key: "chat", label: "聊天", icon: "chat" },
+							{ key: "files", label: "文件", icon: "file" },
 						] as const
 					).map(({ key, label, icon }) => (
 						<button
@@ -1619,8 +1620,8 @@ export default function App() {
 								mobileTab === key ? "text-sky-300" : "text-slate-400 hover:text-slate-200"
 							}`}
 						>
-							<span aria-hidden className="text-base leading-none">
-								{icon}
+							<span aria-hidden className="leading-none">
+								<Icon name={icon} className="h-5 w-5" />
 							</span>
 							{label}
 						</button>
@@ -1630,8 +1631,8 @@ export default function App() {
 						onClick={() => setSettingsOpen(true)}
 						className="flex flex-col items-center gap-0.5 py-2 text-[11px] text-slate-400 transition-colors hover:text-slate-200"
 					>
-						<span aria-hidden className="text-base leading-none">
-							⚙️
+						<span aria-hidden className="leading-none">
+							<Icon name="settings" className="h-5 w-5" />
 						</span>
 						设置
 					</button>

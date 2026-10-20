@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import type { ApprovalInfo } from "../types";
 
 const CATEGORY_LABEL: Record<string, string> = { read: "读取", write: "写入", exec: "执行" };
@@ -28,9 +29,7 @@ export function ApprovalBar({ approvals, busy, onDecide }: ApprovalBarProps) {
 			<div className="mx-auto flex max-w-3xl flex-col gap-2">
 				{approvals.map((item) => (
 					<div key={item.id} className="flex flex-wrap items-start gap-2 text-xs">
-						<span aria-hidden className="mt-0.5 text-sm leading-none">
-							🔐
-						</span>
+						<Icon name="approval" className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
 						<div className="min-w-0 flex-1">
 							<div className="flex flex-wrap items-center gap-x-2">
 								<span className="font-medium text-amber-200">{item.tool}</span>
