@@ -1,0 +1,81 @@
+CHANGELOG.md
+  00512495ff504ece 7-14
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 36-38,127-128,619-630
+docs/knowledge-base.md
+  00512495ff504ece 48-59
+src/web/lib/api.ts
+  00512495ff504ece 294-295,303
+README.md
+  00512495ff504ece 22,101
+tests/api/api.test.ts
+  00512495ff504ece 317-348
+scripts/smoke.mjs
+  00512495ff504ece 117-124
+src/worker.ts
+  00512495ff504ece 745-755,757-758,760,845-854,857-865,880-905,2158,2361-2362,2372-2374,3152,3377-3380,3485-3494,3998,4005,4007-4008,4053
+src/web/App.tsx
+  00512495ff504ece 83-84,692,699,1297-1308,1634-1635
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "75ef98f89fa537c953cac65e30c540fba972f48d",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 190,
+      "total_deletions": 27,
+      "accepted_lines": 189,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "scripts/smoke.mjs": {
+          "additions": 8,
+          "deletions": 2,
+          "accepted_lines": 8
+        },
+        "src/web/lib/api.ts": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "docs/knowledge-base.md": {
+          "additions": 12,
+          "accepted_lines": 12
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 17,
+          "accepted_lines": 17
+        },
+        "CHANGELOG.md": {
+          "additions": 8,
+          "accepted_lines": 8
+        },
+        "src/worker.ts": {
+          "additions": 90,
+          "deletions": 22,
+          "accepted_lines": 89
+        },
+        "README.md": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "src/web/App.tsx": {
+          "additions": 18,
+          "deletions": 2,
+          "accepted_lines": 18
+        },
+        "tests/api/api.test.ts": {
+          "additions": 32,
+          "accepted_lines": 32
+        }
+      }
+    }
+  }
+}
