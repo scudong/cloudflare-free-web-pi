@@ -107,15 +107,25 @@
 
 ## 五、可执行 TODO
 
-- [x] P0 子代理编排：`createSubagent(task, {tools})` + 并行扇出 + 结果汇总
-- [x] P0 压缩可配置：设置页加阈值/保留量，压缩时聊天里给提示
-- [x] P1 Goal 模式：目标 + token 预算 + 自动续转 + 完成校验
-- [x] P1 会话分支：从任意消息分叉，侧栏显示分支树
-- [x] P1 工具审批：read/write/exec 三档
-- [ ] P2 Context files：项目级可编辑 instructions
-- [ ] P2 流式插话：生成中追加消息进入 inbox
-- [ ] P3 多 provider：OpenAI/Anthropic 兼容端点配置
-- [ ] P3 自定义工具：DO 内 JS 工具注册表
+- [x] P0 子代理编排：`createSubagent(task, {tools})` + 并行扇出 + 结果汇总 — **v0.29.0**
+- [x] P0 压缩可配置：设置页加阈值/保留量，压缩时聊天里给提示 — **v0.30.0 / v0.31.0**
+- [x] P1 Goal 模式：目标 + token 预算 + 自动续转 + 完成校验 — **v0.31.0**
+- [x] P1 会话分支：从任意消息分叉，侧栏显示分支树 — **v0.32.0**
+- [x] P1 工具审批：read/write/exec 三档 — **v0.33.0**（含逐工具覆盖）
+- [x] P2 Context files：项目级可编辑 instructions — **v0.30.0 规则文件**（每轮注入；`@path` 导入未做）
+- [x] P2 流式插话：生成中追加消息进入 inbox — **v0.34.0**（`whenBusy: "steer"`）
+- [x] P3 多 provider：OpenAI/Anthropic 兼容端点配置 — **v0.27.0**（OpenAI 兼容；Anthropic 原生协议未接）
+- [ ] P3 自定义工具：DO 内 JS 工具注册表 — **唯一未做**
+
+### 对照之外新增（本轮追加）
+
+- [x] 能力注册表 `GET /api/capabilities`（内置 / 数据 / 协议三类）— v0.30.0
+- [x] 提示模板（`/` 菜单 + `$1`/`$ARGUMENTS` 占位符）— v0.30.0
+- [x] 面板伸缩：会话栏可拖拽 + 左栏/工作台收起展开 — v0.32.0
+- [x] pi 内核版本管理：`/api/kernel` + `npm run upgrade:pi` + 每周自动 PR — v0.35.0
+- [x] 金标回归体系：80 条用例，CI 卡在部署之前 — v0.28.0 起
+- [ ] 访问密码迁到密码管理器（运维项，非功能）
+- [ ] talorys-cn 与 pi-harness 收敛（另一条线）
 
 ---
 
