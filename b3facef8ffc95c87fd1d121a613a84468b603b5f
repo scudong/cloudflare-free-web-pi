@@ -1,0 +1,89 @@
+src/web/components/ApprovalBar.tsx
+  00512495ff504ece 1-79
+src/web/App.tsx
+  00512495ff504ece 12,19,91-94,227-236,373-374,384,478-517,594,644-652,1390,1456-1458
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 43-46,120-122,135-136,159-174,463-518
+src/web/types.ts
+  00512495ff504ece 109-120
+todo/omp-gap-analysis.md
+  00512495ff504ece 114
+tests/README.md
+  00512495ff504ece 73
+src/worker.ts
+  00512495ff504ece 81-83,231-368,490,925-931,997-1001,1010,1014-1018,1075-1076,2453-2463,2483-2545,2554,2563-2579,2606
+tests/api/api.test.ts
+  00512495ff504ece 390-430
+src/web/lib/api.ts
+  00512495ff504ece 238,244,251-252,255-272
+CHANGELOG.md
+  00512495ff504ece 5-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "b3facef8ffc95c87fd1d121a613a84468b603b5f",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 608,
+      "total_deletions": 25,
+      "accepted_lines": 592,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/api/api.test.ts": {
+          "additions": 41,
+          "accepted_lines": 41
+        },
+        "src/web/lib/api.ts": {
+          "additions": 23,
+          "deletions": 1,
+          "accepted_lines": 23
+        },
+        "todo/omp-gap-analysis.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/App.tsx": {
+          "additions": 93,
+          "deletions": 14,
+          "accepted_lines": 81
+        },
+        "src/web/types.ts": {
+          "additions": 12,
+          "deletions": 1,
+          "accepted_lines": 12
+        },
+        "CHANGELOG.md": {
+          "additions": 15,
+          "accepted_lines": 15
+        },
+        "src/web/components/ApprovalBar.tsx": {
+          "additions": 79,
+          "accepted_lines": 79
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 83,
+          "deletions": 1,
+          "accepted_lines": 82
+        },
+        "src/worker.ts": {
+          "additions": 260,
+          "deletions": 7,
+          "accepted_lines": 257
+        },
+        "tests/README.md": {
+          "additions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
