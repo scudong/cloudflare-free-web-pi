@@ -4,6 +4,10 @@
 
 ## 2026-10-20（文件分享）
 
+### 分享弹窗新增「在新窗口打开」（v0.38.2）
+- 生成链接后可直接在新标签页打开，不用先复制
+- 用普通 `<a target="_blank" rel="noopener noreferrer">`，不受弹窗拦截影响
+
 ### 分享链接改用当前域名（v0.38.1）
 - 修复：通过 pages.dev 反代访问时，服务端 `request.url` 是上游 workers.dev 地址，生成的链接在国内打不开
 - 前端统一用 `window.location.origin + /s/<token>`（`shareUrlFor`），文件分享与会话分享都走这条逻辑

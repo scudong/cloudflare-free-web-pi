@@ -150,6 +150,14 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 									{copied ? "已复制" : "复制"}
 								</button>
 							</div>
+							<a
+								href={result.url}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-md border border-slate-600 px-2.5 py-1.5 text-[11px] text-slate-200 transition-colors hover:bg-slate-800"
+							>
+								在新窗口打开 ↗
+							</a>
 							<p className="mt-1.5 text-[11px] text-emerald-200/70">
 								{result.expiresAt > 0
 									? `有效期至 ${new Date(result.expiresAt).toLocaleString("zh-CN", { hour12: false })}`
