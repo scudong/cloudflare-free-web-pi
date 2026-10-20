@@ -68,10 +68,15 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	}
 	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS skills (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)`);
-	// 只读分享（v0.9.0）；v0.38.0 起支持过期时间（0 = 永久）
-	sql.exec(`CREATE TABLE IF NOT EXISTS shares (token TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`);
+	// 只读分享（v0.9.0）；v0.38.0 起支持过期时间，v0.39.1 起记录分享时的主题
+	sql.exec(`CREATE TABLE IF NOT EXISTS shares (token TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0, theme TEXT NOT NULL DEFAULT 'dark', created_at TEXT NOT NULL)`);
 	try {
 		sql.exec(`ALTER TABLE shares ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0`);
+	} catch {
+		// 列已存在（老库）
+	}
+	try {
+		sql.exec(`ALTER TABLE shares ADD COLUMN theme TEXT NOT NULL DEFAULT 'dark'`);
 	} catch {
 		// 列已存在（老库）
 	}
@@ -1494,58 +1499,144 @@ function markdownToHtml(source: string): string {
 	return out.join("\n");
 }
 
-/** 分享页与过期页共用的样式。 */
-const SHARE_CSS = `
-:root{color-scheme:dark}
+/* ---- 分享页主题（v0.39.1）：与客户端四套主题一一对应 ---- */
+
+type ShareThemeId = "dark" | "light" | "sepia" | "midnight";
+
+interface SharePalette {
+	scheme: "dark" | "light";
+	bg: string;
+	panel: string;
+	panelAlt: string;
+	border: string;
+	fg: string;
+	muted: string;
+	accent: string;
+	accentSoft: string;
+	accentBorder: string;
+	userBg: string;
+	userBorder: string;
+}
+
+/** 色值取自 web/styles/index.css 的 Arco 主题变量。 */
+const SHARE_PALETTES: Record<ShareThemeId, SharePalette> = {
+	dark: {
+		scheme: "dark",
+		bg: "#17171a",
+		panel: "#232324",
+		panelAlt: "#2a2a2b",
+		border: "#3a3a3c",
+		fg: "#f2f3f5",
+		muted: "#86909c",
+		accent: "#6aa1ff",
+		accentSoft: "rgba(64,128,255,.14)",
+		accentBorder: "rgba(64,128,255,.35)",
+		userBg: "rgba(64,128,255,.12)",
+		userBorder: "rgba(64,128,255,.3)",
+	},
+	light: {
+		scheme: "light",
+		bg: "#f7f8fa",
+		panel: "#ffffff",
+		panelAlt: "#f2f3f5",
+		border: "#e5e6eb",
+		fg: "#1d2129",
+		muted: "#86909c",
+		accent: "#165dff",
+		accentSoft: "rgba(22,93,255,.08)",
+		accentBorder: "rgba(22,93,255,.25)",
+		userBg: "rgba(22,93,255,.07)",
+		userBorder: "rgba(22,93,255,.2)",
+	},
+	sepia: {
+		scheme: "light",
+		bg: "#fcf8ec",
+		panel: "#fffdf6",
+		panelAlt: "#f7efd9",
+		border: "#ebdcbc",
+		fg: "#2e2415",
+		muted: "#a08c68",
+		accent: "#b37a00",
+		accentSoft: "rgba(217,152,0,.12)",
+		accentBorder: "rgba(179,122,0,.35)",
+		userBg: "rgba(217,152,0,.1)",
+		userBorder: "rgba(179,122,0,.25)",
+	},
+	midnight: {
+		scheme: "dark",
+		bg: "#0b1220",
+		panel: "#121a2e",
+		panelAlt: "#1a2440",
+		border: "#263454",
+		fg: "#eaf0fa",
+		muted: "#6b80a8",
+		accent: "#6aa1ff",
+		accentSoft: "rgba(64,128,255,.14)",
+		accentBorder: "rgba(64,128,255,.35)",
+		userBg: "rgba(64,128,255,.1)",
+		userBorder: "rgba(64,128,255,.3)",
+	},
+};
+
+function isShareTheme(value: unknown): value is ShareThemeId {
+	return typeof value === "string" && value in SHARE_PALETTES;
+}
+
+/** 分享页与过期页共用的样式（按主题生成 CSS 变量）。 */
+function shareCss(theme: ShareThemeId): string {
+	const p = SHARE_PALETTES[theme];
+	return `
+:root{color-scheme:${p.scheme};--bg:${p.bg};--panel:${p.panel};--panel-alt:${p.panelAlt};--border:${p.border};--fg:${p.fg};--muted:${p.muted};--accent:${p.accent};--accent-soft:${p.accentSoft};--accent-border:${p.accentBorder};--user-bg:${p.userBg};--user-border:${p.userBorder}}
 *{box-sizing:border-box}
-body{margin:0;background:#0b1120;color:#e2e8f0;font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
-header{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:.6rem;padding:.9rem 1.2rem;background:rgba(15,23,42,.9);border-bottom:1px solid #1e293b;backdrop-filter:blur(8px)}
-header .badge{font-size:12px;color:#7dd3fc;border:1px solid rgba(125,211,252,.3);background:rgba(125,211,252,.1);padding:2px 8px;border-radius:6px;white-space:nowrap}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+header{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:.6rem;padding:.9rem 1.2rem;background:var(--panel);border-bottom:1px solid var(--border)}
+header .badge{font-size:12px;color:var(--accent);border:1px solid var(--accent-border);background:var(--accent-soft);padding:2px 8px;border-radius:6px;white-space:nowrap}
 header h1{font-size:14px;margin:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 main{max-width:860px;margin:0 auto;padding:1.5rem 1.2rem 4rem}
-article.article{background:#111c31;border:1px solid #1e293b;border-radius:14px;padding:1.4rem 1.6rem}
+article.article{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:1.4rem 1.6rem}
 article.article>*:first-child{margin-top:0}
-h1,h2,h3,h4{line-height:1.35;color:#f1f5f9}
-h1{font-size:1.6rem;margin:1.4rem 0 .7rem;border-bottom:1px solid #1e293b;padding-bottom:.4rem}
+h1,h2,h3,h4{line-height:1.35;color:var(--fg)}
+h1{font-size:1.6rem;margin:1.4rem 0 .7rem;border-bottom:1px solid var(--border);padding-bottom:.4rem}
 h2{font-size:1.3rem;margin:1.3rem 0 .6rem}
 h3{font-size:1.1rem;margin:1.1rem 0 .5rem}
 p{margin:.7rem 0}
-a{color:#7dd3fc}
-code{background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:1px 5px;font-size:.9em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-pre{background:#0b1324;border:1px solid #1e293b;border-radius:10px;padding:.9rem 1rem;overflow:auto}
+a{color:var(--accent)}
+code{background:var(--panel-alt);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:.9em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--panel-alt);border:1px solid var(--border);border-radius:10px;padding:.9rem 1rem;overflow:auto}
 pre code{background:none;border:0;padding:0;font-size:.86rem;white-space:pre}
-blockquote{margin:.9rem 0;padding:.3rem 1rem;border-left:3px solid #38bdf8;background:#0c4a6e26;color:#bae6fd;border-radius:0 8px 8px 0}
+blockquote{margin:.9rem 0;padding:.3rem 1rem;border-left:3px solid var(--accent);background:var(--accent-soft);color:var(--fg);border-radius:0 8px 8px 0}
 ul,ol{margin:.6rem 0;padding-left:1.5rem}
 li{margin:.25rem 0}
-li input{margin-right:.4rem;accent-color:#0ea5e9}
-hr{border:0;border-top:1px solid #1e293b;margin:1.4rem 0}
+li input{margin-right:.4rem;accent-color:var(--accent)}
+hr{border:0;border-top:1px solid var(--border);margin:1.4rem 0}
 table{border-collapse:collapse;width:100%;margin:.9rem 0;font-size:.92em;display:block;overflow-x:auto}
-th,td{border:1px solid #1e293b;padding:.45rem .7rem;text-align:left}
-th{background:#16213a;color:#e2e8f0}
-tr:nth-child(even) td{background:#0f172a66}
+th,td{border:1px solid var(--border);padding:.45rem .7rem;text-align:left}
+th{background:var(--panel-alt);color:var(--fg)}
+tr:nth-child(even) td{background:var(--panel-alt)}
 img{max-width:100%;border-radius:8px}
 .msg{margin:1.1rem 0;padding:.9rem 1rem;border-radius:14px}
-.msg.user{background:#0c4a6e33;border:1px solid #0c4a6e}
-.msg.bot{background:#1e293b66;border:1px solid #1e293b}
-.who{font-size:11px;color:#94a3b8;margin-bottom:.35rem}
+.msg.user{background:var(--user-bg);border:1px solid var(--user-border)}
+.msg.bot{background:var(--panel);border:1px solid var(--border)}
+.who{font-size:11px;color:var(--muted);margin-bottom:.35rem}
 .md{word-break:break-word}
 .md>*:first-child{margin-top:0}
 .md>*:last-child{margin-bottom:0}
-.empty{color:#64748b;text-align:center}
-footer{text-align:center;color:#64748b;font-size:12px;padding:1.4rem 1rem 2rem}
+.empty{color:var(--muted);text-align:center}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:1.4rem 1rem 2rem}
 .expired{max-width:520px;margin:14vh auto;text-align:center;padding:2rem}
 .expired h1{font-size:1.3rem;margin:0 0 .6rem;border:0}
-.expired p{color:#94a3b8}
+.expired p{color:var(--muted)}
 `;
+}
 
 /** 分享页外壳（只读、noindex）。expiresAt > 0 时页脚显示有效期。 */
-function sharePage(title: string, body: string, expiresAt = 0): string {
+function sharePage(title: string, body: string, expiresAt = 0, theme: ShareThemeId = "dark"): string {
 	const until =
 		expiresAt > 0
 			? `链接有效期至 ${new Date(expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}`
 			: "";
 	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · 分享</title>
-<style>${SHARE_CSS}</style></head><body>
+<style>${shareCss(theme)}</style></head><body>
 <header><span class="badge">只读分享</span><h1>${escapeHtml(title)}</h1></header>
 <main>${body}</main>
 <footer>由 π Harness 生成 · 只读视图${until ? ` · ${escapeHtml(until)}` : ""}</footer>
@@ -1553,13 +1644,13 @@ function sharePage(title: string, body: string, expiresAt = 0): string {
 }
 
 /** 过期页（410）。 */
-function expiredSharePage(title: string, expiresAt: number): SharePage {
+function expiredSharePage(title: string, expiresAt: number, theme: ShareThemeId = "dark"): SharePage {
 	const until = new Date(expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
 	const body = `<div class="expired"><h1>分享链接已过期</h1><p>「${escapeHtml(title || "分享内容")}」的链接已于 ${escapeHtml(until)} 失效。</p><p>如需继续分享，请回到 pi-harness 重新生成。</p></div>`;
 	return {
 		status: 410,
 		contentType: "text/html; charset=utf-8",
-		body: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>分享已过期</title><style>${SHARE_CSS}</style></head><body>${body}</body></html>`,
+		body: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>分享已过期</title><style>${shareCss(theme)}</style></head><body>${body}</body></html>`,
 	};
 }
 
@@ -2049,7 +2140,7 @@ export class SpikeAgent extends DurableObject {
 				automations: q("SELECT id, name, prompt, session_id, schedule, enabled, next_run_at FROM automations"),
 				mcpServers: q("SELECT id, name, url, headers FROM mcp_servers"),
 				sessions: q("SELECT id, title, created_at, updated_at, model FROM sessions_meta WHERE deleted = 0"),
-				shares: q("SELECT token, kind, session_id, name, expires_at, created_at FROM shares"),
+				shares: q("SELECT token, kind, session_id, name, expires_at, theme, created_at FROM shares"),
 				skills: q("SELECT name, description, content FROM skills ORDER BY name"),
 				settings: q("SELECT key, value FROM app_settings"),
 				plans: q("SELECT conversation_id, steps, updated_at FROM plans"),
@@ -2195,12 +2286,13 @@ export class SpikeAgent extends DurableObject {
 		return counts;
 	}
 
-	/** 生成分享链接（只读）。ttlSeconds <= 0 表示永久；已过期记录顺手清理。 */
+	/** 生成分享链接（只读）。ttlSeconds <= 0 表示永久；theme 记录分享页配色。 */
 	async createShare(
 		sessionId: string | undefined,
 		kind: "conversation" | "file",
 		name?: string,
 		ttlSeconds?: number,
+		theme?: string,
 	): Promise<{ token: string; expiresAt: number }> {
 		await this.open();
 		const conversation = await this.conversationFor(await this.open(), sessionId);
@@ -2217,26 +2309,40 @@ export class SpikeAgent extends DurableObject {
 		sqlFacade!.exec("DELETE FROM shares WHERE expires_at > 0 AND expires_at <= ?", Date.now());
 		const ttl = Number(ttlSeconds);
 		const expiresAt = Number.isFinite(ttl) && ttl > 0 ? Date.now() + Math.round(Math.min(ttl, 365 * 86400) * 1000) : 0;
+		const themeId: ShareThemeId = isShareTheme(theme) ? theme : "dark";
 		const bytes = crypto.getRandomValues(new Uint8Array(12));
 		const token = [...bytes].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("");
 		sqlFacade!.exec(
-			"INSERT INTO shares (token, kind, session_id, name, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-			token, kind, String(conversation.id), fileName, expiresAt, new Date().toISOString(),
+			"INSERT INTO shares (token, kind, session_id, name, expires_at, theme, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			token, kind, String(conversation.id), fileName, expiresAt, themeId, new Date().toISOString(),
 		);
 		return { token, expiresAt };
 	}
 
 	/** 分享页（服务端渲染，只读）。html 文件原样输出，其余按 Markdown 渲染。 */
-	async renderShare(token: string): Promise<SharePage | null> {
+	async renderShare(token: string, themeOverride?: string | null): Promise<SharePage | null> {
 		await this.open();
 		const rows = sqlFacade!.exec(
-			"SELECT kind, session_id, name, created_at, expires_at FROM shares WHERE token = ?",
+			"SELECT kind, session_id, name, created_at, expires_at, theme FROM shares WHERE token = ?",
 			token,
-		).toArray() as { kind: string; session_id: string; name: string; created_at: string; expires_at: number }[];
+		).toArray() as {
+			kind: string;
+			session_id: string;
+			name: string;
+			created_at: string;
+			expires_at: number;
+			theme: string;
+		}[];
 		const share = rows[0];
 		if (!share) return null;
+		// ?theme= 可临时覆盖；否则用分享时记录的主题，老链接回落深色
+		const theme: ShareThemeId = isShareTheme(themeOverride)
+			? themeOverride
+			: isShareTheme(share.theme)
+				? share.theme
+				: "dark";
 		const expiresAt = Number(share.expires_at ?? 0);
-		if (expiresAt > 0 && expiresAt <= Date.now()) return expiredSharePage(share.name, expiresAt);
+		if (expiresAt > 0 && expiresAt <= Date.now()) return expiredSharePage(share.name, expiresAt, theme);
 
 		if (share.kind === "file") {
 			const file = sqlFacade!.exec(
@@ -2260,7 +2366,7 @@ export class SpikeAgent extends DurableObject {
 			return {
 				status: 200,
 				contentType: "text/html; charset=utf-8",
-				body: sharePage(share.name || "文件", `<article class="article">${markdownToHtml(content)}</article>`, expiresAt),
+				body: sharePage(share.name || "文件", `<article class="article">${markdownToHtml(content)}</article>`, expiresAt, theme),
 			};
 		}
 
@@ -2297,7 +2403,7 @@ export class SpikeAgent extends DurableObject {
 		return {
 			status: 200,
 			contentType: "text/html; charset=utf-8",
-			body: sharePage(title, parts.join("") || "<p class='empty'>（暂无内容）</p>", expiresAt),
+			body: sharePage(title, parts.join("") || "<p class='empty'>（暂无内容）</p>", expiresAt, theme),
 		};
 	}
 
@@ -2873,6 +2979,7 @@ export class SpikeAgent extends DurableObject {
 					kind?: "conversation" | "file";
 					name?: string;
 					ttlSeconds?: number;
+					theme?: string;
 				};
 				try {
 					const { token, expiresAt } = await this.createShare(
@@ -2880,6 +2987,7 @@ export class SpikeAgent extends DurableObject {
 						body.kind === "file" ? "file" : "conversation",
 						body.name,
 						body.ttlSeconds,
+						body.theme,
 					);
 					// 用请求自身的域名拼绝对地址：页面在哪个域名打开，链接就指向哪里
 					const origin = new URL(request.url).origin;
@@ -2892,7 +3000,7 @@ export class SpikeAgent extends DurableObject {
 				}
 			}
 			if (url.pathname.startsWith("/s/") && request.method === "GET") {
-				const page = await this.renderShare(url.pathname.slice(3));
+				const page = await this.renderShare(url.pathname.slice(3), url.searchParams.get("theme"));
 				if (!page) {
 					return new Response("分享链接不存在或已失效", {
 						status: 404,

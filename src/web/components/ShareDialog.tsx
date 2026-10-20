@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { shareUrlFor } from "../lib/format";
+import { readTheme } from "../lib/theme";
 import { Icon } from "./Icon";
 
 interface ShareDialogProps {
@@ -42,7 +43,7 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 		setCopied(false);
 		void (async () => {
 			try {
-				const data = await api.shareFile(sessionId, name, ttl);
+				const data = await api.shareFile(sessionId, name, ttl, readTheme());
 				if (!data.url) throw new Error(data.error || "生成分享链接失败");
 				// 域名一律用当前页面：pages.dev 反代下服务端看到的是 workers.dev 地址
 				const url = shareUrlFor(data.url, window.location.origin);

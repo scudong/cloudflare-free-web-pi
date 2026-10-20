@@ -313,6 +313,28 @@ describe("文件分享", () => {
 		expect(html).toContain("<li>第一条</li>");
 		expect(html).toContain("<table>");
 		expect(html).toContain("链接有效期至");
+		// 未指定主题时回落深色（Arco 深色底）
+		expect(html).toContain("--bg:#17171a");
+	});
+
+	it("分享页记录主题，?theme= 可覆盖", async () => {
+		const created = await post("/api/share", {
+			sessionId: "1",
+			kind: "file",
+			name: "share-test.md",
+			ttlSeconds: 3600,
+			theme: "light",
+		});
+		const light = await (await fetch(created.json.url)).text();
+		expect(light).toContain("--bg:#f7f8fa");
+		expect(light).toContain("color-scheme:light");
+
+		const sepia = await (await fetch(`${created.json.url}?theme=sepia`)).text();
+		expect(sepia).toContain("--bg:#fcf8ec");
+
+		// 未知主题参数不生效，仍用分享时记录的浅色
+		const fallback = await (await fetch(`${created.json.url}?theme=dracula`)).text();
+		expect(fallback).toContain("--bg:#f7f8fa");
 	});
 
 	it("HTML 原样输出并带 sandbox CSP", async () => {

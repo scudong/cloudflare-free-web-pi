@@ -4,6 +4,13 @@
 
 ## 2026-10-20（文件分享）
 
+### 分享页跟随原主题（v0.39.1）
+- 生成分享链接时把当前主题（深色 / 浅色 / 米黄 / 午夜蓝）记入 `shares.theme`，Markdown 与对话分享页按同一套 Arco 配色渲染
+- 分享页改用 CSS 变量（`--bg` / `--panel` / `--border` / `--fg` / `--accent`），不再写死深蓝色
+- 支持 `?theme=light|sepia|midnight` 临时覆盖；老链接默认深色
+- HTML 文件分享仍原样输出（产物自带样式）
+- 金标新增 1 条，总计 **97 条**
+
 ### 全站图标统一（v0.39.0）
 - 引入 `lucide-react`（按需 tree-shake），新增 `components/Icon.tsx` 语义图标表：统一线性风格、1.75 描边、`currentColor`，颜色沿用 slate / sky / emerald / amber / violet 色系
 - 替换范围：左侧导航与会话栏、聊天头部与目标/审批/问答条、工具调用与思考块、计划卡片、文件卡与工作台、设置弹窗五个 tab、分享弹窗、移动端底栏、Markdown 任务列表

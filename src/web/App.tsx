@@ -1159,7 +1159,7 @@ export default function App() {
 	const handleShare = useCallback(() => {
 		void (async () => {
 			try {
-				const data = await api.share(sessionId);
+				const data = await api.share(sessionId, readTheme());
 				if (!data.url) throw new Error("no url");
 				// 域名一律用当前页面：pages.dev 反代下服务端看到的是 workers.dev 地址
 				const absolute = shareUrlFor(data.url, window.location.origin);
