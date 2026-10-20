@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { shareUrlFor } from "../lib/format";
 
 interface ShareDialogProps {
 	sessionId: string;
@@ -42,8 +43,8 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 			try {
 				const data = await api.shareFile(sessionId, name, ttl);
 				if (!data.url) throw new Error(data.error || "生成分享链接失败");
-				// 服务端返回绝对地址；老版本返回相对路径时用当前域名补全
-				const url = /^https?:\/\//i.test(data.url) ? data.url : `${window.location.origin}${data.url}`;
+				// 域名一律用当前页面：pages.dev 反代下服务端看到的是 workers.dev 地址
+				const url = shareUrlFor(data.url, window.location.origin);
 				setResult({ url, expiresAt: Number(data.expiresAt) || 0 });
 			} catch (err) {
 				setError(err instanceof Error ? err.message : String(err));

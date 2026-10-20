@@ -14,3 +14,16 @@ export function formatTime(iso: string): string {
 	const pad = (n: number) => String(n).padStart(2, "0");
 	return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+
+/**
+ * 分享链接归一化：只保留路径，域名换成当前页面的 origin。
+ * pages.dev 反代到 Worker 时，服务端 request.url 是 workers.dev 地址，
+ * 直接使用它拼链接在国内打不开（v0.38.1）。
+ */
+export function shareUrlFor(raw: string, origin: string): string {
+	try {
+		return `${origin}${new URL(raw, origin).pathname}`;
+	} catch {
+		return raw;
+	}
+}
