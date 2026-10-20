@@ -387,6 +387,14 @@ describe("会话分支", () => {
 	});
 });
 
+describe("生成中插话", () => {
+	it("空插话被拒绝", async () => {
+		const res = await post("/api/interject", { sessionId: "1", message: "   " });
+		expect(res.status).toBe(400);
+		expect(res.json.ok).toBe(false);
+	});
+});
+
 describe("工具审批", () => {
 	it("工具清单带分级，默认全部放行", async () => {
 		const { json } = await api("/api/tools");
