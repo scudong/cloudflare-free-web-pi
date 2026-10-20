@@ -1,0 +1,56 @@
+src/web/lib/theme.ts
+  00512495ff504ece 33,36,38,40
+src/web/App.tsx
+  00512495ff504ece 651-652
+tests/unit/theme.test.ts
+  00512495ff504ece 26-27
+src/web/index.html
+  00512495ff504ece 22,26
+CHANGELOG.md
+  00512495ff504ece 7-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "7c6804a2b00ee116379fefb3559af80e8fa0ef5b",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 19,
+      "total_deletions": 8,
+      "accepted_lines": 19,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/index.html": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "tests/unit/theme.test.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/App.tsx": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/lib/theme.ts": {
+          "additions": 4,
+          "deletions": 4,
+          "accepted_lines": 4
+        },
+        "CHANGELOG.md": {
+          "additions": 9,
+          "accepted_lines": 9
+        }
+      }
+    }
+  }
+}
