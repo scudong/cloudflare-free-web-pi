@@ -1,0 +1,91 @@
+src/worker.ts
+  00512495ff504ece 3,28-50,133,986,1112-1113,1118,1152-1153,1157,1789,1807,2117-2127,2416,2435,2994-3005,3187-3188,3195,3883-3885,3887,3894-3899,3920-3946,3948-3958,3961-4073,4077-4080,4084,4088-4092,4095-4101,4103-4120,4131-4145,4150,4154-4160,4163-4166,4169-4173
+src/web/components/Icon.tsx
+  00512495ff504ece 115
+README.md
+  00512495ff504ece 25,111,124-125
+src/web/components/UsersPanel.tsx
+  00512495ff504ece 1-209
+CHANGELOG.md
+  00512495ff504ece 5-17
+src/web/App.tsx
+  00512495ff504ece 14,73,632,634,650,1404-1405,1407,1409,1411,1421-1422,1447,1452,1682,1685,1688-1692
+wrangler.jsonc
+  00512495ff504ece 7-11,14-17
+src/web/lib/api.ts
+  00512495ff504ece 33-41,176,179,183-192
+tests/api/api.test.ts
+  00512495ff504ece 66-67,451-488
+src/web/components/Rail.tsx
+  00512495ff504ece 3,11-12,19,53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "01786d79e4b294708379ae4ecc9262e2ee3c684c",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 624,
+      "total_deletions": 59,
+      "accepted_lines": 623,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/Rail.tsx": {
+          "additions": 5,
+          "deletions": 2,
+          "accepted_lines": 5
+        },
+        "src/web/App.tsx": {
+          "additions": 21,
+          "deletions": 12,
+          "accepted_lines": 21
+        },
+        "src/web/components/UsersPanel.tsx": {
+          "additions": 209,
+          "accepted_lines": 209
+        },
+        "README.md": {
+          "additions": 4,
+          "deletions": 2,
+          "accepted_lines": 4
+        },
+        "CHANGELOG.md": {
+          "additions": 13,
+          "deletions": 1,
+          "accepted_lines": 13
+        },
+        "src/web/lib/api.ts": {
+          "additions": 22,
+          "deletions": 2,
+          "accepted_lines": 22
+        },
+        "tests/api/api.test.ts": {
+          "additions": 40,
+          "deletions": 1,
+          "accepted_lines": 40
+        },
+        "src/web/components/Icon.tsx": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "wrangler.jsonc": {
+          "additions": 9,
+          "deletions": 2,
+          "accepted_lines": 9
+        },
+        "src/worker.ts": {
+          "additions": 300,
+          "deletions": 37,
+          "accepted_lines": 299
+        }
+      }
+    }
+  }
+}
