@@ -495,6 +495,27 @@ export default function App() {
 		[sessionId, handleSend, nextId],
 	);
 
+	/** 生成中插话（v0.34.0）：消息进入当前这轮，不打断。 */
+	const handleInterject = useCallback(
+		(text: string) => {
+			if (!text.trim()) return;
+			setMessages((prev) => [...prev, { id: nextId(), role: "user", text }]);
+			void (async () => {
+				try {
+					await api.interject(sessionId, text);
+					setMessages((prev) => [
+						...prev,
+						{ id: nextId(), role: "notice", text: "已插入本轮：模型会在下一次工具调用后看到。" },
+					]);
+				} catch (err) {
+					const detail = err instanceof Error ? err.message : String(err);
+					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `插话失败：${detail}` }]);
+				}
+			})();
+		},
+		[sessionId, nextId],
+	);
+
 	/** 审批策略（v0.33.0）：分级或逐工具覆盖。 */
 	const handleChangeApproval = useCallback(
 		(patch: Partial<{ read: string; write: string; exec: string }>) => {
@@ -1388,7 +1409,14 @@ export default function App() {
 						/>
 						{goal && <GoalBar goal={goal} onStop={() => void handleStopGoal()} onNew={() => setGoalDialogOpen(true)} />}
 						<ApprovalBar approvals={approvals} busy={approvalBusy || pending} onDecide={handleDecideApproval} />
-						<Composer pending={pending} onSend={handleSend} onStop={handleStop} skills={skills} prompts={prompts} />
+						<Composer
+							pending={pending}
+							onSend={handleSend}
+							onStop={handleStop}
+							onInterject={handleInterject}
+							skills={skills}
+							prompts={prompts}
+						/>
 					</section>
 				)}
 

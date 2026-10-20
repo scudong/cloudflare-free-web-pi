@@ -259,6 +259,10 @@ export const api = {
 			tools?: { name: string; category: string; policy: string; override: string }[];
 		}>("/api/tools"),
 
+	/** 生成中插话（v0.34.0）：消息进入正在进行的这一轮。 */
+	interject: (sessionId: string, message: string) =>
+		requestJson<{ ok?: boolean; id?: string; error?: string }>("/api/interject", jsonPost({ sessionId, message })),
+
 	/** 待审批的工具调用（v0.33.0）。 */
 	approvals: (sessionId: string) =>
 		requestJson<{

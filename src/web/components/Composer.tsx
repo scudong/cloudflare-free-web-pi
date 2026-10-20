@@ -8,6 +8,8 @@ interface ComposerProps {
 	/** text 为文字，images 为 data URL 列表（v0.12.0，多模态）。 */
 	onSend: (text: string, images: string[]) => void;
 	onStop: () => void;
+	/** 生成中插话（v0.34.0）：消息进入当前这轮，模型在下一次工具调用后看到。 */
+	onInterject?: (text: string) => void;
 	/** 已安装技能（v0.23.0）：输入 / 唤起，选中后把「/技能名」写进输入框。 */
 	skills: SkillInfo[];
 	/** 提示模板（v0.31.0）：选中后把模板正文填进输入框。 */
@@ -66,7 +68,7 @@ function detectSkillToken(value: string, caret: number): { start: number; query:
 	return { start: upto.lastIndexOf("/"), query: match[2] ?? "" };
 }
 
-export function Composer({ pending, onSend, onStop, skills, prompts = [] }: ComposerProps) {
+export function Composer({ pending, onSend, onStop, onInterject, skills, prompts = [] }: ComposerProps) {
 	const [text, setText] = useState("");
 	const [images, setImages] = useState<string[]>([]);
 	const [busy, setBusy] = useState(false);
@@ -149,6 +151,15 @@ export function Composer({ pending, onSend, onStop, skills, prompts = [] }: Comp
 		setNotice(null);
 	};
 
+	/** 生成中插话：把当前文字送进本轮，不清空技能菜单状态之外的东西。 */
+	const interject = () => {
+		const trimmed = text.trim();
+		if (!trimmed || !pending || busy || !onInterject) return;
+		onInterject(trimmed);
+		setText("");
+		setNotice(null);
+	};
+
 	const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
 		// 技能菜单打开时，方向键/回车/Tab 归菜单用
 		if (menuOpen) {
@@ -176,7 +187,9 @@ export function Composer({ pending, onSend, onStop, skills, prompts = [] }: Comp
 		// Enter 发送，Shift+Enter 换行；输入法选字确认的 Enter 不发送
 		if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
 			event.preventDefault();
-			submit();
+			// 生成中且有内容 → 插话；否则按发送/忽略
+			if (pending && text.trim() && onInterject) interject();
+			else submit();
 		}
 	};
 
@@ -325,10 +338,24 @@ export function Composer({ pending, onSend, onStop, skills, prompts = [] }: Comp
 						}
 					}}
 					rows={1}
-					placeholder={pending ? "等待回复中…" : "输入消息，/ 调用技能或模板，Enter 发送"}
+					placeholder={
+						pending ? (onInterject ? "生成中：输入内容可插话，Enter 插入本轮" : "等待回复中…") : "输入消息，/ 调用技能或模板，Enter 发送"
+					}
 					aria-label="消息输入框"
 					className="min-h-[44px] flex-1 resize-none rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-[16px] leading-relaxed text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-sky-500/70 focus:ring-1 focus:ring-sky-500/40"
 				/>
+				{pending && onInterject && text.trim() && (
+					<button
+						type="button"
+						onClick={interject}
+						disabled={busy}
+						aria-label="插话到当前这轮"
+						title="插话：模型会在下一次工具调用后看到（不中断当前这轮）"
+						className="h-[44px] shrink-0 rounded-xl bg-amber-600 px-4 text-sm font-medium text-white transition-colors hover:bg-amber-500 disabled:opacity-40"
+					>
+						插话
+					</button>
+				)}
 				{pending ? (
 					<button
 						type="button"

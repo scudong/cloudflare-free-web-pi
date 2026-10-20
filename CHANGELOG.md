@@ -2,6 +2,13 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-20（修复 codemode 回归）
+
+### 修：审批包装漏传第三个参数导致 codemode 报 abortSignal 错误（v0.33.1）
+- 原因：`withApproval()` 只转发了 `(args, api)`，而工具 `execute` 的第三个参数是调用上下文（含 `abortSignal`），codemode 在初始化时读它 → `Cannot read properties of undefined (reading 'abortSignal')`
+- 修复：包装层改为 `(...rest)` 原样转发全部参数
+- 加上回归验证：本地实测 codemode `123*456 = 56088`
+
 ## 2026-10-20（工具审批）
 
 ### read / write / exec 三档审批 + 逐工具覆盖（v0.33.0）

@@ -334,14 +334,17 @@ function recordApproval(sessionId: string, tool: string, category: ApprovalCateg
 }
 
 /** 给工具套上审批闸门：放行 / 询问（无许可时记一条待审批并让模型等待）/ 禁止。 */
-function withApproval<T extends { name: string; execute?: (args: never, api: never) => unknown }>(tool: T): T {
+function withApproval<T extends { name: string; execute?: (...args: never[]) => unknown }>(tool: T): T {
 	const original = tool.execute;
 	if (typeof original !== "function") return tool;
 	return {
 		...tool,
-		execute: async (args: never, api: never) => {
+		// 必须把 execute 的全部参数（args, api, context）原样转发：codemode 等工具依赖第三个 context.abortSignal
+		execute: async (...rest: never[]) => {
 			const policy = toolPolicy(tool.name);
-			const run = () => (original as (a: never, b: never) => unknown)(args, api);
+			const run = () => (original as (...a: never[]) => unknown)(...rest);
+			const args = rest[0];
+			const api = rest[1];
 			if (policy === "allow") return run();
 			const sid = String((api as unknown as { conversationId?: unknown })?.conversationId ?? "1");
 			if (isHiddenSession(sid)) return run();
@@ -1510,6 +1513,21 @@ export class SpikeAgent extends DurableObject {
 		return out;
 	}
 
+	/**
+	 * 生成中插话（v0.34.0）：把消息以 steer 方式提交，模型在当前这轮的下一个边界
+	 * （通常是下一次工具调用之后）就会看到；会话空闲时等同普通发送。
+	 */
+	async interject(message: string, sessionId?: string): Promise<{ ok: true; id: string }> {
+		const text = message.trim();
+		if (!text) throw new Error("插话内容不能为空");
+		const harness = await this.open();
+		const conversation = await this.conversationFor(harness, sessionId);
+		const submission = await (conversation as unknown as {
+			submit(draft: unknown, c: unknown): Promise<{ id: unknown }>;
+		}).submit({ type: "input", content: userContent(text, undefined), whenBusy: "steer" }, ctx);
+		return { ok: true, id: String(submission.id) };
+	}
+
 	/** 真正中止服务端生成（v0.19.0）：撤回排队输入并等待会话空闲。 */
 	async abort(sessionId?: string): Promise<{ ok: true }> {
 		const harness = await this.open();
@@ -2479,6 +2497,17 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 						{ key: "protocol", label: "协议接入", items: protocol },
 					],
 				});
+			}
+			/* ---- 生成中插话（v0.34.0） ---- */
+			if (url.pathname === "/interject" && request.method === "POST") {
+				const body = (await request.json().catch(() => ({}))) as { sessionId?: string; message?: string };
+				const message = String(body.message ?? "").trim();
+				if (!message) return Response.json({ ok: false, error: "插话内容不能为空" }, { status: 400 });
+				try {
+					return Response.json(await this.interject(message, body.sessionId));
+				} catch (err) {
+					return Response.json({ ok: false, error: String(err).slice(0, 200) }, { status: 500 });
+				}
 			}
 			/* ---- 工具审批（v0.33.0） ---- */
 			if (url.pathname === "/approvals" && request.method === "GET") {
