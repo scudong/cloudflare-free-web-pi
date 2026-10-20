@@ -80,6 +80,8 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	sql.exec(`CREATE TABLE IF NOT EXISTS rules (name TEXT PRIMARY KEY, content TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`);
 	// 目标模式（v0.31.0）：一个会话一个目标，active 时按 token 预算与轮次自动续转
 	sql.exec(`CREATE TABLE IF NOT EXISTS goals (session_id TEXT PRIMARY KEY, objective TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', token_budget INTEGER NOT NULL DEFAULT 200000, baseline_tokens INTEGER NOT NULL DEFAULT 0, tokens_used INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0, max_turns INTEGER NOT NULL DEFAULT 12, summary TEXT NOT NULL DEFAULT '', next_run_at INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	// 自定义工具（v0.36.0）：用户贴一段 JS，沙箱执行后成为模型可调用的工具
+	sql.exec(`CREATE TABLE IF NOT EXISTS custom_tools (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', parameters TEXT NOT NULL DEFAULT '{}', code TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`);
 	// 工具审批（v0.33.0）：待审批请求 + 已授予的放行许可
 	sql.exec(`CREATE TABLE IF NOT EXISTS approvals (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool TEXT NOT NULL, category TEXT NOT NULL, args TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, decided_at TEXT)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS approval_grants (session_id TEXT NOT NULL, tool TEXT NOT NULL, uses INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, PRIMARY KEY (session_id, tool))`);
@@ -259,9 +261,13 @@ const TOOL_CATEGORY: Record<string, ApprovalCategory> = {
 
 const APPROVAL_LABEL: Record<ApprovalCategory, string> = { read: "读取", write: "写入", exec: "执行" };
 
+/** 当前已加载的自定义工具名（构建扩展时刷新），统一按 exec 级处理。 */
+const customToolNames = new Set<string>();
+
 function toolCategory(name: string): ApprovalCategory {
 	const known = TOOL_CATEGORY[name];
 	if (known) return known;
+	if (customToolNames.has(name)) return "exec";
 	if (name.startsWith("mcp__")) return "write";
 	return "read";
 }
@@ -369,6 +375,94 @@ function withApproval<T extends { name: string; execute?: (...args: never[]) => 
 			};
 		},
 	} as T;
+}
+
+
+/* ---------------- 自定义工具（v0.36.0）：用户 JS → 沙箱工具 ---------------- */
+
+/** 合法工具名：字母开头，字母数字下划线。 */
+const CUSTOM_TOOL_NAME = /^[a-zA-Z][a-zA-Z0-9_]{1,40}$/;
+/** 保留名：不能覆盖内置工具。 */
+const RESERVED_TOOL_NAMES = new Set([
+	"now", "remember", "recall", "list_skills", "load_skill", "read_file", "list_files", "write_file",
+	"update_plan", "dispatch_tasks", "web_search", "web_fetch_page", "http_fetch", "tool_search",
+	"codemode", "set_goal", "complete_goal", "report_goal",
+]);
+const CUSTOM_TOOL_CODE_MAX = 8000;
+
+/** 共享的 QuickJS 沙箱：每次 execute 起独立 VM，自定义工具之间互不影响。 */
+let customSandbox: ReturnType<typeof createInlineCodemodeSandbox> | null = null;
+function sandbox(): ReturnType<typeof createInlineCodemodeSandbox> {
+	customSandbox ??= createInlineCodemodeSandbox({ memoryLimitBytes: 32 * 1024 * 1024, timeoutMs: 15_000 });
+	return customSandbox;
+}
+
+type CustomToolRow = { name: string; description: string; parameters: string; code: string };
+
+function listCustomToolRows(): CustomToolRow[] {
+	try {
+		return sqlFacade!
+			.exec("SELECT name, description, parameters, code FROM custom_tools WHERE enabled = 1 ORDER BY name")
+			.toArray() as CustomToolRow[];
+	} catch {
+		return [];
+	}
+}
+
+/** 把用户代码包成函数体执行：`args` 是入参，返回值即工具结果。 */
+async function runCustomTool(code: string, args: unknown): Promise<{ ok: boolean; text: string }> {
+	const source = `async function __custom_tool(args) {\n${code}\n}\nreturn await __custom_tool(load("args"));`;
+	try {
+		const result = await sandbox().execute(source, { store: { args: args ?? {} }, timeoutMs: 15_000 });
+		if (!result.ok) {
+			const detail = (result.error as { message?: unknown } | undefined)?.message;
+			return { ok: false, text: `执行失败：${String(detail ?? JSON.stringify(result.error)).slice(0, 400)}` };
+		}
+		const value = result.value;
+		const text =
+			value === undefined || value === null
+				? "(无返回值)"
+				: typeof value === "string"
+					? value
+					: JSON.stringify(value);
+		return { ok: true, text: text.slice(0, 8000) };
+	} catch (err) {
+		return { ok: false, text: `执行异常：${String(err).slice(0, 300)}` };
+	}
+}
+
+/** 从 custom_tools 表构建扩展；没有启用的工具时返回 null。 */
+function buildCustomToolsExtension(sql: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } }) {
+	const rows = (() => {
+		try {
+			return sql.exec("SELECT name, description, parameters, code FROM custom_tools WHERE enabled = 1 ORDER BY name").toArray() as CustomToolRow[];
+		} catch {
+			return [];
+		}
+	})();
+	customToolNames.clear();
+	const tools = rows.map((row) => {
+		customToolNames.add(row.name);
+		let parameters: object = { type: "object", properties: {} };
+		try {
+			const parsed = JSON.parse(row.parameters) as { type?: unknown };
+			if (parsed && typeof parsed === "object" && parsed.type === "object") parameters = parsed;
+		} catch {
+			// 保持默认空 schema
+		}
+		return withApproval(
+			defineTool({
+				name: row.name,
+				description: `${row.description || row.name}\n（自定义工具：在 QuickJS 沙箱里执行用户提供的 JavaScript，入参是 args 对象，返回值即结果）`.slice(0, 400),
+				parameters: Type.Unsafe(parameters as never),
+				execute: async (args: unknown) => {
+					const r = await runCustomTool(row.code, args);
+					return { output: [{ type: "text", text: r.text }], ...(r.ok ? {} : { isError: true }) };
+				},
+			}) as never,
+		);
+	});
+	return defineExtension({ name: "custom-tools", tools: tools as never });
 }
 
 /* ---------------- 提示模板与规则（v0.31.0） ---------------- */
@@ -1141,6 +1235,8 @@ export class SpikeAgent extends DurableObject {
 	private activeChats = new Set<string>();
 	/** MCP 扩展：构建一次后常驻，避免每轮重连造成工具列表抖动。 */
 	private mcpExt: { name: string; tools?: unknown[] } | null = null;
+	/** 自定义工具扩展（v0.36.0）：增删后重建并重新 install。 */
+	private customExt: { name: string; tools?: unknown[] } | null = null;
 	/** 注册表引用：MCP 扩展在运行时安装（install 按名替换）。 */
 	private registryRef: { install(ext: unknown): void; snapshot(): { installed(): readonly { name: string }[] } } | null = null;
 	private storageRef: { scanConversations(q: object, limit: number, cursor: undefined, context: unknown): Promise<unknown> } | null = null;
@@ -1170,6 +1266,9 @@ export class SpikeAgent extends DurableObject {
 			// MCP 扩展在表就绪后构建并安装；之后由 /api/mcp 变更时重建。
 			this.mcpExt = (await buildMcpExtension(sqlFacade)) as never;
 				if (this.mcpExt) registry.install(this.mcpExt);
+			// 自定义工具（v0.36.0）：同样必须在 Harness.open 之前 install
+			this.customExt = buildCustomToolsExtension(sqlFacade!) as never;
+			if (this.customExt) registry.install(this.customExt as never);
 			this.harness = await Harness.open(storage, { models, registry, settings: { compaction: compactionSettings() } }, ctx);
 			harnessRef = this.harness as never;
 			this.harness.resume();
@@ -1205,15 +1304,12 @@ export class SpikeAgent extends DurableObject {
 		const inv = this.skillInvocation(message);
 		const effectiveMessage = inv ? inv.rest || `请按技能「${inv.name}」执行。` : message;
 		// 会话首次创建后 agent 选择会固化在 pi.agent 文档里；幂等重设，保证新扩展开关对老会话也生效。
-		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
 		await root.configure(
 			{
 				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 				// 思考档位（v0.22.0）：off 时不产生 thinking 事件，前端自然不显示思考块。
 				thinkingLevel: currentThinkingLevel(),
-				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
-					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
-					: [spikeExtension, codemodeExtension, toolSearchExtension],
+				extensions: this.agentExtensions() as never,
 				instructions: this.buildInstructions(inv, sessionId),
 			},
 			ctx,
@@ -1295,10 +1391,20 @@ export class SpikeAgent extends DurableObject {
 		}
 	}
 
+	/** 本轮要装的扩展：内置 + MCP + 自定义工具（后两者可为空）。 */
+	private agentExtensions(): unknown[] {
+		const list: unknown[] = [spikeExtension, codemodeExtension, toolSearchExtension];
+		const mcp = this.mcpExt as { tools?: unknown[] } | null;
+		if (mcp && (mcp.tools?.length ?? 0) > 0) list.push(mcp);
+		const custom = this.customExt as { tools?: unknown[] } | null;
+		if (custom && (custom.tools?.length ?? 0) > 0) list.push(custom);
+		return list;
+	}
+
 	private async conversationFor(harness: Awaited<ReturnType<typeof this.open>>, sessionId?: string) {
 		const agentChange = {
 			model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
-			extensions: [spikeExtension, codemodeExtension],
+			extensions: this.agentExtensions() as never,
 		};
 		if (sessionId) {
 			const numeric = Number(sessionId);
@@ -1316,7 +1422,7 @@ export class SpikeAgent extends DurableObject {
 		const conversation = await harness.createConversation(
 			{
 				ownership: { kind: "ownerless" },
-				agent: { model: { provider: this.providerId(), modelId: this.defaultModelId() }, extensions: [spikeExtension, codemodeExtension] },
+				agent: { model: { provider: this.providerId(), modelId: this.defaultModelId() }, extensions: this.agentExtensions() as never },
 			},
 			ctx,
 		);
@@ -1410,6 +1516,7 @@ export class SpikeAgent extends DurableObject {
 	/** 组装本轮 instructions：基础规则 + 技能索引 + 可选显式技能正文 + 进行中的目标。 */
 	private buildInstructions(inv: { name: string; content: string } | null, sessionId?: string): string {
 		const base =
+			"你在 pi-harness（GitHub: scudong/pi-harness）里运行：一个部署在 Cloudflare Workers 上的 pi-durable harness。GitHub 上另有同名项目（如 wangmiaozero/pi-harness），被问到本项目时以 scudong/pi-harness 为准，不要混为一谈。\n" +
 			"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。";
 		const withSkills = this.instructionsWithSkills(base);
 		const goal = sessionId ? readGoalRow(sessionId) : null;
@@ -2054,14 +2161,11 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 		const root = await this.conversationFor(harness, sessionId);
 		const inv = this.skillInvocation(message);
 		const effectiveMessage = inv ? inv.rest || `请按技能「${inv.name}」执行。` : message;
-		const mcpExt = this.mcpExt as { name: string; tools?: unknown[] } | null;
 		await root.configure(
 			{
 				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 				thinkingLevel: currentThinkingLevel(),
-				extensions: mcpExt && (mcpExt.tools?.length ?? 0) > 0
-					? [spikeExtension, codemodeExtension, toolSearchExtension, mcpExt as never]
-					: [spikeExtension, codemodeExtension, toolSearchExtension],
+				extensions: this.agentExtensions() as never,
 				instructions: this.buildInstructions(inv, sessionId),
 			},
 			ctx,
@@ -2248,7 +2352,8 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				const root = await harness.root(ctx);
 				const mcpExtDbg = await buildMcpExtension(sqlFacade!);
 				if (mcpExtDbg && this.registryRef) this.registryRef.install(mcpExtDbg);
-				await root.configure({ extensions: mcpExtDbg ? [spikeExtension, codemodeExtension, mcpExtDbg] : [spikeExtension, codemodeExtension] }, ctx);
+				if (!this.customExt) this.customExt = buildCustomToolsExtension(sqlFacade!) as never;
+				await root.configure({ extensions: this.agentExtensions() as never }, ctx);
 				const agent = await root.agent(ctx);
 				const a = agent as unknown as {
 					tools?: readonly { name?: string }[];
@@ -2265,6 +2370,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 					extensions: names(a.extensions),
 					sections: (a.sections ?? []).map((x) => x.key),
 					mcpToolCount: mcpExtDbg ? (mcpExtDbg.tools?.length ?? 0) : 0,
+					customToolCount: (this.customExt as { tools?: unknown[] } | null)?.tools?.length ?? 0,
 					installed: this.registryRef?.snapshot().installed().map((e) => e.name) ?? null,
 				});
 			}
@@ -2554,6 +2660,64 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 					],
 				});
 			}
+			/* ---- 自定义工具（v0.36.0） ---- */
+			if (url.pathname === "/custom-tools" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const rows = sqlFacade!
+					.exec("SELECT name, description, parameters, code, enabled, created_at FROM custom_tools ORDER BY created_at DESC")
+					.toArray();
+				return Response.json({ tools: rows });
+			}
+			if (url.pathname === "/custom-tools" && request.method === "POST") {
+				ensureTables(sqlFacade!);
+				const body = (await request.json().catch(() => ({}))) as {
+					name?: string;
+					description?: string;
+					parameters?: string;
+					code?: string;
+				};
+				const name = String(body.name ?? "").trim();
+				const code = String(body.code ?? "").trim();
+				if (!CUSTOM_TOOL_NAME.test(name)) {
+					return Response.json({ ok: false, error: "工具名只能字母开头，含字母数字下划线，2–41 字符" }, { status: 400 });
+				}
+				if (RESERVED_TOOL_NAMES.has(name)) {
+					return Response.json({ ok: false, error: `「${name}」是内置工具名，换一个` }, { status: 400 });
+				}
+				if (!code) return Response.json({ ok: false, error: "代码不能为空" }, { status: 400 });
+				if (code.length > CUSTOM_TOOL_CODE_MAX) {
+					return Response.json({ ok: false, error: `代码最长 ${CUSTOM_TOOL_CODE_MAX} 字符` }, { status: 400 });
+				}
+				let parameters = "{\"type\":\"object\",\"properties\":{}}";
+				if (body.parameters && String(body.parameters).trim()) {
+					try {
+						const parsed = JSON.parse(String(body.parameters)) as { type?: unknown };
+						if (!parsed || typeof parsed !== "object" || parsed.type !== "object") {
+							return Response.json({ ok: false, error: "参数 schema 必须是 {\"type\":\"object\", ...} 的 JSON" }, { status: 400 });
+						}
+						parameters = JSON.stringify(parsed);
+					} catch {
+						return Response.json({ ok: false, error: "参数 schema 不是合法 JSON" }, { status: 400 });
+					}
+				}
+				sqlFacade!.exec(
+					`INSERT INTO custom_tools (name, description, parameters, code, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)
+					 ON CONFLICT(name) DO UPDATE SET description = excluded.description, parameters = excluded.parameters, code = excluded.code, enabled = 1`,
+					name, String(body.description ?? "").trim().slice(0, 200), parameters, code, new Date().toISOString(),
+				);
+				this.customExt = buildCustomToolsExtension(sqlFacade!) as never;
+				if (this.registryRef) this.registryRef.install(this.customExt as never);
+				return Response.json({ ok: true, name, tools: (this.customExt as { tools?: unknown[] } | null)?.tools?.length ?? 0 });
+			}
+			if (url.pathname === "/custom-tools" && request.method === "DELETE") {
+				ensureTables(sqlFacade!);
+				const name = url.searchParams.get("name") ?? "";
+				if (!name) return Response.json({ ok: false, error: "缺少 name" }, { status: 400 });
+				sqlFacade!.exec("DELETE FROM custom_tools WHERE name = ?", name);
+				this.customExt = buildCustomToolsExtension(sqlFacade!) as never;
+				if (this.registryRef) this.registryRef.install(this.customExt as never);
+				return Response.json({ ok: true, tools: (this.customExt as { tools?: unknown[] } | null)?.tools?.length ?? 0 });
+			}
 			/* ---- pi 内核版本（v0.35.0）：当前声明版本 + npm 最新版本（缓存 6 小时） ---- */
 			if (url.pathname === "/kernel" && request.method === "GET") {
 				ensureTables(sqlFacade!);
@@ -2652,10 +2816,11 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				return Response.json({ ok: true, id, action, tool: row.tool, resume });
 			}
 			if (url.pathname === "/tools" && request.method === "GET") {
+				await this.open();
 				ensureTables(sqlFacade!);
 				const names = new Set<string>();
 				// 内置扩展（spike / codemode / tool-search）+ 已连接的 MCP 工具
-				for (const ext of [spikeExtension, codemodeExtension, toolSearchExtension, this.mcpExt] as unknown as {
+				for (const ext of [spikeExtension, codemodeExtension, toolSearchExtension, this.mcpExt, this.customExt] as unknown as {
 					tools?: { name?: string }[];
 				}[]) {
 					for (const tool of ext?.tools ?? []) if (tool.name) names.add(tool.name);

@@ -2,6 +2,22 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-20（自定义工具 + 项目身份）
+
+### 用户贴 JS 即成为工具（v0.36.0）
+- **`custom_tools` 表**：工具名 / 描述 / 参数 JSON Schema / 代码；`GET/POST/DELETE /api/custom-tools`
+- **执行在 QuickJS 沙箱**（复用 codemode 的内联沙箱，32 MB 内存、15 秒超时）：代码是函数体，`args` 是入参，返回值即工具结果；返回值自动 JSON 序列化
+- **注册时机**：与 MCP 一样在 `Harness.open` 之前构建并 `registry.install`，每轮 `configure()` 带上 → 新工具对已有会话也生效
+- **安全**：自定义工具归 **exec** 级，默认跟随工具审批策略；参数 schema 必须是 `{"type":"object"}`；工具名不能覆盖内置工具
+- **界面**：能力面板新增「🧩 自定义工具」折叠区，含名称/描述/schema/代码表单与删除
+- 实测：新增 `word_count` → 模型调用 → 返回 `{"chars":15,"words":3}`
+
+### 项目身份写进 instructions
+- 系统提示里明确「你在 scudong/pi-harness」，避免与 GitHub 上同名项目（如 wangmiaozero/pi-harness）混淆
+
+### 金标
+- 新增 5 条（非法名 / 内置名 / schema 非对象 / 空代码 / 增删与分级），总计 **85 条**
+
 ## 2026-10-20（pi 内核版本管理）
 
 ### 内核版本可见 + 手动/自动升级 + 兼容性门禁（v0.35.0）

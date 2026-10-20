@@ -395,6 +395,52 @@ describe("生成中插话", () => {
 	});
 });
 
+describe("自定义工具", () => {
+	it("非法工具名被拒绝", async () => {
+		const bad = await post("/api/custom-tools", { name: "1bad", code: "return 1" });
+		expect(bad.status).toBe(400);
+	});
+
+	it("内置工具名被拒绝", async () => {
+		const bad = await post("/api/custom-tools", { name: "codemode", code: "return 1" });
+		expect(bad.status).toBe(400);
+		expect(bad.json.error).toContain("内置");
+	});
+
+	it("参数 schema 必须是对象", async () => {
+		const bad = await post("/api/custom-tools", { name: "bad_schema", parameters: "[1,2]", code: "return 1" });
+		expect(bad.status).toBe(400);
+	});
+
+	it("空代码被拒绝", async () => {
+		const bad = await post("/api/custom-tools", { name: "no_code", code: "   " });
+		expect(bad.status).toBe(400);
+	});
+
+	it("新增 → 列表 → 工具清单可见（exec 级）→ 删除", async () => {
+		const created = await post("/api/custom-tools", {
+			name: "test_tool",
+			description: "测试用",
+			parameters: JSON.stringify({ type: "object", properties: { x: { type: "number" } } }),
+			code: "return { doubled: Number(args.x ?? 0) * 2 };",
+		});
+		expect(created.json.ok).toBe(true);
+		expect(created.json.tools).toBe(1);
+
+		const list = await api("/api/custom-tools");
+		expect(list.json.tools.map((t: { name: string }) => t.name)).toContain("test_tool");
+
+		const tools = await api("/api/tools");
+		const entry = tools.json.tools.find((t: { name: string }) => t.name === "test_tool");
+		expect(entry).toMatchObject({ category: "exec" });
+
+		const del = await api("/api/custom-tools?name=test_tool", { method: "DELETE" });
+		expect(del.json.ok).toBe(true);
+		const after = await api("/api/custom-tools");
+		expect(after.json.tools.map((t: { name: string }) => t.name)).not.toContain("test_tool");
+	});
+});
+
 describe("工具审批", () => {
 	it("工具清单带分级，默认全部放行", async () => {
 		const { json } = await api("/api/tools");

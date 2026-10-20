@@ -252,6 +252,16 @@ export const api = {
 		approvalTools?: Record<string, string>;
 	}) => requestJson<{ ok?: boolean }>("/api/settings", jsonPost(patch)),
 
+	/** 自定义工具（v0.36.0）。 */
+	customTools: () =>
+		requestJson<{ tools?: unknown[] }>("/api/custom-tools"),
+
+	addCustomTool: (body: { name: string; description: string; parameters: string; code: string }) =>
+		requestJson<{ ok?: boolean; name?: string; tools?: number; error?: string }>("/api/custom-tools", jsonPost(body)),
+
+	deleteCustomTool: (name: string) =>
+		requestJson<{ ok?: boolean; tools?: number }>(withQuery("/api/custom-tools", { name }), { method: "DELETE" }),
+
 	/** pi 内核版本（v0.35.0）：当前声明版本 + npm 最新版本。 */
 	kernel: (refresh = false) =>
 		requestJson<{

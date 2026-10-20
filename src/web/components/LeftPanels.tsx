@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { renderMarkdown } from "../lib/rich";
-import type { AutomationInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
+import type { AutomationInfo, CustomToolInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
 
 function PanelHeader({ title, count, onCollapse }: { title: string; count?: number; onCollapse?: () => void }) {
 	return (
@@ -308,6 +308,9 @@ export function SkillPanel({
 	onAddRule,
 	onToggleRule,
 	onDeleteRule,
+	customTools,
+	onAddCustomTool,
+	onDeleteCustomTool,
 	onCollapse,
 }: {
 	items: SkillInfo[];
@@ -324,6 +327,10 @@ export function SkillPanel({
 	onAddRule: (name: string, content: string) => Promise<boolean>;
 	onToggleRule: (name: string, enabled: boolean) => Promise<boolean>;
 	onDeleteRule: (name: string) => Promise<boolean>;
+	/** 自定义工具（v0.36.0）。 */
+	customTools: CustomToolInfo[];
+	onAddCustomTool: (name: string, description: string, parameters: string, code: string) => Promise<boolean>;
+	onDeleteCustomTool: (name: string) => Promise<boolean>;
 	onCollapse?: () => void;
 }) {
 	const [name, setName] = useState("");
@@ -505,6 +512,39 @@ export function SkillPanel({
 					</ul>
 				</div>
 
+				{/* 自定义工具（v0.36.0） */}
+				<details className="border-t border-slate-800/70 p-3">
+					<summary className="cursor-pointer text-xs font-medium text-slate-300">
+						🧩 自定义工具 <span className="tabular-nums text-slate-500">{customTools.length}</span>
+					</summary>
+					<p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+						贴一段 JavaScript：参数从 <code className="rounded bg-slate-800 px-1">args</code> 取，返回值即工具结果。在 QuickJS 沙箱里执行，默认按「执行级」参与审批。
+					</p>
+					<CustomToolForm onAdd={onAddCustomTool} />
+					<ul className="mt-2 space-y-1">
+						{customTools.map((tool) => (
+							<li key={tool.name} className="flex items-start gap-2 rounded-lg bg-slate-800/50 px-2.5 py-1.5">
+								<span className="min-w-0 flex-1">
+									<span className="block truncate font-mono text-[12.5px] text-slate-100">{tool.name}</span>
+									{tool.description && (
+										<span className="block truncate text-[11px] text-slate-500">{tool.description}</span>
+									)}
+								</span>
+								<button
+									type="button"
+									title="删除"
+									aria-label={`删除自定义工具 ${tool.name}`}
+									onClick={() => {
+										if (window.confirm(`删除自定义工具「${tool.name}」？`)) void onDeleteCustomTool(tool.name);
+									}}
+									className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
+								>
+									🗑
+								</button>
+							</li>
+						))}
+					</ul>
+				</details>
 				{/* 提示模板（v0.31.0） */}
 				<details className="border-t border-slate-800/70 p-3">
 					<summary className="cursor-pointer text-xs font-medium text-slate-300">
@@ -580,6 +620,77 @@ export function SkillPanel({
 					</ul>
 				</details>
 			</div>
+		</div>
+	);
+}
+
+/** 新增自定义工具的小表单（v0.36.0）。 */
+function CustomToolForm({ onAdd }: { onAdd: (name: string, description: string, parameters: string, code: string) => Promise<boolean> }) {
+	const [name, setName] = useState("");
+	const [description, setDescription] = useState("");
+	const [parameters, setParameters] = useState("");
+	const [code, setCode] = useState("");
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const submit = () => {
+		if (!name.trim() || !code.trim() || busy) return;
+		setBusy(true);
+		setError(null);
+		void (async () => {
+			const ok = await onAdd(name.trim(), description.trim(), parameters.trim(), code.trim());
+			if (ok) {
+				setName("");
+				setDescription("");
+				setParameters("");
+				setCode("");
+			} else {
+				setError("保存失败：检查工具名、JSON schema 或代码长度。");
+			}
+			setBusy(false);
+		})();
+	};
+
+	return (
+		<div className="mt-2 space-y-1.5">
+			<input
+				value={name}
+				onChange={(e) => setName(e.target.value)}
+				placeholder="工具名（字母开头，如 word_count）"
+				aria-label="自定义工具名"
+				className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-[12px] text-slate-100"
+			/>
+			<input
+				value={description}
+				onChange={(e) => setDescription(e.target.value)}
+				placeholder="一句话说明这个工具做什么"
+				aria-label="自定义工具描述"
+				className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-[12px] text-slate-100"
+			/>
+			<input
+				value={parameters}
+				onChange={(e) => setParameters(e.target.value)}
+				placeholder='参数 schema（可留空）：{"type":"object","properties":{"text":{"type":"string"}}}'
+				aria-label="参数 schema"
+				className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 font-mono text-[11px] text-slate-100"
+			/>
+			<textarea
+				value={code}
+				onChange={(e) => setCode(e.target.value)}
+				rows={4}
+				placeholder={'// args 是入参对象，return 结果\nreturn { length: String(args.text ?? "").length };'}
+				aria-label="自定义工具代码"
+				className="w-full resize-y rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 font-mono text-[11px] text-slate-100"
+			/>
+			{error && <p className="text-[11px] text-rose-300">{error}</p>}
+			<button
+				type="button"
+				onClick={submit}
+				disabled={!name.trim() || !code.trim() || busy}
+				className="rounded-md bg-sky-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-sky-500 disabled:opacity-40"
+			>
+				{busy ? "保存中…" : "添加工具"}
+			</button>
 		</div>
 	);
 }

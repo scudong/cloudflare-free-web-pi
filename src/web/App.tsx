@@ -12,11 +12,11 @@ import { GoalBar, GoalDialog } from "./components/GoalBar";
 import { ApprovalBar } from "./components/ApprovalBar";
 import { api } from "./lib/api";
 import { parseEntries, truncateOneLine } from "./lib/entries";
-import { parseAutomations, parseFiles, parseMemories, parsePrompts, parseRules, parseSessions, parseSkills } from "./lib/collections";
+import { parseAutomations, parseCustomTools, parseFiles, parseMemories, parsePrompts, parseRules, parseSessions, parseSkills } from "./lib/collections";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { ApprovalInfo, AutomationInfo, ChatMessage, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
+import type { ApprovalInfo, AutomationInfo, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -98,6 +98,7 @@ export default function App() {
 	const [skills, setSkills] = useState<SkillInfo[]>([]);
 	// 提示模板与规则（v0.31.0）
 	const [prompts, setPrompts] = useState<PromptInfo[]>([]);
+	const [customTools, setCustomTools] = useState<CustomToolInfo[]>([]);
 	const [rules, setRules] = useState<RuleInfo[]>([]);
 	const [skillsLoading, setSkillsLoading] = useState(true);
 	const [skillsError, setSkillsError] = useState<string | null>(null);
@@ -537,6 +538,30 @@ export default function App() {
 	);
 
 	/** 停止目标的自动续转（保留记录）。 */
+	/** 自定义工具（v0.36.0）：增删后刷新能力面板。 */
+	const handleAddCustomTool = useCallback(
+		async (name: string, description: string, parameters: string, code: string) => {
+			try {
+				await api.addCustomTool({ name, description, parameters, code });
+				setPanelTick((tick) => tick + 1);
+				return true;
+			} catch {
+				return false;
+			}
+		},
+		[],
+	);
+
+	const handleDeleteCustomTool = useCallback(async (name: string) => {
+		try {
+			await api.deleteCustomTool(name);
+			setPanelTick((tick) => tick + 1);
+			return true;
+		} catch {
+			return false;
+		}
+	}, []);
+
 	const handleStopGoal = useCallback(async () => {
 		try {
 			const res = await api.stopGoal(sessionId);
@@ -697,10 +722,11 @@ export default function App() {
 		let alive = true;
 		void (async () => {
 			try {
-				const [p, r] = await Promise.all([api.prompts(), api.rules()]);
+				const [p, r, ct] = await Promise.all([api.prompts(), api.rules(), api.customTools()]);
 				if (!alive) return;
 				setPrompts(parsePrompts(p.prompts));
 				setRules(parseRules(r.rules));
+				setCustomTools(parseCustomTools(ct.tools));
 			} catch {
 				// 接口不可用时保持为空
 			}
@@ -1336,6 +1362,9 @@ export default function App() {
 				onAddRule={handleAddRule}
 				onToggleRule={handleToggleRule}
 				onDeleteRule={handleDeleteRule}
+				customTools={customTools}
+				onAddCustomTool={handleAddCustomTool}
+				onDeleteCustomTool={handleDeleteCustomTool}
 				onCollapse={toggleLeft}
 			/>
 		);

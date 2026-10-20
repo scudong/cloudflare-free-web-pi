@@ -1,4 +1,4 @@
-import type { AutomationInfo, FileInfo, MemoryInfo, PromptInfo, RuleInfo, SessionListItem, SkillInfo } from "../types";
+import type { AutomationInfo, CustomToolInfo, FileInfo, MemoryInfo, PromptInfo, RuleInfo, SessionListItem, SkillInfo } from "../types";
 
 /**
  * Tolerant parsers for panel data (sessions / files / memories).
@@ -122,6 +122,18 @@ export function parsePrompts(raw: unknown): PromptInfo[] {
 		name: pickString(entry, ["name"]) || "未命名模板",
 		description: pickString(entry, ["description"]),
 		content: pickString(entry, ["content"]),
+	}));
+}
+
+/** GET /api/custom-tools → 自定义工具。 */
+export function parseCustomTools(raw: unknown): CustomToolInfo[] {
+	const list = arrayOf(raw, ["tools"]).filter(isObject);
+	return list.map((entry) => ({
+		name: pickString(entry, ["name"]) || "未命名工具",
+		description: pickString(entry, ["description"]),
+		parameters: pickString(entry, ["parameters"]) || '{"type":"object","properties":{}}',
+		code: pickString(entry, ["code"]),
+		createdAt: pickString(entry, ["created_at", "createdAt"]),
 	}));
 }
 

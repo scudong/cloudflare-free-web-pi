@@ -106,6 +106,16 @@ export interface GoalInfo {
 	updatedAt?: string;
 }
 
+/** 自定义工具（v0.36.0）：用户贴的 JS，沙箱执行后成为模型可调用的工具。 */
+export interface CustomToolInfo {
+	name: string;
+	description: string;
+	/** 参数 JSON Schema 字符串。 */
+	parameters: string;
+	code: string;
+	createdAt?: string;
+}
+
 /** 待审批的工具调用（v0.33.0）。 */
 export interface ApprovalInfo {
 	id: number;

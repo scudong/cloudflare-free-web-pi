@@ -115,7 +115,7 @@
 - [x] P2 Context files：项目级可编辑 instructions — **v0.30.0 规则文件**（每轮注入；`@path` 导入未做）
 - [x] P2 流式插话：生成中追加消息进入 inbox — **v0.34.0**（`whenBusy: "steer"`）
 - [x] P3 多 provider：OpenAI/Anthropic 兼容端点配置 — **v0.27.0**（OpenAI 兼容；Anthropic 原生协议未接）
-- [ ] P3 自定义工具：DO 内 JS 工具注册表 — **唯一未做**
+- [x] P3 自定义工具：DO 内 JS 工具注册表 — **v0.36.0**
 
 ### 对照之外新增（本轮追加）
 
