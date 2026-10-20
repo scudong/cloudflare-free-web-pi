@@ -490,7 +490,7 @@ describe("工具注册（防回归）", () => {
 	it("关键工具都已注册给模型", async () => {
 		const { json } = await api("/api/debug/agent");
 		const tools: string[] = json.tools ?? [];
-		for (const name of ["dispatch_tasks", "update_plan", "web_search", "web_fetch_page", "write_file", "codemode", "remember", "recall"]) {
+		for (const name of ["dispatch_tasks", "update_plan", "web_search", "web_fetch_page", "write_file", "codemode", "remember", "recall", "install_skill"]) {
 			expect(tools).toContain(name);
 		}
 		// 目标模式（v0.31.0）

@@ -275,6 +275,7 @@ const TOOL_CATEGORY: Record<string, ApprovalCategory> = {
 	recall: "read",
 	list_skills: "read",
 	load_skill: "read",
+	install_skill: "write",
 	read_file: "read",
 	list_files: "read",
 	web_search: "read",
@@ -449,7 +450,7 @@ function recordQuestion(sessionId: string, payload: AskPayload): number | null {
 const CUSTOM_TOOL_NAME = /^[a-zA-Z][a-zA-Z0-9_]{1,40}$/;
 /** 保留名：不能覆盖内置工具。 */
 const RESERVED_TOOL_NAMES = new Set([
-	"now", "remember", "recall", "list_skills", "load_skill", "read_file", "list_files", "write_file",
+	"now", "remember", "recall", "list_skills", "load_skill", "install_skill", "read_file", "list_files", "write_file",
 	"update_plan", "dispatch_tasks", "web_search", "web_fetch_page", "http_fetch", "tool_search",
 	"codemode", "set_goal", "complete_goal", "report_goal", "ask_user",
 ]);
@@ -767,6 +768,51 @@ const baseSpikeExtension = defineExtension({
 				const name = String((args as { name?: unknown }).name ?? "").trim();
 				const rows = sqlFacade!.exec("SELECT content FROM skills WHERE name = ?", name).toArray() as { content: string }[];
 				return { output: [{ type: "text", text: rows[0]?.content ?? `技能「${name}」不存在，可用 list_skills 查看。` }] };
+			},
+		}),
+		defineTool({
+			name: "install_skill",
+			description: "从 SKILL.md 链接安装技能到当前用户（写操作）：抓取正文、解析 frontmatter、按名称写入或覆盖技能库",
+			parameters: Type.Object({
+				url: Type.String({ description: "SKILL.md 的 http(s) 链接；GitHub blob 链接会自动转 raw" }),
+				name: Type.Optional(Type.String({ description: "覆盖技能名（默认取 frontmatter 的 name）" })),
+			}),
+			execute: async (args) => {
+				const url = normalizeSkillUrl(String((args as { url?: unknown }).url ?? ""));
+				if (!url) return { output: [{ type: "text", text: "需要一个 http(s) 的 SKILL.md 链接。" }] };
+				let text = "";
+				try {
+					const resp = await fetch(url, { headers: { "user-agent": "pi-harness-skill-install" } });
+					if (!resp.ok) return { output: [{ type: "text", text: `抓取失败：HTTP ${resp.status}` }] };
+					text = await resp.text();
+				} catch (err) {
+					return { output: [{ type: "text", text: `抓取失败：${String(err).slice(0, 120)}` }] };
+				}
+				if (!text.trim()) return { output: [{ type: "text", text: "抓取到的内容为空。" }] };
+				const parsed = parseFrontmatter(text);
+				const fallback = (url.split("/").slice(-2, -1)[0] ?? "imported-skill").toLowerCase();
+				const override = String((args as { name?: unknown }).name ?? "").trim();
+				const name = (override || parsed.name || fallback).trim().slice(0, 40);
+				if (!name) return { output: [{ type: "text", text: "技能名为空。" }] };
+				let content = (parsed.body || text).slice(0, 200_000);
+				// 兼容「入口 stub」：本 harness 没有 Skill 工具，改写成 load_skill
+				content = content.replace(
+					/Call the Skill tool with\s+["'“]([^"'”]+)["'”][.。]?/gi,
+					'调用 load_skill("$1") 读取完整流程后再继续。',
+				);
+				const description = (parsed.description || "（未提供描述）").slice(0, 200);
+				sqlFacade!.exec(
+					"INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
+					name, description, content, new Date().toISOString(),
+				);
+				return {
+					output: [
+						{
+							type: "text",
+							text: `技能已安装：${name}。现在可以调用 load_skill("${name}") 读取；下一轮起会出现在技能索引里。`,
+						},
+					],
+				};
 			},
 		}),
 		defineTool({
@@ -2203,6 +2249,7 @@ export class SpikeAgent extends DurableObject {
 			const lines = index.map((s) => `- ${s.name}：${s.description || "（无描述）"}`).join("\n");
 			out = `${out}\n\n可用技能（需要时调用 load_skill 读取完整说明后再执行）：\n${lines}`;
 		}
+		out += "\n安装技能：用户给出 SKILL.md 链接时，直接调用 install_skill({ url }) 安装；不要用 write_file 往工作台复制技能文件，工作台文件不会被注册。";
 		// 网页搜索开启时才在提示词里引导模型使用；关闭时工具会返回开启指引。
 		if (getSetting("web_search", "1") === "1") {
 			out += "\n需要联网查资料时优先用 web_search 搜索、web_fetch_page 抓取正文（比 http_fetch 更干净）。";
