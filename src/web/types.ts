@@ -106,6 +106,22 @@ export interface GoalInfo {
 	updatedAt?: string;
 }
 
+/** ask_user 的一个问题（v0.37.0）。 */
+export interface AskItem {
+	id: string;
+	question: string;
+	options?: { label: string; description?: string; recommended?: boolean }[];
+	allowText?: boolean;
+}
+
+/** 待回答的问题组（v0.37.0）。 */
+export interface AskQuestion {
+	id: number;
+	title?: string;
+	questions: AskItem[];
+	created_at?: string;
+}
+
 /** 自定义工具（v0.36.0）：用户贴的 JS，沙箱执行后成为模型可调用的工具。 */
 export interface CustomToolInfo {
 	name: string;

@@ -395,6 +395,28 @@ describe("生成中插话", () => {
 	});
 });
 
+describe("交互式问答（ask_user）", () => {
+	it("待回答问题默认为空", async () => {
+		const { json } = await api("/api/questions?sessionId=1");
+		expect(Array.isArray(json.questions)).toBe(true);
+	});
+
+	it("缺少问题 id 被拒绝", async () => {
+		const bad = await post("/api/questions", { answers: [] });
+		expect(bad.status).toBe(400);
+	});
+
+	it("不存在的问题返回 404", async () => {
+		const missing = await post("/api/questions", { id: 999999, answers: [{ id: "q1", choice: "a" }] });
+		expect(missing.status).toBe(404);
+	});
+
+	it("ask_user 工具已注册", async () => {
+		const { json } = await api("/api/debug/agent");
+		expect(json.tools).toContain("ask_user");
+	});
+});
+
 describe("自定义工具", () => {
 	it("非法工具名被拒绝", async () => {
 		const bad = await post("/api/custom-tools", { name: "1bad", code: "return 1" });

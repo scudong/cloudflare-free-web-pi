@@ -74,3 +74,4 @@ tests/
 | **生成中插话** | `api/api.test.ts` · 生成中插话 |
 | **pi 内核版本** | `unit/kernel.test.ts` |
 | **自定义工具** | `api/api.test.ts` · 自定义工具 |
+| **交互式问答** | `api/api.test.ts` · 交互式问答 |

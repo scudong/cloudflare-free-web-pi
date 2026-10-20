@@ -80,6 +80,8 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	sql.exec(`CREATE TABLE IF NOT EXISTS rules (name TEXT PRIMARY KEY, content TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`);
 	// 目标模式（v0.31.0）：一个会话一个目标，active 时按 token 预算与轮次自动续转
 	sql.exec(`CREATE TABLE IF NOT EXISTS goals (session_id TEXT PRIMARY KEY, objective TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', token_budget INTEGER NOT NULL DEFAULT 200000, baseline_tokens INTEGER NOT NULL DEFAULT 0, tokens_used INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0, max_turns INTEGER NOT NULL DEFAULT 12, summary TEXT NOT NULL DEFAULT '', next_run_at INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	// 交互式问答（v0.37.0）：ask_user 工具提出的问题，等用户点选后带回模型
+	sql.exec(`CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, answered_at TEXT)`);
 	// 自定义工具（v0.36.0）：用户贴一段 JS，沙箱执行后成为模型可调用的工具
 	sql.exec(`CREATE TABLE IF NOT EXISTS custom_tools (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', parameters TEXT NOT NULL DEFAULT '{}', code TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`);
 	// 工具审批（v0.33.0）：待审批请求 + 已授予的放行许可
@@ -378,6 +380,39 @@ function withApproval<T extends { name: string; execute?: (...args: never[]) => 
 }
 
 
+
+/* ---------------- 交互式问答（v0.37.0）：ask_user ---------------- */
+
+type AskOption = { label: string; description?: string; recommended?: boolean };
+type AskItem = { id: string; question: string; options?: AskOption[]; allowText?: boolean };
+type AskPayload = { title?: string; questions: AskItem[] };
+
+function readPendingQuestion(sessionId: string): { id: number; payload: AskPayload } | null {
+	try {
+		const rows = sqlFacade!
+			.exec("SELECT id, payload FROM questions WHERE session_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1", sessionId)
+			.toArray() as { id: number; payload: string }[];
+		const row = rows[0];
+		if (!row) return null;
+		return { id: row.id, payload: JSON.parse(row.payload) as AskPayload };
+	} catch {
+		return null;
+	}
+}
+
+function recordQuestion(sessionId: string, payload: AskPayload): number | null {
+	try {
+		sqlFacade!.exec(
+			"INSERT INTO questions (session_id, payload, status, created_at) VALUES (?, ?, 'pending', ?)",
+			sessionId, JSON.stringify(payload), new Date().toISOString(),
+		);
+		const rows = sqlFacade!.exec("SELECT last_insert_rowid() AS id").toArray() as { id: number }[];
+		return rows[0]?.id ?? null;
+	} catch {
+		return null;
+	}
+}
+
 /* ---------------- 自定义工具（v0.36.0）：用户 JS → 沙箱工具 ---------------- */
 
 /** 合法工具名：字母开头，字母数字下划线。 */
@@ -386,7 +421,7 @@ const CUSTOM_TOOL_NAME = /^[a-zA-Z][a-zA-Z0-9_]{1,40}$/;
 const RESERVED_TOOL_NAMES = new Set([
 	"now", "remember", "recall", "list_skills", "load_skill", "read_file", "list_files", "write_file",
 	"update_plan", "dispatch_tasks", "web_search", "web_fetch_page", "http_fetch", "tool_search",
-	"codemode", "set_goal", "complete_goal", "report_goal",
+	"codemode", "set_goal", "complete_goal", "report_goal", "ask_user",
 ]);
 const CUSTOM_TOOL_CODE_MAX = 8000;
 
@@ -835,6 +870,73 @@ const baseSpikeExtension = defineExtension({
 				const reason = String((args as { reason?: unknown }).reason ?? "").trim().slice(0, 500) || "未说明";
 				writeGoal(sid, { status: "blocked", summary: reason, next_run_at: 0 });
 				return { output: [{ type: "text", text: `目标已标记为受阻并停止续转：${reason}` }] };
+			},
+		}),
+		defineTool({
+			name: "ask_user",
+			description:
+				"向用户提问并等待回答（渲染成问答卡片，可选项 + 自由输入）。需要用户做决策、补充偏好或确认方向时使用；一次可以问 1–6 个问题，每个问题给出推荐项（recommended: true）。用户回答后你会自动收到答案并继续。普通对话不要用。",
+			parameters: Type.Object({
+				title: Type.Optional(Type.String({ description: "这一轮的问题标题，一句话" })),
+				questions: Type.Array(
+					Type.Object({
+						id: Type.String({ description: "问题 id，如 q1" }),
+						question: Type.String({ description: "问题正文" }),
+						options: Type.Optional(
+							Type.Array(
+								Type.Object({
+									label: Type.String({ description: "选项文案（简短）" }),
+									description: Type.Optional(Type.String({ description: "选项补充说明" })),
+									recommended: Type.Optional(Type.Boolean({ description: "是否推荐项" })),
+								}),
+								{ description: "可选项；留空则只收自由文本" },
+							),
+						),
+						allowText: Type.Optional(Type.Boolean({ description: "是否允许自由输入（默认 true）" })),
+					}),
+					{ description: "问题列表，1–6 个", minItems: 1, maxItems: 6 },
+				),
+			}),
+			execute: async (args, api) => {
+				const a = args as { title?: unknown; questions?: unknown };
+				const list = Array.isArray(a.questions) ? a.questions : [];
+				const questions: AskItem[] = [];
+				for (const raw of list.slice(0, 6)) {
+					const o = (raw ?? {}) as { id?: unknown; question?: unknown; options?: unknown; allowText?: unknown };
+					const question = String(o.question ?? "").trim();
+					if (!question) continue;
+					const options = (Array.isArray(o.options) ? o.options : [])
+						.slice(0, 8)
+						.map((item) => {
+							const opt = (item ?? {}) as { label?: unknown; description?: unknown; recommended?: unknown };
+							const label = String(opt.label ?? "").trim();
+							if (!label) return null;
+							return {
+								label: label.slice(0, 80),
+								...(opt.description ? { description: String(opt.description).slice(0, 200) } : {}),
+								...(opt.recommended === true ? { recommended: true } : {}),
+							};
+						})
+						.filter((opt): opt is AskOption => opt !== null);
+					questions.push({
+						id: String(o.id ?? `q${questions.length + 1}`).slice(0, 20),
+						question: question.slice(0, 500),
+						...(options.length ? { options } : {}),
+						allowText: o.allowText !== false,
+					});
+				}
+				if (!questions.length) return { output: [{ type: "text", text: "没有有效问题，未提交。" }] };
+				const sid = String(api.conversationId);
+				const id = recordQuestion(sid, {
+					...(a.title ? { title: String(a.title).slice(0, 120) } : {}),
+					questions,
+				});
+				return {
+					output: [{
+						type: "text",
+						text: `已向用户提出 ${questions.length} 个问题${id ? `（#${id}）` : ""}，正在等待回答。不要重复提问，也不要自己替用户作答；用户回答后你会收到答案。`,
+					}],
+				};
 			},
 		}),
 		defineTool({
@@ -1670,6 +1772,9 @@ export class SpikeAgent extends DurableObject {
 		if (rules.length) {
 			out += "\n\n## 项目规则（必须遵守）\n" + rules.map((r) => `- ${r}`).join("\n");
 		}
+		// 交互式问答（v0.37.0）：需要用户决策时用卡片而不是纯文本罗列
+		out +=
+			"\n需要用户在方案之间做选择、或缺少关键偏好无法继续时，用 ask_user 提结构化问题（一次 1–6 题，每题给 recommended 选项），比在正文里罗列问题更好用；能从环境查到的信息不要问用户。";
 		// 子代理（v0.29.0）：可并行的独立子任务交给它们
 		out +=
 			"\n当有 2–4 个**互不依赖**的子任务（如分别调研几个对象再做对比）时，用 dispatch_tasks 并行分派给子代理，比串行逐个做更快；子代理看不到主对话，每个 prompt 要自包含。";
@@ -2132,6 +2237,11 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 	private async goalTick(sessionId: string): Promise<void> {
 		const row = readGoalRow(sessionId);
 		if (!row || row.status !== "active") return;
+		// 用户还没回答问题：暂停续转（v0.37.0）
+		if (readPendingQuestion(sessionId)) {
+			writeGoal(sessionId, { next_run_at: 0 });
+			return;
+		}
 		writeGoal(sessionId, { next_run_at: 0 });
 		const harness = await this.open();
 		const conversation = await this.conversationFor(harness, sessionId);
@@ -2254,6 +2364,13 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 					if (!updated) break;
 					if (updated.status !== "active") {
 						await send("goal", { goal: goalInfo(updated), finished: true });
+						break;
+					}
+					// 有待回答的问题：暂停自动续转，等用户答完再说（v0.37.0）
+					const pendingQuestion = readPendingQuestion(sid);
+					if (pendingQuestion) {
+						writeGoal(sid, { next_run_at: 0 });
+						await send("goal", { goal: goalInfo(updated), paused: true, questionId: pendingQuestion.id });
 						break;
 					}
 					if (round >= GOAL_ROUNDS_PER_REQUEST) {
@@ -2659,6 +2776,46 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 						{ key: "protocol", label: "协议接入", items: protocol },
 					],
 				});
+			}
+			/* ---- 交互式问答（v0.37.0） ---- */
+			if (url.pathname === "/questions" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const sid = url.searchParams.get("sessionId") ?? "1";
+				const rows = sqlFacade!
+					.exec("SELECT id, payload, created_at FROM questions WHERE session_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 5", sid)
+					.toArray() as { id: number; payload: string; created_at: string }[];
+				return Response.json({
+					questions: rows.map((row) => ({ id: row.id, created_at: row.created_at, ...(JSON.parse(row.payload) as AskPayload) })),
+				});
+			}
+			if (url.pathname === "/questions" && request.method === "POST") {
+				ensureTables(sqlFacade!);
+				const body = (await request.json().catch(() => ({}))) as {
+					id?: number;
+					answers?: { id?: string; choice?: string; text?: string }[];
+				};
+				const id = Math.floor(Number(body.id));
+				if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false, error: "缺少问题 id" }, { status: 400 });
+				const rows = sqlFacade!.exec("SELECT id, session_id, payload, status FROM questions WHERE id = ?", id).toArray() as {
+					id: number; session_id: string; payload: string; status: string;
+				}[];
+				const row = rows[0];
+				if (!row) return Response.json({ ok: false, error: "问题不存在" }, { status: 404 });
+				if (row.status !== "pending") return Response.json({ ok: false, error: "该问题已回答" }, { status: 409 });
+				const payload = JSON.parse(row.payload) as AskPayload;
+				const given = Array.isArray(body.answers) ? body.answers : [];
+				const lines: string[] = [];
+				for (const q of payload.questions) {
+					const hit = given.find((a) => String(a.id ?? "") === q.id);
+					const choice = String(hit?.choice ?? "").trim();
+					const text = String(hit?.text ?? "").trim();
+					const answer = text || choice || "（未回答）";
+					lines.push(`- ${q.id}「${q.question}」：${answer}`);
+				}
+				if (!lines.length) return Response.json({ ok: false, error: "没有有效回答" }, { status: 400 });
+				sqlFacade!.exec("UPDATE questions SET status = 'answered', answered_at = ? WHERE id = ?", new Date().toISOString(), id);
+				const resume = `用户回答了你的问题${payload.title ? `（${payload.title}）` : ""}：\n${lines.join("\n")}\n\n请据此继续。`;
+				return Response.json({ ok: true, id, resume });
 			}
 			/* ---- 自定义工具（v0.36.0） ---- */
 			if (url.pathname === "/custom-tools" && request.method === "GET") {

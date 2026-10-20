@@ -252,6 +252,13 @@ export const api = {
 		approvalTools?: Record<string, string>;
 	}) => requestJson<{ ok?: boolean }>("/api/settings", jsonPost(patch)),
 
+	/** 待回答的问题（v0.37.0）。 */
+	questions: (sessionId: string) =>
+		requestJson<{ questions?: unknown[] }>(withQuery("/api/questions", { sessionId })),
+
+	answerQuestion: (id: number, answers: { id: string; choice?: string; text?: string }[]) =>
+		requestJson<{ ok?: boolean; id?: number; resume?: string; error?: string }>("/api/questions", jsonPost({ id, answers })),
+
 	/** 自定义工具（v0.36.0）。 */
 	customTools: () =>
 		requestJson<{ tools?: unknown[] }>("/api/custom-tools"),

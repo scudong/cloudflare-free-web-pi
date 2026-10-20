@@ -10,13 +10,14 @@ import { AutomationPanel, McpPanel, SkillPanel } from "./components/LeftPanels";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { GoalBar, GoalDialog } from "./components/GoalBar";
 import { ApprovalBar } from "./components/ApprovalBar";
+import { AskUserCard } from "./components/AskUserCard";
 import { api } from "./lib/api";
 import { parseEntries, truncateOneLine } from "./lib/entries";
 import { parseAutomations, parseCustomTools, parseFiles, parseMemories, parsePrompts, parseRules, parseSessions, parseSkills } from "./lib/collections";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { ApprovalInfo, AutomationInfo, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
+import type { ApprovalInfo, AskQuestion, AutomationInfo, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -92,6 +93,9 @@ export default function App() {
 	const [approvals, setApprovals] = useState<ApprovalInfo[]>([]);
 	const [approvalBusy, setApprovalBusy] = useState(false);
 	const [approvalSettings, setApprovalSettings] = useState<{ read: string; write: string; exec: string } | null>(null);
+	// 交互式问答（v0.37.0）
+	const [askQuestions, setAskQuestions] = useState<AskQuestion[]>([]);
+	const [askBusy, setAskBusy] = useState(false);
 	/** 从聊天里的文件卡打开右栏预览（v0.22.0）。 */
 	const [fileRequest, setFileRequest] = useState<{ name: string; tick: number } | null>(null);
 	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
@@ -341,6 +345,8 @@ export default function App() {
 									startNewRound(`🎯 继续推进目标（第 ${Number(event.round ?? 0) + 1} 轮）`);
 								} else if (event.finished) {
 									setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "目标已结束。" }]);
+								} else if (event.paused) {
+									setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "目标已暂停：等你回答问题后继续。" }]);
 								} else if (event.scheduled) {
 									setMessages((prev) => [
 										...prev,
@@ -373,6 +379,7 @@ export default function App() {
 									: [...tools].reverse().find((t) => t.name === name && t.status === "running");
 								// 工具被审批拦下时会在摘要里说明：立刻刷新待审批列表
 								if (typeof event.summary === "string" && event.summary.includes("待审批")) void refreshApprovals();
+								if (typeof event.summary === "string" && event.summary.includes("等待回答")) void refreshQuestions();
 								if (target) {
 									target.status = event.error ? "error" : "done";
 									target.summary =
@@ -383,6 +390,7 @@ export default function App() {
 								syncBubble();
 							} else if (event.type === "done") {
 								void refreshApprovals();
+								void refreshQuestions();
 								const answer = typeof event.answer === "string" ? event.answer : "";
 								if (!bubbleShown) ensureBubble();
 								setMessages((prev) => {
@@ -490,6 +498,36 @@ export default function App() {
 					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `审批失败：${detail}` }]);
 				} finally {
 					setApprovalBusy(false);
+				}
+			})();
+		},
+		[sessionId, handleSend, nextId],
+	);
+
+	/** 拉取待回答问题（ask_user 触发后调用）。 */
+	const refreshQuestions = useCallback(async () => {
+		try {
+			const data = await api.questions(sessionId);
+			setAskQuestions((data.questions ?? []) as AskQuestion[]);
+		} catch {
+			// 忽略：下一次事件会再拉
+		}
+	}, [sessionId]);
+
+	/** 提交问答卡片的回答（v0.37.0）：把答案发回给模型继续。 */
+	const handleAnswerQuestion = useCallback(
+		(id: number, answers: { id: string; choice?: string; text?: string }[]) => {
+			setAskBusy(true);
+			void (async () => {
+				try {
+					const res = await api.answerQuestion(id, answers);
+					setAskQuestions((prev) => prev.filter((q) => q.id !== id));
+					if (res.resume) handleSend(res.resume, []);
+				} catch (err) {
+					const detail = err instanceof Error ? err.message : String(err);
+					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `提交回答失败：${detail}` }]);
+				} finally {
+					setAskBusy(false);
 				}
 			})();
 		},
@@ -680,6 +718,22 @@ export default function App() {
 				if (alive) setGoal(data.goal ?? null);
 			} catch {
 				if (alive) setGoal(null);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [sessionId]);
+
+	// 待回答的问题（v0.37.0）：切会话时读一次
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.questions(sessionId);
+				if (alive) setAskQuestions((data.questions ?? []) as AskQuestion[]);
+			} catch {
+				if (alive) setAskQuestions([]);
 			}
 		})();
 		return () => {
@@ -1438,6 +1492,9 @@ export default function App() {
 						/>
 						{goal && <GoalBar goal={goal} onStop={() => void handleStopGoal()} onNew={() => setGoalDialogOpen(true)} />}
 						<ApprovalBar approvals={approvals} busy={approvalBusy || pending} onDecide={handleDecideApproval} />
+						{askQuestions.slice(0, 1).map((q) => (
+							<AskUserCard key={q.id} question={q} busy={askBusy || pending} onSubmit={handleAnswerQuestion} />
+						))}
 						<Composer
 							pending={pending}
 							onSend={handleSend}
