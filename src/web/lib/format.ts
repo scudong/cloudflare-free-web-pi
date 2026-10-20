@@ -20,9 +20,17 @@ export function formatTime(iso: string): string {
  * pages.dev 反代到 Worker 时，服务端 request.url 是 workers.dev 地址，
  * 直接使用它拼链接在国内打不开（v0.38.1）。
  */
-export function shareUrlFor(raw: string, origin: string): string {
+/**
+ * 分享链接归一化：只保留路径，域名换成当前页面的 origin。
+ * pages.dev 反代到 Worker 时，服务端 request.url 是 workers.dev 地址，
+ * 直接使用它拼链接在国内打不开（v0.38.1）。
+ * 传 theme 时追加 ?theme=，让文档打开就是当前配色（v0.44.1）。
+ */
+export function shareUrlFor(raw: string, origin: string, theme?: string): string {
 	try {
-		return `${origin}${new URL(raw, origin).pathname}`;
+		const url = new URL(raw, origin);
+		if (theme) url.searchParams.set("theme", theme);
+		return `${origin}${url.pathname}${url.search}`;
 	} catch {
 		return raw;
 	}

@@ -40,7 +40,7 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 				setExisting(latest);
 				setResult((prev) =>
 					prev ?? {
-						url: shareUrlFor(latest.url, window.location.origin),
+						url: shareUrlFor(latest.url, window.location.origin, readTheme()),
 						expiresAt: Number(latest.expiresAt) || 0,
 						reused: true,
 						createdAt: latest.createdAt,
@@ -73,7 +73,7 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 				const data = await api.shareFile(sessionId, name, ttl, readTheme());
 				if (!data.url) throw new Error(data.error || "生成分享链接失败");
 				// 域名一律用当前页面：pages.dev 反代下服务端看到的是 workers.dev 地址
-				const url = shareUrlFor(data.url, window.location.origin);
+				const url = shareUrlFor(data.url, window.location.origin, readTheme());
 				setResult({ url, expiresAt: Number(data.expiresAt) || 0, reused: false, createdAt: new Date().toISOString() });
 			} catch (err) {
 				setError(err instanceof Error ? err.message : String(err));

@@ -1176,7 +1176,7 @@ export default function App() {
 				}
 				if (!url) throw new Error("no url");
 				// 域名一律用当前页面：pages.dev 反代下服务端看到的是 workers.dev 地址
-				const absolute = shareUrlFor(url, window.location.origin);
+				const absolute = shareUrlFor(url, window.location.origin, readTheme());
 				try {
 					await navigator.clipboard.writeText(absolute);
 					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `只读分享链接已复制：${absolute}` }]);

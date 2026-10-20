@@ -33,4 +33,9 @@ describe("shareUrlFor", () => {
 	it("相对路径也能拼成绝对地址", () => {
 		expect(shareUrlFor("/s/abc", "http://127.0.0.1:8797")).toBe("http://127.0.0.1:8797/s/abc");
 	});
+	it("带上主题参数", () => {
+		expect(shareUrlFor("/s/abc", "https://pi-harness-gw.pages.dev", "light")).toBe(
+			"https://pi-harness-gw.pages.dev/s/abc?theme=light",
+		);
+	});
 });
