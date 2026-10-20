@@ -4,10 +4,6 @@ interface ChatHeaderProps {
 	sessionId: string;
 	sessionTitle: string;
 	pending: boolean;
-	/** 可选模型与当前模型（v6）。 */
-	models: string[];
-	model: string;
-	onModelChange: (model: string) => void;
 	/** 目标模式（v0.31.0）：打开设定目标弹窗。 */
 	onOpenGoal?: () => void;
 	/** 当前会话目标是否进行中（按钮高亮）。 */
@@ -24,9 +20,6 @@ export function ChatHeader({
 	sessionId,
 	sessionTitle,
 	pending,
-	models,
-	model,
-	onModelChange,
 	onOpenGoal,
 	goalActive,
 	leftCollapsed,
@@ -48,21 +41,6 @@ export function ChatHeader({
 						<Icon name="chevronsRight" className="h-3.5 w-3.5" />
 					</button>
 				)}
-				<label className="flex items-center gap-1.5">
-					<select
-						value={model}
-						onChange={(e) => onModelChange(e.target.value)}
-						aria-label="选择模型"
-						className="rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 font-medium text-sky-300 outline-none"
-					>
-						{(models.length ? models : [model]).map((id) => (
-							<option key={id} value={id} className="bg-slate-900 text-slate-100">
-								{id}
-							</option>
-						))}
-					</select>
-					<span className="hidden text-slate-500 sm:inline">当前模型</span>
-				</label>
 				{onOpenGoal && (
 					<button
 						type="button"

@@ -203,6 +203,12 @@ export const api = {
 	compact: (sessionId: string, instructions?: string) =>
 		requestJson<{ ok?: boolean; taskId?: string; error?: string }>("/api/compact", jsonPost({ sessionId, instructions })),
 
+	/** 上下文占用估算（v0.42.0）：最近一次模型用量 + 新增内容估算。 */
+	context: (sessionId: string) =>
+		requestJson<{ usedTokens: number; contextWindow: number; percent: number; approximate?: boolean }>(
+			withQuery("/api/context", { sessionId }),
+		),
+
 	communitySkills: () =>
 		requestJson<{ source?: string; skills?: { name: string; description: string; needsLocal?: boolean; url: string }[] }>(
 			"/api/skills/community",

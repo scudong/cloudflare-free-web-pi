@@ -436,6 +436,17 @@ describe("文件分享", () => {
 	});
 });
 
+describe("上下文占用", () => {
+	it("返回估算的上下文占比", async () => {
+		const res = await api("/api/context?sessionId=1");
+		expect(res.status).toBe(200);
+		expect(res.json.contextWindow).toBeGreaterThan(0);
+		expect(res.json.usedTokens).toBeGreaterThanOrEqual(0);
+		expect(res.json.percent).toBeGreaterThanOrEqual(0);
+		expect(res.json.percent).toBeLessThanOrEqual(100);
+	});
+});
+
 describe("工具注册（防回归）", () => {
 	it("关键工具都已注册给模型", async () => {
 		const { json } = await api("/api/debug/agent");

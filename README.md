@@ -101,6 +101,7 @@ npx wrangler deploy
 | GET / POST / DELETE | `/api/providers` · `/api/providers/activate` | LLM 供应商（自定义 OpenAI 兼容端点） |
 | GET / POST | `/api/settings` | 全局设置（网页搜索开关 `webSearch`、思考档位 `thinkingLevel`） |
 | GET | `/api/plan?sessionId=` | 当前会话的分步计划 |
+| GET | `/api/context?sessionId=` | 上下文占用估算（百分比 / 窗口） |
 | GET / POST / PATCH / DELETE | `/api/automations` | 定时任务 |
 | POST | `/api/share` · GET `/s/<token>` | 只读分享（`kind=conversation/file`，`ttlSeconds` 可选，0 = 永久；`theme` 记录分享页配色） |
 | GET | `/api/shares?sessionId=&kind=&name=` | 未过期的分享链接（打开弹窗时复用） |

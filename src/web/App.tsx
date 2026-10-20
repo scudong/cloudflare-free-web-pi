@@ -88,6 +88,8 @@ export default function App() {
 	} | null>(null);
 	// 当前会话的分步计划（v0.22.0）
 	const [plan, setPlan] = useState<PlanStep[]>([]);
+	// 上下文占用刷新信号（v0.42.0）：每轮结束 / 压缩完成 +1
+	const [contextTick, setContextTick] = useState(0);
 	// 目标模式（v0.31.0）
 	const [goal, setGoal] = useState<GoalInfo | null>(null);
 	const [goalDialogOpen, setGoalDialogOpen] = useState(false);
@@ -338,6 +340,7 @@ export default function App() {
 											id && m.id === id ? { ...m, text: "上下文已压缩：更早的对话被摘要为一条记录。" } : m,
 										),
 									);
+									setContextTick((tick) => tick + 1);
 								}
 							} else if (event.type === "goal") {
 								// 目标状态（v0.31.0）：更新目标条；续转时开新一轮气泡
@@ -393,6 +396,7 @@ export default function App() {
 							} else if (event.type === "done") {
 								void refreshApprovals();
 								void refreshQuestions();
+								setContextTick((tick) => tick + 1);
 								const answer = typeof event.answer === "string" ? event.answer : "";
 								if (!bubbleShown) ensureBubble();
 								setMessages((prev) => {
@@ -1478,9 +1482,6 @@ export default function App() {
 							sessionId={sessionId}
 							sessionTitle={currentSession?.title ?? ""}
 							pending={pending}
-							models={models}
-							model={model}
-							onModelChange={handleModelChange}
 							onOpenGoal={() => setGoalDialogOpen(true)}
 							goalActive={goal?.status === "active"}
 							leftCollapsed={!leftOpen}
@@ -1512,6 +1513,13 @@ export default function App() {
 							onInterject={handleInterject}
 							skills={skills}
 							prompts={prompts}
+							sessionId={sessionId}
+							models={models}
+							model={model}
+							onModelChange={handleModelChange}
+							thinkingLevel={thinkingLevel}
+							onThinkingLevelChange={handleChangeThinkingLevel}
+							contextTick={contextTick}
 						/>
 					</section>
 				)}

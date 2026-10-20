@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 import { expandTemplate } from "../lib/template";
+import { api } from "../lib/api";
 import { Icon } from "./Icon";
 import type { PromptInfo, SkillInfo } from "../types";
 
@@ -15,6 +16,15 @@ interface ComposerProps {
 	skills: SkillInfo[];
 	/** 提示模板（v0.31.0）：选中后把模板正文填进输入框。 */
 	prompts?: PromptInfo[];
+	/** 模型与思考等级（v0.42.0）：从聊天头部移到输入框上方。 */
+	sessionId: string;
+	models: string[];
+	model: string;
+	onModelChange: (model: string) => void;
+	thinkingLevel: string;
+	onThinkingLevelChange: (level: string) => void;
+	/** 每轮结束 +1，触发上下文占用刷新。 */
+	contextTick: number;
 }
 
 const MAX_IMAGES = 4;
@@ -64,6 +74,11 @@ const MIN_INPUT_HEIGHT = 44;
 const MAX_INPUT_HEIGHT = 480;
 const INPUT_HEIGHT_KEY = "pi-harness.composer-height";
 
+/** 千位压缩：54.2k / 128k。 */
+function formatTokens(n: number): string {
+	return n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n);
+}
+
 function maxInputHeight(): number {
 	if (typeof window === "undefined") return MAX_INPUT_HEIGHT;
 	return Math.max(MIN_INPUT_HEIGHT, Math.min(MAX_INPUT_HEIGHT, Math.round(window.innerHeight * 0.6)));
@@ -88,7 +103,21 @@ function detectSkillToken(value: string, caret: number): { start: number; query:
 	return { start: upto.lastIndexOf("/"), query: match[2] ?? "" };
 }
 
-export function Composer({ pending, onSend, onStop, onInterject, skills, prompts = [] }: ComposerProps) {
+export function Composer({
+	pending,
+	onSend,
+	onStop,
+	onInterject,
+	skills,
+	prompts = [],
+	sessionId,
+	models,
+	model,
+	onModelChange,
+	thinkingLevel,
+	onThinkingLevelChange,
+	contextTick,
+}: ComposerProps) {
 	const [text, setText] = useState("");
 	const [images, setImages] = useState<string[]>([]);
 	const [busy, setBusy] = useState(false);
@@ -102,6 +131,52 @@ export function Composer({ pending, onSend, onStop, onInterject, skills, prompts
 	const [inputHeight, setInputHeight] = useState<number | null>(readInputHeight);
 	const heightRef = useRef<number | null>(inputHeight);
 	const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
+	/** 上下文占用（v0.42.0）：估算值，刷新信号来自每轮结束 / 手动压缩。 */
+	const [context, setContext] = useState<{ usedTokens: number; contextWindow: number; percent: number } | null>(null);
+	const [contextReload, setContextReload] = useState(0);
+	const [compactBusy, setCompactBusy] = useState(false);
+
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.context(sessionId);
+				if (alive) setContext(data);
+			} catch {
+				if (alive) setContext(null);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [sessionId, contextTick, contextReload]);
+
+	// 手动压缩是异步任务：15 秒内轮询占用，按钮恢复后停止
+	useEffect(() => {
+		if (!compactBusy) return;
+		const interval = window.setInterval(() => setContextReload((n) => n + 1), 2500);
+		const stop = window.setTimeout(() => setCompactBusy(false), 15000);
+		return () => {
+			window.clearInterval(interval);
+			window.clearTimeout(stop);
+		};
+	}, [compactBusy]);
+
+	const compactContext = () => {
+		if (compactBusy || pending) return;
+		if (!window.confirm("压缩当前会话上下文？较早的内容会摘要成一条记录，最近消息保留原文。")) return;
+		setCompactBusy(true);
+		void api.compact(sessionId).catch(() => setCompactBusy(false));
+	};
+
+	const percent = context?.percent ?? 0;
+	const contextTone = !context
+		? "border-slate-700 text-slate-500"
+		: percent >= 85
+			? "border-rose-500/40 bg-rose-500/10 text-rose-300"
+			: percent >= 60
+				? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+				: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
 
 	type MenuItem = { kind: "skill" | "prompt"; name: string; description: string; content?: string };
 	const candidates: MenuItem[] = [
@@ -349,6 +424,71 @@ export function Composer({ pending, onSend, onStop, onInterject, skills, prompts
 				>
 					<Icon name="grip" className="h-3.5 w-3.5" />
 				</button>
+				<div className="flex flex-wrap items-center justify-end gap-1.5 pb-1.5">
+					<label className="inline-flex items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-1.5 py-1 text-[11px] text-sky-300">
+						<Icon name="model" className="h-3 w-3 shrink-0" />
+						<select
+							value={model}
+							onChange={(event) => onModelChange(event.target.value)}
+							aria-label="选择模型"
+							className="max-w-[8.5rem] cursor-pointer appearance-none bg-transparent text-[11px] font-medium text-sky-300 outline-none"
+						>
+							{(models.length ? models : [model]).map((id) => (
+								<option key={id} value={id} className="bg-slate-900 text-slate-100">
+									{id}
+								</option>
+							))}
+						</select>
+						<Icon name="chevronDown" className="h-3 w-3 shrink-0 opacity-60" />
+					</label>
+					<label className="inline-flex items-center gap-1 rounded-md border border-violet-500/30 bg-violet-500/10 px-1.5 py-1 text-[11px] text-violet-300">
+						<Icon name="thinking" className="h-3 w-3 shrink-0" />
+						<select
+							value={thinkingLevel}
+							onChange={(event) => onThinkingLevelChange(event.target.value)}
+							aria-label="思考等级"
+							className="cursor-pointer appearance-none bg-transparent text-[11px] font-medium text-violet-300 outline-none"
+						>
+							<option value="off" className="bg-slate-900 text-slate-100">
+								不思考
+							</option>
+							<option value="low" className="bg-slate-900 text-slate-100">
+								低思考
+							</option>
+							<option value="high" className="bg-slate-900 text-slate-100">
+								高思考
+							</option>
+						</select>
+						<Icon name="chevronDown" className="h-3 w-3 shrink-0 opacity-60" />
+					</label>
+					<button
+						type="button"
+						onClick={() => setContextReload((n) => n + 1)}
+						title="上下文占用（估算）：点击刷新"
+						className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[11px] tabular-nums transition-colors ${contextTone}`}
+					>
+						<span className="h-1.5 w-8 overflow-hidden rounded-full bg-slate-700/60">
+							<span
+								className="block h-full rounded-full bg-current transition-[width]"
+								style={{ width: `${percent}%` }}
+							/>
+						</span>
+						{context ? `${percent}%` : "—"}
+						<span className="hidden text-[10px] opacity-70 sm:inline">
+							{context ? `${formatTokens(context.usedTokens)}/${formatTokens(context.contextWindow)}` : ""}
+						</span>
+					</button>
+					<button
+						type="button"
+						onClick={compactContext}
+						disabled={compactBusy || pending}
+						title="压缩上下文：把较早内容摘要成一条记录"
+						className="inline-flex items-center gap-1 rounded-md border border-slate-700 px-1.5 py-1 text-[11px] text-slate-300 transition-colors hover:border-sky-500/50 hover:text-sky-300 disabled:opacity-50"
+					>
+						<Icon name="compact" className="h-3 w-3" />
+						<span className="hidden sm:inline">{compactBusy ? "压缩中…" : "压缩"}</span>
+					</button>
+				</div>
 				<div className="flex items-end gap-2 pt-1">
 				{/* 技能菜单（v0.23.0）：输入 / 自动弹出 */}
 				{menuOpen && (

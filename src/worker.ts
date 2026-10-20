@@ -1351,6 +1351,31 @@ function escapeHtml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/** 从 entry.model 里取纯文本（用户 / 助手 / 工具结果通用）。 */
+function entryText(model: unknown): string {
+	const blocks = Array.isArray(model) ? (model as { content?: unknown }[]) : [];
+	for (const block of blocks) {
+		const content = block?.content;
+		if (typeof content === "string") return content;
+		if (Array.isArray(content)) {
+			return content.map((c) => (typeof c === "object" && c && "text" in c ? String((c as { text?: unknown }).text ?? "") : "")).join("");
+		}
+	}
+	return "";
+}
+
+/** 从 assistant entry 里取本次请求的 token 用量（input + output）。 */
+function entryUsage(model: unknown): number | null {
+	const blocks = Array.isArray(model) ? (model as { usage?: unknown }[]) : [];
+	for (const block of blocks) {
+		const usage = block?.usage as { input?: unknown; output?: unknown } | undefined;
+		if (usage && typeof usage === "object") {
+			return (Number(usage.input) || 0) + (Number(usage.output) || 0);
+		}
+	}
+	return null;
+}
+
 /**
  * 极简 Markdown → HTML（只用于公开分享页）。
  * 支持标题、列表（含任务项）、代码块、引用、分隔线、管道表格与常用行内样式。
@@ -2480,26 +2505,13 @@ export class SpikeAgent extends DurableObject {
 			: { items: [] };
 		const meta = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", share.session_id).toArray() as { title: string }[];
 		const title = meta[0]?.title ?? "对话";
-		const textOf = (model: unknown): string => {
-			const blocks = Array.isArray(model) ? (model as { content?: unknown }[]) : [];
-			for (const block of blocks) {
-				const content = block?.content;
-				if (typeof content === "string") return content;
-				if (Array.isArray(content)) {
-					return content
-						.map((c) => (typeof c === "object" && c && "text" in c ? String((c as { text?: unknown }).text ?? "") : ""))
-						.join("");
-				}
-			}
-			return "";
-		};
 		const parts: string[] = [];
 		// 对话分享也生成目录：所有消息共用一套锚点 id（v0.41.0）
 		const headings: ShareHeading[] = [];
 		const usedIds = new Set<string>();
 		for (const entry of [...page.items].reverse()) {
 			const kind = String(entry.kind ?? "");
-			const text = textOf(entry.model).trim();
+			const text = entryText(entry.model).trim();
 			if (!text) continue;
 			if (kind === "pi.user") {
 				parts.push(`<div class="msg user"><div class="who">用户</div><div class="md">${markdownToHtml(text, { headings, usedIds })}</div></div>`);
@@ -2644,6 +2656,45 @@ export class SpikeAgent extends DurableObject {
 		} catch (err) {
 			console.warn("maybeReflect skipped", err);
 			return 0;
+		}
+	}
+
+	/** 估算当前上下文占用（v0.42.0）：最近一次模型用量 + 之后新增内容的字符估算。 */
+	private async contextUsage(
+		sessionId?: string,
+	): Promise<{ usedTokens: number; contextWindow: number; percent: number; approximate: boolean }> {
+		const CONTEXT_WINDOW = 128_000;
+		try {
+			const harness = await this.open();
+			const conversation = await this.conversationFor(harness, sessionId);
+			const page = (await conversation.entries({}, 500, undefined, ctx)) as { items: readonly Record<string, unknown>[] };
+			const items = [...page.items].reverse(); // 按时间正序
+			let base = 0;
+			let lastUsage = -1;
+			for (let i = items.length - 1; i >= 0; i--) {
+				const usage = entryUsage(items[i].model);
+				if (usage != null) {
+					base = usage;
+					lastUsage = i;
+					break;
+				}
+			}
+			let extra = 0;
+			if (lastUsage >= 0) {
+				for (let i = lastUsage + 1; i < items.length; i++) extra += Math.ceil(entryText(items[i].model).length / 2);
+			} else {
+				// 还没有模型用量：整段按字符估算（中文约 2 字符 / token）
+				for (const item of items) extra += Math.ceil(entryText(item.model).length / 2);
+			}
+			const usedTokens = Math.max(0, base + extra);
+			return {
+				usedTokens,
+				contextWindow: CONTEXT_WINDOW,
+				percent: Math.min(100, Math.round((usedTokens / CONTEXT_WINDOW) * 100)),
+				approximate: lastUsage < 0,
+			};
+		} catch {
+			return { usedTokens: 0, contextWindow: CONTEXT_WINDOW, percent: 0, approximate: true };
 		}
 	}
 
@@ -3564,6 +3615,9 @@ export class SpikeAgent extends DurableObject {
 					compaction: compactionSettings(),
 					approval: approvalSettings(),
 				});
+			}
+			if (url.pathname === "/context" && request.method === "GET") {
+				return Response.json(await this.contextUsage(url.searchParams.get("sessionId") ?? undefined));
 			}
 			if (url.pathname === "/compact" && request.method === "POST") {
 				const body = (await request.json().catch(() => ({}))) as { sessionId?: string; instructions?: string };

@@ -1,4 +1,5 @@
 import {
+	Archive,
 	Brain,
 	BrainCircuit,
 	Check,
@@ -112,6 +113,7 @@ const ICONS = {
 	checkboxOff: Square,
 	subagent: Users,
 	grip: GripHorizontal,
+	compact: Archive,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;
