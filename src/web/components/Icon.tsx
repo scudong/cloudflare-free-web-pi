@@ -112,6 +112,7 @@ const ICONS = {
 	checkboxOn: SquareCheckBig,
 	checkboxOff: Square,
 	subagent: Users,
+	users: Users,
 	grip: GripHorizontal,
 	compact: Archive,
 } as const satisfies Record<string, LucideIcon>;

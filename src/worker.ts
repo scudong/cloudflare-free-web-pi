@@ -1,5 +1,6 @@
 // Spike: pi-durable harness inside a Cloudflare Durable Object (MemoryStorage round).
 import { DurableObject } from "cloudflare:workers";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "typebox";
 import { createModels, createProvider } from "@earendil-works/pi-ai/models";
@@ -24,8 +25,29 @@ import packageJson from "../package.json";
 
 const ctx = BACKGROUND_CONTEXT;
 
-/** DO 实例的 SQL 门面，open() 时注入（工具在模块级定义，无法用 this）。 */
-let sqlFacade: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } } | null = null;
+type SqlHandle = { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } };
+
+/**
+ * 同一 isolate 可能同时承载多个 Durable Object（多用户后必然发生），
+ * 模块级全局会串数据；SQL / Harness / API Key 一律按请求作用域取（v0.43.0）。
+ */
+type AgentScope = { sql: SqlHandle; harness: unknown | null; apiKey: string | null };
+const agentScope = new AsyncLocalStorage<AgentScope>();
+
+function scope(): AgentScope {
+	const current = agentScope.getStore();
+	if (!current) throw new Error("Agent scope missing");
+	return current;
+}
+
+/** 模块级工具通过代理读取当前请求的 SQL，调用点保持 `sqlFacade!.exec(...)` 不变。 */
+const sqlFacade = new Proxy({} as SqlHandle, {
+	get(_target, property) {
+		const db = scope().sql;
+		const value = (db as unknown as Record<PropertyKey, unknown>)[property];
+		return typeof value === "function" ? value.bind(db) : value;
+	},
+});
 const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } }) => {
 	sql.exec(`CREATE TABLE IF NOT EXISTS pi_mem (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS vfs_v2 (conversation_id TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (conversation_id, name))`);
@@ -108,10 +130,7 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	}
 };
 
-/** DEEPSEEK_API_KEY（open() 时从 env 注入；模块级定义的工具拿不到 this.env）。 */
-let apiKeyRef: string | null = null;
-/** Harness 全局引用：子代理工具需要它来创建会话（工具在模块级定义，拿不到 this）。 */
-let harnessRef: { createConversation(o: unknown, c: unknown): Promise<unknown>; conversation(id: unknown, c: unknown): Promise<unknown> } | null = null;
+/** DEEPSEEK_API_KEY / Harness 都从当前请求作用域读取（多 DO 共 isolate 时不能放全局）。 */
 
 /** 全局设置读写（app_settings 表）：目前只有网页搜索开关 web_search。 */
 function getSetting(key: string, fallback: string): string {
@@ -964,7 +983,7 @@ const baseSpikeExtension = defineExtension({
 				),
 			}),
 			execute: async (args, api) => {
-				const harness = harnessRef as unknown as {
+				const harness = scope().harness as {
 					createConversation(o: unknown, c: unknown): Promise<{
 						id: unknown;
 						submit(i: unknown, c: unknown): Promise<{ wait(c: unknown): Promise<{ status: string; type?: string; answer?: unknown }> }>;
@@ -1090,12 +1109,13 @@ const baseSpikeExtension = defineExtension({
 				if (getSetting("web_search", "1") !== "1") {
 					return { output: [{ type: "text", text: "网页搜索当前未开启。请告诉用户：在 设置 → 网页搜索 中开启后即可联网搜索。" }] };
 				}
-				if (!apiKeyRef) return { output: [{ type: "text", text: "未配置 DEEPSEEK_API_KEY，无法联网搜索。" }] };
+				const apiKey = scope().apiKey;
+				if (!apiKey) return { output: [{ type: "text", text: "未配置 DEEPSEEK_API_KEY，无法联网搜索。" }] };
 				const count = Math.min(50, Math.max(1, Math.floor(Number(a.count ?? 8) || 8)));
 				try {
 					const resp = await fetch("https://api.deepseek.com/v1/tools/search", {
 						method: "POST",
-						headers: { "content-type": "application/json", authorization: `Bearer ${apiKeyRef}` },
+						headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
 						body: JSON.stringify({ query, count, need_content: false }),
 					});
 					const data = (await resp.json().catch(() => null)) as { results?: unknown; error?: { message?: string } } | null;
@@ -1129,11 +1149,12 @@ const baseSpikeExtension = defineExtension({
 				if (getSetting("web_search", "1") !== "1") {
 					return { output: [{ type: "text", text: "网页搜索当前未开启。请告诉用户：在 设置 → 网页搜索 中开启后即可抓取网页。" }] };
 				}
-				if (!apiKeyRef) return { output: [{ type: "text", text: "未配置 DEEPSEEK_API_KEY，无法抓取网页。" }] };
+				const apiKey = scope().apiKey;
+				if (!apiKey) return { output: [{ type: "text", text: "未配置 DEEPSEEK_API_KEY，无法抓取网页。" }] };
 				try {
 					const resp = await fetch("https://api.deepseek.com/v1/tools/fetch", {
 						method: "POST",
-						headers: { "content-type": "application/json", authorization: `Bearer ${apiKeyRef}` },
+						headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
 						body: JSON.stringify({ url }),
 					});
 					const data = (await resp.json().catch(() => null)) as { title?: string; content?: string; error?: { message?: string } } | null;
@@ -1765,7 +1786,7 @@ export class SpikeAgent extends DurableObject {
 			const providerRow = activeId ? listProviderRows().find((r) => r.id === activeId) : undefined;
 			if (providerRow) models.setProvider(buildCustomProvider(providerRow) as never);
 			else models.setProvider(deepseekProvider());
-			apiKeyRef = (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null;
+			scope().apiKey = (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null;
 			const registry = createRegistry();
 			this.registryRef = registry as unknown as typeof this.registryRef;
 			registry.install(spikeExtension);
@@ -1775,7 +1796,6 @@ export class SpikeAgent extends DurableObject {
 			// Durable Object SQLite: conversations survive DO restarts and redeploys.
 			const storage = await openDurableObjectSqliteStorage(this.ctx.storage);
 			ensureTables(this.ctx.storage.sql);
-			sqlFacade = this.ctx.storage.sql;
 			this.storageRef = storage;
 			// MCP 扩展在表就绪后构建并安装；之后由 /api/mcp 变更时重建。
 			this.mcpExt = (await buildMcpExtension(sqlFacade)) as never;
@@ -1784,7 +1804,7 @@ export class SpikeAgent extends DurableObject {
 			this.customExt = buildCustomToolsExtension(sqlFacade!) as never;
 			if (this.customExt) registry.install(this.customExt as never);
 			this.harness = await Harness.open(storage, { models, registry, settings: { compaction: compactionSettings() } }, ctx);
-			harnessRef = this.harness as never;
+			scope().harness = this.harness;
 			this.harness.resume();
 		}
 		return this.harness;
@@ -2094,6 +2114,17 @@ export class SpikeAgent extends DurableObject {
 
 	/** DO alarm：执行到点的定时任务。 */
 	async alarm(): Promise<void> {
+		return agentScope.run(
+			{
+				sql: this.ctx.storage.sql as unknown as SqlHandle,
+				harness: this.harness ?? null,
+				apiKey: (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null,
+			},
+			() => this.handleAlarm(),
+		);
+	}
+
+	private async handleAlarm(): Promise<void> {
 		try {
 			await this.open();
 			const now = Date.now();
@@ -2382,6 +2413,7 @@ export class SpikeAgent extends DurableObject {
 		name?: string,
 		ttlSeconds?: number,
 		theme?: string,
+		tokenPrefix = "",
 	): Promise<{ token: string; expiresAt: number }> {
 		await this.open();
 		const conversation = await this.conversationFor(await this.open(), sessionId);
@@ -2400,7 +2432,7 @@ export class SpikeAgent extends DurableObject {
 		const expiresAt = Number.isFinite(ttl) && ttl > 0 ? Date.now() + Math.round(Math.min(ttl, 365 * 86400) * 1000) : 0;
 		const themeId: ShareThemeId = isShareTheme(theme) ? theme : "dark";
 		const bytes = crypto.getRandomValues(new Uint8Array(12));
-		const token = [...bytes].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("");
+		const token = `${tokenPrefix}${[...bytes].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("")}`;
 		sqlFacade!.exec(
 			"INSERT INTO shares (token, kind, session_id, name, expires_at, theme, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			token, kind, String(conversation.id), fileName, expiresAt, themeId, new Date().toISOString(),
@@ -2959,6 +2991,18 @@ export class SpikeAgent extends DurableObject {
 	}
 
 	override async fetch(request: Request): Promise<Response> {
+		// 每个请求绑定自己的 SQL / Harness，避免同一 isolate 里的其它 DO 串数据
+		return agentScope.run(
+			{
+				sql: this.ctx.storage.sql as unknown as SqlHandle,
+				harness: this.harness ?? null,
+				apiKey: (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null,
+			},
+			() => this.handleFetch(request),
+		);
+	}
+
+	private async handleFetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 		try {
 			// 所有路由都先确保 DO 初始化（sqlFacade/表/Harness 就绪），幂等。
@@ -3140,12 +3184,15 @@ export class SpikeAgent extends DurableObject {
 					theme?: string;
 				};
 				try {
+					const userKey = request.headers.get("x-pi-user") ?? "";
+					const tokenPrefix = USER_ID_RE.test(userKey) ? `${userKey}.` : "";
 					const { token, expiresAt } = await this.createShare(
 						body.sessionId,
 						body.kind === "file" ? "file" : "conversation",
 						body.name,
 						body.ttlSeconds,
 						body.theme,
+						tokenPrefix,
 					);
 					// 用请求自身的域名拼绝对地址：页面在哪个域名打开，链接就指向哪里
 					const origin = new URL(request.url).origin;
@@ -3833,11 +3880,23 @@ export class SpikeAgent extends DurableObject {
 
 const SESSION_COOKIE = "pi_access";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
+/** 主人（沿用旧版单一 token）与邀请用户（u_ 前缀）的区分（v0.43.0）。 */
+const OWNER_ID = "owner";
+const USER_ID_RE = /^u_[a-z0-9]{6,16}$/;
 
-/** 会话令牌 = HMAC(ACCESS_PASSWORD, 固定串)，改密码即全体失效。 */
+/** 旧版主人令牌 = HMAC(ACCESS_PASSWORD, 固定串)，改密码即全体失效。 */
 async function accessToken(password: string): Promise<string> {
 	const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 	const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("pi-harness-access-v1")));
+	return [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** 用户令牌签名 = HMAC(ACCESS_PASSWORD, "pi-harness-access-v2:<userId>")。 */
+async function userAccessSig(password: string, userId: string): Promise<string> {
+	const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+	const sig = new Uint8Array(
+		await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`pi-harness-access-v2:${userId}`)),
+	);
 	return [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -3858,35 +3917,207 @@ function cookieValue(request: Request, name: string): string | null {
 	return null;
 }
 
-async function isAuthorized(request: Request, password: string): Promise<boolean> {
+/** 邀请用户是否仍然存在（每次请求查注册表，吊销立即生效）。 */
+async function userEnabled(env: { UserRegistry: DurableObjectNamespace }, userId: string): Promise<boolean> {
+	try {
+		const registry = env.UserRegistry.get(env.UserRegistry.idFromName("registry"));
+		const res = await registry.fetch(
+			new Request(`https://registry/internal/user-status?userId=${encodeURIComponent(userId)}`),
+		);
+		if (!res.ok) return false;
+		const data = (await res.json()) as { ok?: boolean };
+		return Boolean(data.ok);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * 解析登录态（v0.43.0）：
+ * - 旧版 64 位 token → 主人；
+ * - `<userId>.<sig>` → 对应邀请用户（每次都确认用户未被删除）；
+ * - 未配置 ACCESS_PASSWORD → 主人（本地开发/开放模式）。
+ */
+async function authorizedUser(
+	request: Request,
+	password: string,
+	env: { UserRegistry: DurableObjectNamespace } | null,
+): Promise<string | null> {
+	if (!password) return OWNER_ID;
 	const token = cookieValue(request, SESSION_COOKIE);
-	if (!token) return false;
-	return timingSafeEqualStr(token, await accessToken(password));
+	if (!token) return null;
+	if (token.length === 64 && timingSafeEqualStr(token, await accessToken(password))) return OWNER_ID;
+	const dot = token.lastIndexOf(".");
+	if (dot <= 0) return null;
+	const userId = token.slice(0, dot);
+	const sig = token.slice(dot + 1);
+	if (userId !== OWNER_ID && !USER_ID_RE.test(userId)) return null;
+	if (!timingSafeEqualStr(sig, await userAccessSig(password, userId))) return null;
+	if (userId === OWNER_ID) return OWNER_ID;
+	if (!env) return null;
+	return (await userEnabled(env, userId)) ? userId : null;
+}
+
+/* ---------------- 用户注册表（v0.43.0） ---------------- */
+
+const INVITE_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789";
+
+/** 无歧义随机串（去掉 0/1/l/o）。 */
+function randomInvite(length: number): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(length));
+	return [...bytes].map((b) => INVITE_ALPHABET[b % INVITE_ALPHABET.length]).join("");
+}
+
+/** 邀请码哈希：码本身高熵，SHA-256 足够；库里不存明文。 */
+async function hashCode(code: string): Promise<string> {
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`pi-harness-invite-v1:${code}`));
+	return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * 独立的小 DO：只存 users 表，负责邀请码校验与用户 CRUD。
+ * 不加载 pi-harness Harness，所以每次鉴权查询都很轻。
+ */
+export class UserRegistry extends DurableObject {
+	private sqlRef: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } } | null = null;
+
+	private db() {
+		if (!this.sqlRef) {
+			this.sqlRef = this.ctx.storage.sql as unknown as {
+				exec(q: string, ...b: unknown[]): { toArray(): unknown[] };
+			};
+			this.sqlRef.exec(
+				`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', code_hash TEXT NOT NULL UNIQUE, code_hint TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, last_used_at TEXT)`,
+			);
+		}
+		return this.sqlRef;
+	}
+
+	override async fetch(request: Request): Promise<Response> {
+		const url = new URL(request.url);
+		const db = this.db();
+		try {
+			if (url.pathname === "/internal/verify-code" && request.method === "POST") {
+				const body = (await request.json().catch(() => ({}))) as { code?: string };
+				const code = String(body.code ?? "").trim().toLowerCase();
+				if (!code) return Response.json({ ok: false });
+				const rows = db
+					.exec("SELECT id, name FROM users WHERE code_hash = ?", await hashCode(code))
+					.toArray() as { id: string; name: string }[];
+				if (!rows[0]) return Response.json({ ok: false });
+				db.exec("UPDATE users SET last_used_at = ? WHERE id = ?", new Date().toISOString(), rows[0].id);
+				return Response.json({ ok: true, userId: rows[0].id, name: rows[0].name });
+			}
+			if (url.pathname === "/internal/user-status" && request.method === "GET") {
+				const userId = url.searchParams.get("userId") ?? "";
+				return Response.json({ ok: db.exec("SELECT id FROM users WHERE id = ?", userId).toArray().length > 0 });
+			}
+			if (url.pathname === "/users" && request.method === "GET") {
+				const rows = db
+					.exec("SELECT id, name, code_hint, created_at, last_used_at FROM users ORDER BY created_at DESC")
+					.toArray() as { id: string; name: string; code_hint: string; created_at: string; last_used_at: string | null }[];
+				return Response.json({
+					users: rows.map((row) => ({
+						id: row.id,
+						name: row.name,
+						codeHint: row.code_hint,
+						createdAt: row.created_at,
+						lastUsedAt: row.last_used_at,
+					})),
+				});
+			}
+			if (url.pathname === "/users" && request.method === "POST") {
+				const body = (await request.json().catch(() => ({}))) as { name?: string };
+				const name = String(body.name ?? "").trim().slice(0, 40);
+				const id = `u_${randomInvite(8)}`;
+				const code = randomInvite(16);
+				const now = new Date().toISOString();
+				db.exec(
+					"INSERT INTO users (id, name, code_hash, code_hint, created_at) VALUES (?, ?, ?, ?, ?)",
+					id, name, await hashCode(code), code.slice(-4), now,
+				);
+				return Response.json({
+					ok: true,
+					user: { id, name, codeHint: code.slice(-4), createdAt: now, lastUsedAt: null },
+					code,
+				});
+			}
+			if (url.pathname === "/users/reset" && request.method === "POST") {
+				const body = (await request.json().catch(() => ({}))) as { id?: string };
+				const id = String(body.id ?? "");
+				if (!db.exec("SELECT id FROM users WHERE id = ?", id).toArray().length) {
+					return Response.json({ ok: false, error: "用户不存在" }, { status: 404 });
+				}
+				const code = randomInvite(16);
+				db.exec("UPDATE users SET code_hash = ?, code_hint = ? WHERE id = ?", await hashCode(code), code.slice(-4), id);
+				return Response.json({ ok: true, code, hint: code.slice(-4) });
+			}
+			if (url.pathname === "/users" && request.method === "DELETE") {
+				db.exec("DELETE FROM users WHERE id = ?", url.searchParams.get("id") ?? "");
+				return Response.json({ ok: true });
+			}
+			return Response.json({ error: "not found" }, { status: 404 });
+		} catch (err) {
+			return Response.json({ error: String(err).slice(0, 200) }, { status: 500 });
+		}
+	}
+}
+
+/** 登录成功：写 cookie。 */
+function sessionResponse(token: string, payload: Record<string, unknown>): Response {
+	return new Response(JSON.stringify(payload), {
+		headers: {
+			"content-type": "application/json",
+			"set-cookie": `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`,
+		},
+	});
 }
 
 export default {
-	async fetch(request: Request, env: { SpikeAgent: DurableObjectNamespace; ACCESS_PASSWORD?: string }): Promise<Response> {
+	async fetch(
+		request: Request,
+		env: { SpikeAgent: DurableObjectNamespace; UserRegistry: DurableObjectNamespace; ACCESS_PASSWORD?: string },
+	): Promise<Response> {
 		const url = new URL(request.url);
 		const password = env.ACCESS_PASSWORD ?? "";
 		const protect = Boolean(password);
+		const userId = await authorizedUser(request, password, env);
 
 		// 登录/登出/状态：不需要已登录。
 		if (url.pathname === "/api/auth" && request.method === "GET") {
-			return Response.json({ required: protect, authenticated: protect ? await isAuthorized(request, password) : true });
+			return Response.json({
+				required: protect,
+				authenticated: protect ? Boolean(userId) : true,
+				owner: !protect || userId === OWNER_ID,
+			});
 		}
 		if (url.pathname === "/api/login" && request.method === "POST") {
-			if (!protect) return Response.json({ ok: true, required: false });
-			const body = (await request.json().catch(() => ({}))) as { password?: string };
-			if (!timingSafeEqualStr(String(body.password ?? ""), password)) {
-				return Response.json({ error: "密码不正确" }, { status: 401 });
+			if (!protect) return Response.json({ ok: true, required: false, owner: true });
+			const body = (await request.json().catch(() => ({}))) as { password?: string; code?: string };
+			const input = String(body.password ?? body.code ?? "").trim();
+			if (!input) return Response.json({ error: "请输入密码或邀请码" }, { status: 400 });
+			// 先当主人密码，再当邀请码
+			if (timingSafeEqualStr(input, password)) {
+				return sessionResponse(await accessToken(password), { ok: true, owner: true });
 			}
-			const token = await accessToken(password);
-			return new Response(JSON.stringify({ ok: true }), {
-				headers: {
-					"content-type": "application/json",
-					"set-cookie": `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`,
-				},
-			});
+			try {
+				const registry = env.UserRegistry.get(env.UserRegistry.idFromName("registry"));
+				const res = await registry.fetch(
+					new Request("https://registry/internal/verify-code", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ code: input }),
+					}),
+				);
+				const data = (await res.json()) as { ok?: boolean; userId?: string; name?: string };
+				if (data.ok && data.userId && USER_ID_RE.test(data.userId)) {
+					const token = `${data.userId}.${await userAccessSig(password, data.userId)}`;
+					return sessionResponse(token, { ok: true, owner: false, name: data.name ?? "" });
+				}
+			} catch {
+				// 注册表不可用时按登录失败处理
+			}
+			return Response.json({ error: "密码或邀请码不正确" }, { status: 401 });
 		}
 		if (url.pathname === "/api/logout" && request.method === "POST") {
 			return new Response(JSON.stringify({ ok: true }), {
@@ -3897,17 +4128,49 @@ export default {
 			});
 		}
 
+		// 用户管理：仅主人；转发到轻量注册表 DO。
+		if (
+			(url.pathname === "/api/users" || url.pathname === "/api/users/reset") &&
+			(request.method === "GET" || request.method === "POST" || request.method === "DELETE")
+		) {
+			if (protect && !userId) return Response.json({ error: "未登录" }, { status: 401 });
+			if (protect && userId !== OWNER_ID) return Response.json({ error: "只有主人可以管理用户" }, { status: 403 });
+			const registry = env.UserRegistry.get(env.UserRegistry.idFromName("registry"));
+			const inner = new URL(request.url);
+			inner.pathname = url.pathname.replace(/^\/api/, "");
+			const headers = new Headers(request.headers);
+			headers.delete("x-pi-user");
+			const init: RequestInit = { method: request.method, headers };
+			if (request.method !== "GET" && request.method !== "HEAD") init.body = request.body;
+			return registry.fetch(new Request(inner, init));
+		}
+
 		// 分享页保持公开：只读、只含被打包的内容。
 		const isShare = url.pathname.startsWith("/s/");
-		if (protect && url.pathname.startsWith("/api/") && !isShare && !(await isAuthorized(request, password))) {
+		if (protect && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/agent/")) && !userId) {
 			return Response.json({ error: "未登录" }, { status: 401 });
 		}
 
-		if (url.pathname.startsWith("/agent/") || url.pathname.startsWith("/api/") || isShare) {
-			const stub = env.SpikeAgent.get(env.SpikeAgent.idFromName("spike"));
+		if (isShare) {
+			// 新分享 token 形如 u_ab12cd34.xxxx：按前缀路由到对应用户的 DO；旧链接留在主人 DO。
+			const shareUser = /^\/s\/(u_[a-z0-9]{6,16})\./.exec(url.pathname)?.[1];
+			const stub = env.SpikeAgent.get(env.SpikeAgent.idFromName(shareUser ? `user:${shareUser}` : "spike"));
+			const headers = new Headers(request.headers);
+			headers.set("x-pi-user", shareUser ?? "");
+			return stub.fetch(new Request(new URL(request.url), { method: request.method, headers }));
+		}
+
+		if (url.pathname.startsWith("/agent/") || url.pathname.startsWith("/api/")) {
+			// 每个用户一个独立 DO；主人沿用历史数据所在的 "spike"
+			const who = userId ?? OWNER_ID;
+			const stub = env.SpikeAgent.get(env.SpikeAgent.idFromName(who === OWNER_ID ? "spike" : `user:${who}`));
 			const inner = new URL(request.url);
 			inner.pathname = url.pathname.replace(/^\/(agent|api)/, "") || "/";
-			return stub.fetch(new Request(inner, request));
+			const headers = new Headers(request.headers);
+			headers.set("x-pi-user", who);
+			const init: RequestInit = { method: request.method, headers };
+			if (request.method !== "GET" && request.method !== "HEAD") init.body = request.body;
+			return stub.fetch(new Request(inner, init));
 		}
 		return Response.json({ ok: true, name: "pi-harness-spike" });
 	},

@@ -63,7 +63,8 @@ afterAll(() => {
 describe("访问控制", () => {
 	it("未配置密码时 auth 返回无需登录", async () => {
 		const { json } = await api("/api/auth");
-		expect(json).toEqual({ required: false, authenticated: true });
+		expect(json).toMatchObject({ required: false, authenticated: true });
+		expect(json.owner).toBe(true);
 	});
 });
 
@@ -444,6 +445,44 @@ describe("上下文占用", () => {
 		expect(res.json.usedTokens).toBeGreaterThanOrEqual(0);
 		expect(res.json.percent).toBeGreaterThanOrEqual(0);
 		expect(res.json.percent).toBeLessThanOrEqual(100);
+	});
+});
+
+describe("用户管理", () => {
+	let userId = "";
+	let firstCode = "";
+
+	it("创建用户返回一次性邀请码", async () => {
+		const res = await post("/api/users", { name: "金标用户" });
+		expect(res.status).toBe(200);
+		expect(res.json.ok).toBe(true);
+		expect(res.json.code).toMatch(/^[a-z2-9]{16}$/);
+		expect(res.json.user.id).toMatch(/^u_[a-z2-9]{8}$/);
+		expect(res.json.user.codeHint).toBe(res.json.code.slice(-4));
+		userId = res.json.user.id;
+		firstCode = res.json.code;
+	});
+
+	it("列表只返回尾号，不泄露邀请码", async () => {
+		const res = await api("/api/users");
+		expect(res.status).toBe(200);
+		const item = (res.json.users as { id: string; name: string; codeHint: string }[]).find((u) => u.id === userId);
+		expect(item).toMatchObject({ name: "金标用户", codeHint: firstCode.slice(-4) });
+		expect(JSON.stringify(res.json)).not.toContain(firstCode);
+	});
+
+	it("重置邀请码会生成新码", async () => {
+		const res = await post("/api/users/reset", { id: userId });
+		expect(res.status).toBe(200);
+		expect(res.json.code).toMatch(/^[a-z2-9]{16}$/);
+		expect(res.json.code).not.toBe(firstCode);
+	});
+
+	it("删除用户后列表不再返回", async () => {
+		const res = await api(`/api/users?id=${userId}`, { method: "DELETE" });
+		expect(res.json.ok).toBe(true);
+		const list = await api("/api/users");
+		expect((list.json.users as { id: string }[]).some((u) => u.id === userId)).toBe(false);
 	});
 });
 

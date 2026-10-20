@@ -11,6 +11,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { GoalBar, GoalDialog } from "./components/GoalBar";
 import { ApprovalBar } from "./components/ApprovalBar";
 import { AskUserCard } from "./components/AskUserCard";
+import { UsersPanel } from "./components/UsersPanel";
 import { Icon } from "./components/Icon";
 import { api } from "./lib/api";
 import { shareUrlFor } from "./lib/format";
@@ -69,7 +70,7 @@ export default function App() {
 	const [sessionId, setSessionId] = useState("1");
 	const [sessions, setSessions] = useState<SessionListItem[]>([]);
 	const [theme, setTheme] = useState<ThemeId>(() => readTheme());
-	const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean } | null>(null);
+	const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean; owner?: boolean } | null>(null);
 	const [loginError, setLoginError] = useState<string | null>(null);
 	const [models, setModels] = useState<string[]>([]);
 	/** 供应商变更后重新拉取模型列表（v0.27.0）。 */
@@ -628,9 +629,9 @@ export default function App() {
 		void (async () => {
 			try {
 				const data = await api.auth();
-				if (alive) setAuth({ required: !!data.required, authenticated: !!data.authenticated });
+				if (alive) setAuth({ required: !!data.required, authenticated: !!data.authenticated, owner: !!data.owner });
 			} catch {
-				if (alive) setAuth({ required: false, authenticated: true });
+				if (alive) setAuth({ required: false, authenticated: true, owner: true });
 			}
 		})();
 		return () => {
@@ -646,7 +647,7 @@ export default function App() {
 				setLoginError(result.error ?? "密码不正确");
 				return;
 			}
-			setAuth({ required: true, authenticated: true });
+			setAuth({ required: true, authenticated: true, owner: !!result.owner });
 		} catch {
 			setLoginError("密码不正确");
 		}
@@ -1400,12 +1401,14 @@ export default function App() {
 		/>
 	);
 
+	// 邀请用户没有用户管理入口；切回会话栏（v0.43.0）
+	const activeRailView = railView === "users" && !auth?.owner ? "sessions" : railView;
 	const leftContent =
-		railView === "sessions" ? (
+		activeRailView === "sessions" ? (
 			sidebar
-		) : railView === "mcp" ? (
+		) : activeRailView === "mcp" ? (
 			<McpPanel servers={mcpServers} loading={mcpLoading} error={mcpError} onAdd={handleAddMcp} onDelete={handleDeleteMcp} onCollapse={toggleLeft} />
-		) : railView === "automations" ? (
+		) : activeRailView === "automations" ? (
 			<AutomationPanel
 				items={automations}
 				loading={automationsLoading}
@@ -1415,6 +1418,8 @@ export default function App() {
 				onDelete={handleDeleteAutomation}
 				onCollapse={toggleLeft}
 			/>
+		) : activeRailView === "users" ? (
+			<UsersPanel onCollapse={toggleLeft} />
 		) : (
 			<SkillPanel
 				items={skills}
@@ -1439,11 +1444,12 @@ export default function App() {
 
 	const rail = (
 		<Rail
-			view={railView}
+			view={activeRailView}
 			onViewChange={setRailView}
 			onNewSession={handleNewSession}
 			newSessionDisabled={resetting}
 			onOpenSettings={() => setSettingsOpen(true)}
+			isOwner={!!auth?.owner}
 		/>
 	);
 
@@ -1673,14 +1679,17 @@ function LoginGate({ onSubmit, error }: { onSubmit: (password: string) => Promis
 				className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900/80 p-7 shadow-xl"
 			>
 				<h1 className="mb-1 text-lg font-semibold text-slate-100">π Harness</h1>
-				<p className="mb-5 text-sm text-slate-400">请输入访问密码</p>
+				<p className="mb-5 text-sm text-slate-400">请输入访问密码或邀请码</p>
 				{error && <p className="mb-3 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
 				<input
-					type="password"
+					type="text"
 					value={password}
 					onChange={(e) => setPassword(e.target.value)}
-					placeholder="访问密码"
-					aria-label="访问密码"
+					placeholder="访问密码或邀请码"
+					aria-label="访问密码或邀请码"
+					autoComplete="off"
+					autoCapitalize="none"
+					spellCheck={false}
 					autoFocus
 					className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500"
 				/>

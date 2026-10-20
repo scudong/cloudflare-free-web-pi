@@ -1,6 +1,6 @@
 import { Icon, type IconName } from "./Icon";
 
-export type RailView = "sessions" | "mcp" | "automations" | "skills";
+export type RailView = "sessions" | "mcp" | "automations" | "skills" | "users";
 
 interface RailProps {
 	view: RailView;
@@ -8,13 +8,15 @@ interface RailProps {
 	onNewSession: () => void;
 	newSessionDisabled?: boolean;
 	onOpenSettings: () => void;
+	/** 只有主人能看到用户管理（v0.43.0）。 */
+	isOwner?: boolean;
 }
 
 const railButton =
 	"flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 aria-pressed:bg-sky-500/15 aria-pressed:text-sky-300";
 
 /** 最左侧固定工具栏（v0.21.0）：新会话 + 会话/连接/定时/技能切换 + 设置。 */
-export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onOpenSettings }: RailProps) {
+export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onOpenSettings, isOwner }: RailProps) {
 	const item = (value: RailView, label: string, icon: IconName) => (
 		<button
 			key={value}
@@ -48,6 +50,7 @@ export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onO
 			{item("mcp", "连接", "connection")}
 			{item("automations", "定时", "clock")}
 			{item("skills", "能力", "skills")}
+			{isOwner && item("users", "用户", "users")}
 			<div aria-hidden className="flex-1" />
 			<button type="button" onClick={onOpenSettings} title="设置" aria-label="打开设置" className={railButton}>
 				<Icon name="settings" className="h-[18px] w-[18px]" />

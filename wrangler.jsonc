@@ -4,8 +4,15 @@
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
-  "durable_objects": { "bindings": [{ "name": "SpikeAgent", "class_name": "SpikeAgent" }] },
+  "durable_objects": { "bindings": [
+    { "name": "SpikeAgent", "class_name": "SpikeAgent" },
+    // 用户注册表（v0.43.0）：邀请码 / 登录校验，只做 SQL，不加载 Harness
+    { "name": "UserRegistry", "class_name": "UserRegistry" }
+  ] },
   // 前端静态资产同域部署：/agent/* 走 Worker，其余路径走 SPA
   "assets": { "directory": "./dist-web", "not_found_handling": "single-page-application", "run_worker_first": ["/agent/*", "/api/*", "/s/*"] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SpikeAgent"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SpikeAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["UserRegistry"] }
+  ]
 }

@@ -30,6 +30,15 @@ export interface ShareLinkInfo {
 	createdAt: string;
 }
 
+/** 邀请用户（v0.43.0）。 */
+export interface UserInfo {
+	id: string;
+	name: string;
+	codeHint: string;
+	createdAt: string;
+	lastUsedAt: string | null;
+}
+
 export class ApiError extends Error {
 	readonly status: number;
 
@@ -164,12 +173,23 @@ export const api = {
 	deleteFile: (sessionId: string, name: string) =>
 		requestJson<{ ok: boolean }>(withQuery("/api/files", { sessionId, name }), { method: "DELETE" }),
 
-	auth: () => requestJson<{ required?: boolean; authenticated?: boolean }>("/api/auth"),
+	auth: () => requestJson<{ required?: boolean; authenticated?: boolean; owner?: boolean }>("/api/auth"),
 
 	login: (password: string) =>
-		requestJson<{ ok?: boolean; error?: string }>("/api/login", jsonPost({ password })),
+		requestJson<{ ok?: boolean; owner?: boolean; name?: string; error?: string }>("/api/login", jsonPost({ password })),
 
 	logout: () => requestJson<{ ok?: boolean }>("/api/logout", { method: "POST" }),
+
+	/** 用户管理（v0.43.0，仅主人）：邀请码只在创建/重置时返回一次。 */
+	users: () => requestJson<{ users?: UserInfo[] }>("/api/users"),
+
+	addUser: (name: string) =>
+		requestJson<{ ok?: boolean; user?: UserInfo; code?: string; error?: string }>("/api/users", jsonPost({ name })),
+
+	resetUserCode: (id: string) =>
+		requestJson<{ ok?: boolean; code?: string; hint?: string; error?: string }>("/api/users/reset", jsonPost({ id })),
+
+	deleteUser: (id: string) => requestJson<{ ok?: boolean }>(withQuery("/api/users", { id }), { method: "DELETE" }),
 
 	abort: (sessionId: string) => requestJson<{ ok?: boolean }>("/api/abort", jsonPost({ sessionId })),
 
