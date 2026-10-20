@@ -9,7 +9,8 @@
     "build:web": "vite build src/web --outDir ../../dist-web",
     "test:unit": "vitest run tests/unit",
     "test:api": "vitest run tests/api",
-    "upgrade:pi": "node scripts/upgrade-pi.mjs"
+    "upgrade:pi": "node scripts/upgrade-pi.mjs",
+    "smoke": "node scripts/smoke.mjs"
   },
   "keywords": [],
   "author": "",

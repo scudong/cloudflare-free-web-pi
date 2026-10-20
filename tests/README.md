@@ -10,6 +10,8 @@ npm run test:api   # 只跑接口（会启动 wrangler dev）
 
 CI 里 `npm test` 在 `wrangler deploy` **之前**执行——用例不过就不部署。
 
+部署之后用 `npm run smoke`（加 `--deep` 会真跑一次 codemode）打线上接口做验收。
+
 ---
 
 ## 目录
