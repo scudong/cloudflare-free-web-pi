@@ -280,6 +280,7 @@ describe("备份与恢复", () => {
 
 describe("文件分享", () => {
 	const MD = "# 分享测试\n\n**重点** 与 `code`\n\n- 第一条\n- 第二条\n\n| 列 | 值 |\n| --- | --- |\n| a | 1 |";
+	const TOC = "# 总览\n\n## 第一节\n\n内容\n\n## 第二节\n\n### 小节\n\n内容\n\n## 重复\n\n## 重复";
 	const HTML = '<!doctype html><html><body><h1 id="shared">HTML 分享</h1><script>document.title="ok"</script></body></html>';
 
 	beforeAll(async () => {
@@ -288,6 +289,7 @@ describe("文件分享", () => {
 			data: {
 				files: [
 					{ conversation_id: "1", name: "share-test.md", content: MD, updated_at: new Date().toISOString() },
+					{ conversation_id: "1", name: "share-toc.md", content: TOC, updated_at: new Date().toISOString() },
 					{ conversation_id: "1", name: "share-test.html", content: HTML, updated_at: new Date().toISOString() },
 				],
 			},
@@ -308,7 +310,8 @@ describe("文件分享", () => {
 		const html = await page.text();
 		expect(page.status).toBe(200);
 		expect(page.headers.get("content-type")).toContain("text/html");
-		expect(html).toContain("<h1>分享测试</h1>");
+		expect(html).toContain('id="分享测试"');
+		expect(html).toContain("分享测试</h1>");
 		expect(html).toContain("<strong>重点</strong>");
 		expect(html).toContain("<li>第一条</li>");
 		expect(html).toContain("<table>");
@@ -357,6 +360,30 @@ describe("文件分享", () => {
 		const page = await fetch(created.json.url);
 		expect(page.status).toBe(410);
 		expect(await page.text()).toContain("分享链接已过期");
+	});
+
+	it("多标题 Markdown 生成目录与锚点", async () => {
+		const created = await post("/api/share", {
+			sessionId: "1",
+			kind: "file",
+			name: "share-toc.md",
+			ttlSeconds: 3600,
+			theme: "light",
+		});
+		const html = await (await fetch(created.json.url)).text();
+		expect(html).toContain('class="toc"');
+		expect(html).toContain('href="#总览"');
+		expect(html).toContain('id="总览"');
+		expect(html).toContain('href="#第二节"');
+		expect(html).toContain('class="l3"');
+		expect(html).toContain('href="#小节"');
+		// 重复标题自动加序号
+		expect(html).toContain('id="重复"');
+		expect(html).toContain('id="重复-2"');
+
+		// 只有一个标题时不显示目录
+		const single = await post("/api/share", { sessionId: "1", kind: "file", name: "share-test.md", ttlSeconds: 3600 });
+		expect(await (await fetch(single.json.url)).text()).not.toContain('class="toc"');
 	});
 
 	it("已生成的链接可复用", async () => {

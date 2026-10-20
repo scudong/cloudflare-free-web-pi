@@ -1355,9 +1355,45 @@ function escapeHtml(text: string): string {
  * 极简 Markdown → HTML（只用于公开分享页）。
  * 支持标题、列表（含任务项）、代码块、引用、分隔线、管道表格与常用行内样式。
  * 原文一律转义，不解释原始 HTML，因此没有 XSS 面。
+ * 传入 headings 时收集 h1–h4 并生成锚点 id（分享页目录，v0.41.0）。
  */
-function markdownToHtml(source: string): string {
+interface ShareHeading {
+	level: number;
+	text: string;
+	id: string;
+}
+
+/** 标题纯文本：去掉行内标记，供目录显示。 */
+function headingPlainText(text: string): string {
+	return text
+		.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+		.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+		.replace(/`([^`]+)`/g, "$1")
+		.replace(/[*_~]/g, "")
+		.trim();
+}
+
+/** 标题锚点：保留中英文数字，其余压成 -，重复的加序号。 */
+function headingSlug(text: string, used: Set<string>): string {
+	const base =
+		headingPlainText(text)
+			.toLowerCase()
+			.replace(/[^\p{L}\p{N}\s-]/gu, "")
+			.trim()
+			.replace(/\s+/g, "-") || "section";
+	let id = base;
+	let n = 2;
+	while (used.has(id)) id = `${base}-${n++}`;
+	used.add(id);
+	return id;
+}
+
+function markdownToHtml(
+	source: string,
+	opts?: { headings?: ShareHeading[]; usedIds?: Set<string> },
+): string {
 	const lines = source.replace(/\r\n?/g, "\n").split("\n");
+	const used = opts?.usedIds ?? new Set<string>();
 	const safeHref = /^(https?:\/\/|mailto:|\/|#)/i;
 	const safeSrc = /^(https?:\/\/|data:image\/)/i;
 
@@ -1417,7 +1453,14 @@ function markdownToHtml(source: string): string {
 		const heading = /^(#{1,6})\s+(.*)$/.exec(line);
 		if (heading) {
 			const level = heading[1].length;
-			out.push(`<h${level}>${inline(heading[2].trim())}</h${level}>`);
+			const raw = heading[2].trim();
+			if (opts?.headings && level <= 4) {
+				const id = headingSlug(raw, used);
+				out.push(`<h${level} id="${id}">${inline(raw)}</h${level}>`);
+				opts.headings.push({ level, text: headingPlainText(raw), id });
+			} else {
+				out.push(`<h${level}>${inline(raw)}</h${level}>`);
+			}
 			i++;
 			continue;
 		}
@@ -1497,6 +1540,15 @@ function markdownToHtml(source: string): string {
 		out.push(`<p>${paragraph.map((part) => inline(part)).join("<br>")}</p>`);
 	}
 	return out.join("\n");
+}
+
+/** 目录（v0.41.0）：少于两个标题不显示；最多 60 条。 */
+function shareToc(headings: ShareHeading[]): string {
+	if (headings.length < 2) return "";
+	const items = headings.slice(0, 60).map(
+		(h) => `<li><a class="l${Math.min(h.level, 4)}" href="#${h.id}">${escapeHtml(h.text)}</a></li>`,
+	);
+	return `<nav class="toc" aria-label="目录"><div class="toc-title">目录</div><ul>${items.join("")}</ul></nav>`;
 }
 
 /* ---- 分享页主题（v0.39.1）：与客户端四套主题一一对应 ---- */
@@ -1593,9 +1645,21 @@ header{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:.6rem
 header .badge{font-size:12px;color:var(--accent);border:1px solid var(--accent-border);background:var(--accent-soft);padding:2px 8px;border-radius:6px;white-space:nowrap}
 header h1{font-size:14px;margin:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 main{max-width:860px;margin:0 auto;padding:1.5rem 1.2rem 4rem}
+main.with-toc{max-width:1180px;display:grid;grid-template-columns:220px minmax(0,1fr);gap:1.75rem;align-items:start}
+html{scroll-behavior:smooth}
+.toc{position:sticky;top:4.6rem;max-height:calc(100vh - 6rem);overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:.9rem .8rem}
+.toc-title{font-size:11px;letter-spacing:.08em;color:var(--muted);margin:0 0 .45rem;padding-left:.4rem}
+.toc ul{list-style:none;margin:0;padding:0}
+.toc li{margin:.1rem 0}
+.toc a{display:block;padding:.24rem .4rem;border-radius:6px;color:var(--muted);text-decoration:none;font-size:12.5px;line-height:1.45;border-left:2px solid transparent}
+.toc a:hover{color:var(--fg);background:var(--accent-soft)}
+.toc a.l2{padding-left:1rem}
+.toc a.l3{padding-left:1.8rem}
+.toc a.l4{padding-left:2.6rem}
+@media (max-width:900px){main.with-toc{grid-template-columns:minmax(0,1fr);gap:.9rem}.toc{position:static;max-height:40vh}}
 article.article{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:1.4rem 1.6rem}
 article.article>*:first-child{margin-top:0}
-h1,h2,h3,h4{line-height:1.35;color:var(--fg)}
+h1,h2,h3,h4{line-height:1.35;color:var(--fg);scroll-margin-top:4.5rem}
 h1{font-size:1.6rem;margin:1.4rem 0 .7rem;border-bottom:1px solid var(--border);padding-bottom:.4rem}
 h2{font-size:1.3rem;margin:1.3rem 0 .6rem}
 h3{font-size:1.1rem;margin:1.1rem 0 .5rem}
@@ -1630,7 +1694,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:1.4rem 1rem 2
 }
 
 /** 分享页外壳（只读、noindex）。expiresAt > 0 时页脚显示有效期。 */
-function sharePage(title: string, body: string, expiresAt = 0, theme: ShareThemeId = "dark"): string {
+function sharePage(title: string, body: string, expiresAt = 0, theme: ShareThemeId = "dark", toc = ""): string {
 	const until =
 		expiresAt > 0
 			? `链接有效期至 ${new Date(expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}`
@@ -1638,7 +1702,7 @@ function sharePage(title: string, body: string, expiresAt = 0, theme: ShareTheme
 	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · 分享</title>
 <style>${shareCss(theme)}</style></head><body>
 <header><span class="badge">只读分享</span><h1>${escapeHtml(title)}</h1></header>
-<main>${body}</main>
+<main class="${toc ? "with-toc" : "single"}">${toc}${body}</main>
 <footer>由 π Harness 生成 · 只读视图${until ? ` · ${escapeHtml(until)}` : ""}</footer>
 </body></html>`;
 }
@@ -2394,10 +2458,19 @@ export class SpikeAgent extends DurableObject {
 					headers: { "content-security-policy": "sandbox allow-scripts" },
 				};
 			}
+			const headings: ShareHeading[] = [];
+			const usedIds = new Set<string>();
+			const article = markdownToHtml(content, { headings, usedIds });
 			return {
 				status: 200,
 				contentType: "text/html; charset=utf-8",
-				body: sharePage(share.name || "文件", `<article class="article">${markdownToHtml(content)}</article>`, expiresAt, theme),
+				body: sharePage(
+					share.name || "文件",
+					`<article class="article">${article}</article>`,
+					expiresAt,
+					theme,
+					shareToc(headings),
+				),
 			};
 		}
 
@@ -2421,20 +2494,23 @@ export class SpikeAgent extends DurableObject {
 			return "";
 		};
 		const parts: string[] = [];
+		// 对话分享也生成目录：所有消息共用一套锚点 id（v0.41.0）
+		const headings: ShareHeading[] = [];
+		const usedIds = new Set<string>();
 		for (const entry of [...page.items].reverse()) {
 			const kind = String(entry.kind ?? "");
 			const text = textOf(entry.model).trim();
 			if (!text) continue;
 			if (kind === "pi.user") {
-				parts.push(`<div class="msg user"><div class="who">用户</div><div class="md">${markdownToHtml(text)}</div></div>`);
+				parts.push(`<div class="msg user"><div class="who">用户</div><div class="md">${markdownToHtml(text, { headings, usedIds })}</div></div>`);
 			} else if (kind === "pi.assistant") {
-				parts.push(`<div class="msg bot"><div class="who">助手</div><div class="md">${markdownToHtml(text)}</div></div>`);
+				parts.push(`<div class="msg bot"><div class="who">助手</div><div class="md">${markdownToHtml(text, { headings, usedIds })}</div></div>`);
 			}
 		}
 		return {
 			status: 200,
 			contentType: "text/html; charset=utf-8",
-			body: sharePage(title, parts.join("") || "<p class='empty'>（暂无内容）</p>", expiresAt, theme),
+			body: sharePage(title, parts.join("") || "<p class='empty'>（暂无内容）</p>", expiresAt, theme, shareToc(headings)),
 		};
 	}
 
