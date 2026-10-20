@@ -70,3 +70,4 @@ tests/
 | **上下文压缩（提示）** | `unit/entries.test.ts` · 上下文压缩 |
 | **目标模式** | `api/api.test.ts` · 目标模式 + 工具注册（防回归） |
 | **会话分支** | `unit/sessionTree.test.ts` + `api/api.test.ts` · 会话分支 |
+| **工具审批** | `api/api.test.ts` · 工具审批 |

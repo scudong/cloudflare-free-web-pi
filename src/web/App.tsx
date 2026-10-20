@@ -9,13 +9,14 @@ import { Rail, type RailView } from "./components/Rail";
 import { AutomationPanel, McpPanel, SkillPanel } from "./components/LeftPanels";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { GoalBar, GoalDialog } from "./components/GoalBar";
+import { ApprovalBar } from "./components/ApprovalBar";
 import { api } from "./lib/api";
 import { parseEntries, truncateOneLine } from "./lib/entries";
 import { parseAutomations, parseFiles, parseMemories, parsePrompts, parseRules, parseSessions, parseSkills } from "./lib/collections";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { AutomationInfo, ChatMessage, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
+import type { ApprovalInfo, AutomationInfo, ChatMessage, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -87,6 +88,10 @@ export default function App() {
 	// 目标模式（v0.31.0）
 	const [goal, setGoal] = useState<GoalInfo | null>(null);
 	const [goalDialogOpen, setGoalDialogOpen] = useState(false);
+	// 工具审批（v0.33.0）
+	const [approvals, setApprovals] = useState<ApprovalInfo[]>([]);
+	const [approvalBusy, setApprovalBusy] = useState(false);
+	const [approvalSettings, setApprovalSettings] = useState<{ read: string; write: string; exec: string } | null>(null);
 	/** 从聊天里的文件卡打开右栏预览（v0.22.0）。 */
 	const [fileRequest, setFileRequest] = useState<{ name: string; tick: number } | null>(null);
 	const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
@@ -218,6 +223,16 @@ export default function App() {
 			alive = false;
 		};
 	}, [sessionId, panelTick]);
+
+	/** 拉取待审批列表（工具被拦下后调用）。 */
+	const refreshApprovals = useCallback(async () => {
+		try {
+			const data = await api.approvals(sessionId);
+			setApprovals(data.approvals ?? []);
+		} catch {
+			// 忽略：下一次事件会再拉
+		}
+	}, [sessionId]);
 
 	/** Send one message (event handler, not an effect). */
 	const handleSend = useCallback(
@@ -355,6 +370,8 @@ export default function App() {
 								const target = id
 									? tools.find((t) => t.id === id)
 									: [...tools].reverse().find((t) => t.name === name && t.status === "running");
+								// 工具被审批拦下时会在摘要里说明：立刻刷新待审批列表
+								if (typeof event.summary === "string" && event.summary.includes("待审批")) void refreshApprovals();
 								if (target) {
 									target.status = event.error ? "error" : "done";
 									target.summary =
@@ -364,6 +381,7 @@ export default function App() {
 								}
 								syncBubble();
 							} else if (event.type === "done") {
+								void refreshApprovals();
 								const answer = typeof event.answer === "string" ? event.answer : "";
 								if (!bubbleShown) ensureBubble();
 								setMessages((prev) => {
@@ -457,6 +475,46 @@ export default function App() {
 		[sessionId, resetting, pending, nextId],
 	);
 
+	/** 审批决定（v0.33.0）：允许后自动让模型继续，拒绝则让它改方案。 */
+	const handleDecideApproval = useCallback(
+		(id: number, action: "once" | "always" | "deny") => {
+			setApprovalBusy(true);
+			void (async () => {
+				try {
+					const res = await api.decideApproval(id, action);
+					setApprovals((prev) => prev.filter((a) => a.id !== id));
+					if (res.resume) handleSend(res.resume, []);
+				} catch (err) {
+					const detail = err instanceof Error ? err.message : String(err);
+					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `审批失败：${detail}` }]);
+				} finally {
+					setApprovalBusy(false);
+				}
+			})();
+		},
+		[sessionId, handleSend, nextId],
+	);
+
+	/** 审批策略（v0.33.0）：分级或逐工具覆盖。 */
+	const handleChangeApproval = useCallback(
+		(patch: Partial<{ read: string; write: string; exec: string }>) => {
+			setApprovalSettings((prev) => ({ read: "allow", write: "allow", exec: "allow", ...(prev ?? {}), ...patch }));
+			void api.setSettings({ approval: patch }).catch(() => {
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "审批策略保存失败。" }]);
+			});
+		},
+		[nextId],
+	);
+
+	const handleChangeApprovalTool = useCallback(
+		(name: string, policy: string) => {
+			void api.setSettings({ approvalTools: { [name]: policy } }).catch(() => {
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "逐工具策略保存失败。" }]);
+			});
+		},
+		[nextId],
+	);
+
 	/** 停止目标的自动续转（保留记录）。 */
 	const handleStopGoal = useCallback(async () => {
 		try {
@@ -533,6 +591,7 @@ export default function App() {
 					setWebSearch(data.webSearch !== false);
 					if (typeof data.thinkingLevel === "string") setThinkingLevel(data.thinkingLevel);
 					if (data.compaction) setCompaction(data.compaction);
+					if (data.approval) setApprovalSettings(data.approval);
 				}
 			} catch {
 				if (alive) setWebSearch(true);
@@ -575,6 +634,22 @@ export default function App() {
 				if (alive) setGoal(data.goal ?? null);
 			} catch {
 				if (alive) setGoal(null);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [sessionId]);
+
+	// 待审批（v0.33.0）：切会话时读一次
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.approvals(sessionId);
+				if (alive) setApprovals(data.approvals ?? []);
+			} catch {
+				if (alive) setApprovals([]);
 			}
 		})();
 		return () => {
@@ -1312,6 +1387,7 @@ export default function App() {
 							onBranch={handleBranch}
 						/>
 						{goal && <GoalBar goal={goal} onStop={() => void handleStopGoal()} onNew={() => setGoalDialogOpen(true)} />}
+						<ApprovalBar approvals={approvals} busy={approvalBusy || pending} onDecide={handleDecideApproval} />
 						<Composer pending={pending} onSend={handleSend} onStop={handleStop} skills={skills} prompts={prompts} />
 					</section>
 				)}
@@ -1377,6 +1453,9 @@ export default function App() {
 				compaction={compaction}
 				onChangeCompaction={handleChangeCompaction}
 				sessionId={sessionId}
+				approval={approvalSettings}
+				onChangeApproval={handleChangeApproval}
+				onChangeApprovalTool={handleChangeApprovalTool}
 				memories={memories}
 				memoriesLoading={memoriesState === "loading"}
 				memoriesError={memoriesError}

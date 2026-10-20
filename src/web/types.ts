@@ -106,7 +106,18 @@ export interface GoalInfo {
 	updatedAt?: string;
 }
 
-/** 提示模板（v0.31.0）：输入 / 选中后把正文填进输入框。 */export interface PromptInfo {
+/** 待审批的工具调用（v0.33.0）。 */
+export interface ApprovalInfo {
+	id: number;
+	tool: string;
+	category: string;
+	/** 调用参数的 JSON 预览（截断）。 */
+	args: string;
+	created_at: string;
+}
+
+/** 提示模板（v0.31.0）：输入 / 选中后把正文填进输入框。 */
+export interface PromptInfo {
 	name: string;
 	description: string;
 	content: string;

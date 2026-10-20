@@ -387,6 +387,47 @@ describe("会话分支", () => {
 	});
 });
 
+describe("工具审批", () => {
+	it("工具清单带分级，默认全部放行", async () => {
+		const { json } = await api("/api/tools");
+		expect(json.approval).toEqual({ read: "allow", write: "allow", exec: "allow" });
+		const byName = new Map(json.tools.map((t: { name: string; category: string; policy: string }) => [t.name, t]));
+		expect(byName.get("read_file")).toMatchObject({ category: "read", policy: "allow" });
+		expect(byName.get("write_file")).toMatchObject({ category: "write" });
+		expect(byName.get("codemode")).toMatchObject({ category: "exec" });
+		expect(byName.get("dispatch_tasks")).toMatchObject({ category: "exec" });
+	});
+
+	it("改分级策略后生效策略跟随", async () => {
+		await post("/api/settings", { approval: { write: "ask" } });
+		const { json } = await api("/api/tools");
+		expect(json.approval.write).toBe("ask");
+		const writeTool = json.tools.find((t: { name: string }) => t.name === "write_file");
+		expect(writeTool.policy).toBe("ask");
+		// 其它档位不受影响
+		expect(json.tools.find((t: { name: string }) => t.name === "read_file").policy).toBe("allow");
+	});
+
+	it("逐工具覆盖优先于分级", async () => {
+		await post("/api/settings", { approvalTools: { write_file: "allow" } });
+		const { json } = await api("/api/tools");
+		expect(json.tools.find((t: { name: string }) => t.name === "write_file").policy).toBe("allow");
+		await post("/api/settings", { approvalTools: { write_file: "follow" }, approval: { write: "allow" } });
+	});
+
+	it("非法与不存在的审批决定被拒绝", async () => {
+		const bad = await post("/api/approvals", { id: 0, action: "once" });
+		expect(bad.status).toBe(400);
+		const missing = await post("/api/approvals", { id: 999999, action: "once" });
+		expect(missing.status).toBe(404);
+	});
+
+	it("待审批列表默认空", async () => {
+		const { json } = await api("/api/approvals?sessionId=1");
+		expect(Array.isArray(json.approvals)).toBe(true);
+	});
+});
+
 describe("导出与版本", () => {
 	it("导出 Markdown 返回文本", async () => {
 		const res = await fetch(`${BASE}/api/export?format=md&sessionId=1`);

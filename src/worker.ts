@@ -78,6 +78,9 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	sql.exec(`CREATE TABLE IF NOT EXISTS rules (name TEXT PRIMARY KEY, content TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`);
 	// 目标模式（v0.31.0）：一个会话一个目标，active 时按 token 预算与轮次自动续转
 	sql.exec(`CREATE TABLE IF NOT EXISTS goals (session_id TEXT PRIMARY KEY, objective TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', token_budget INTEGER NOT NULL DEFAULT 200000, baseline_tokens INTEGER NOT NULL DEFAULT 0, tokens_used INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0, max_turns INTEGER NOT NULL DEFAULT 12, summary TEXT NOT NULL DEFAULT '', next_run_at INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+	// 工具审批（v0.33.0）：待审批请求 + 已授予的放行许可
+	sql.exec(`CREATE TABLE IF NOT EXISTS approvals (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool TEXT NOT NULL, category TEXT NOT NULL, args TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, decided_at TEXT)`);
+	sql.exec(`CREATE TABLE IF NOT EXISTS approval_grants (session_id TEXT NOT NULL, tool TEXT NOT NULL, uses INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, PRIMARY KEY (session_id, tool))`);
 	// LLM 供应商（v0.27.0）：CCswitch 式自定义 OpenAI 兼容端点
 	sql.exec(`CREATE TABLE IF NOT EXISTS providers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL, models TEXT NOT NULL, created_at TEXT NOT NULL)`);
 	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
@@ -225,6 +228,144 @@ function goalContinuePrompt(row: GoalRow): string {
 }
 
 
+/* ---------------- 工具审批（v0.33.0） ---------------- */
+
+type ApprovalCategory = "read" | "write" | "exec";
+type ApprovalPolicy = "allow" | "ask" | "deny";
+
+/** 已知工具的默认分级。MCP 工具按写操作、未知工具按读取处理。 */
+const TOOL_CATEGORY: Record<string, ApprovalCategory> = {
+	now: "read",
+	recall: "read",
+	list_skills: "read",
+	load_skill: "read",
+	read_file: "read",
+	list_files: "read",
+	web_search: "read",
+	web_fetch_page: "read",
+	http_fetch: "read",
+	tool_search: "read",
+	update_plan: "read",
+	set_goal: "read",
+	complete_goal: "read",
+	report_goal: "read",
+	write_file: "write",
+	remember: "write",
+	codemode: "exec",
+	dispatch_tasks: "exec",
+};
+
+const APPROVAL_LABEL: Record<ApprovalCategory, string> = { read: "读取", write: "写入", exec: "执行" };
+
+function toolCategory(name: string): ApprovalCategory {
+	const known = TOOL_CATEGORY[name];
+	if (known) return known;
+	if (name.startsWith("mcp__")) return "write";
+	return "read";
+}
+
+/** 三档策略（供设置页读取）。 */
+function approvalSettings(): { read: ApprovalPolicy; write: ApprovalPolicy; exec: ApprovalPolicy } {
+	const pick = (level: ApprovalCategory): ApprovalPolicy => {
+		const value = getSetting(`approval_${level}`, "allow");
+		return value === "ask" || value === "deny" ? value : "allow";
+	};
+	return { read: pick("read"), write: pick("write"), exec: pick("exec") };
+}
+
+/** 生效策略：逐工具覆盖 > 分级策略 > 默认放行。 */
+function toolPolicy(name: string): ApprovalPolicy {
+	const override = getSetting(`approval_tool_${name}`, "follow");
+	if (override === "allow" || override === "ask" || override === "deny") return override;
+	const level = getSetting(`approval_${toolCategory(name)}`, "allow");
+	return level === "ask" || level === "deny" ? level : "allow";
+}
+
+/** 子代理会话在侧栏不可见，没人能点审批：直接放行，避免子任务卡死。 */
+function isHiddenSession(sessionId: string): boolean {
+	try {
+		const rows = sqlFacade!.exec("SELECT hidden FROM sessions_meta WHERE id = ?", sessionId).toArray() as { hidden?: number }[];
+		return Number(rows[0]?.hidden ?? 0) === 1;
+	} catch {
+		return false;
+	}
+}
+
+/** 消耗一次放行许可（uses = -1 表示始终允许）。 */
+function consumeApprovalGrant(sessionId: string, tool: string): boolean {
+	try {
+		const rows = sqlFacade!.exec("SELECT uses FROM approval_grants WHERE session_id = ? AND tool = ?", sessionId, tool).toArray() as {
+			uses: number;
+		}[];
+		const row = rows[0];
+		if (!row) return false;
+		if (row.uses < 0) return true;
+		if (row.uses <= 1) sqlFacade!.exec("DELETE FROM approval_grants WHERE session_id = ? AND tool = ?", sessionId, tool);
+		else sqlFacade!.exec("UPDATE approval_grants SET uses = uses - 1 WHERE session_id = ? AND tool = ?", sessionId, tool);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** 记录一条待审批；同一会话同一工具已有待审批时不重复插入。 */
+function recordApproval(sessionId: string, tool: string, category: ApprovalCategory, args: unknown): number | null {
+	try {
+		const existing = sqlFacade!
+			.exec("SELECT id FROM approvals WHERE session_id = ? AND tool = ? AND status = 'pending' ORDER BY id DESC", sessionId, tool)
+			.toArray() as { id: number }[];
+		if (existing[0]) return existing[0].id;
+		const preview = (() => {
+			try {
+				return JSON.stringify(args ?? {}).slice(0, 800);
+			} catch {
+				return "";
+			}
+		})();
+		sqlFacade!.exec(
+			"INSERT INTO approvals (session_id, tool, category, args, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
+			sessionId, tool, category, preview, new Date().toISOString(),
+		);
+		const rows = sqlFacade!.exec("SELECT last_insert_rowid() AS id").toArray() as { id: number }[];
+		return rows[0]?.id ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/** 给工具套上审批闸门：放行 / 询问（无许可时记一条待审批并让模型等待）/ 禁止。 */
+function withApproval<T extends { name: string; execute?: (args: never, api: never) => unknown }>(tool: T): T {
+	const original = tool.execute;
+	if (typeof original !== "function") return tool;
+	return {
+		...tool,
+		execute: async (args: never, api: never) => {
+			const policy = toolPolicy(tool.name);
+			const run = () => (original as (a: never, b: never) => unknown)(args, api);
+			if (policy === "allow") return run();
+			const sid = String((api as unknown as { conversationId?: unknown })?.conversationId ?? "1");
+			if (isHiddenSession(sid)) return run();
+			const category = toolCategory(tool.name);
+			if (policy === "deny") {
+				return {
+					output: [{
+						type: "text",
+						text: `「${tool.name}」属于${APPROVAL_LABEL[category]}级操作，当前策略为禁止。请告诉用户：可在 设置 → 工具审批 中调整。`,
+					}],
+				};
+			}
+			if (consumeApprovalGrant(sid, tool.name)) return run();
+			const id = recordApproval(sid, tool.name, category, args);
+			return {
+				output: [{
+					type: "text",
+					text: `「${tool.name}」属于${APPROVAL_LABEL[category]}级操作，需要用户确认后才能执行。已提交待审批${id ? `（#${id}）` : ""}：不要重复调用本工具，等用户批准后再继续。`,
+				}],
+			};
+		},
+	} as T;
+}
+
 /* ---------------- 提示模板与规则（v0.31.0） ---------------- */
 
 type RuleRow = { name: string; content: string; enabled: number };
@@ -346,7 +487,7 @@ const stripHtml = (html: string) =>
 		.trim()
 		.slice(0, 6000);
 
-const spikeExtension = defineExtension({
+const baseSpikeExtension = defineExtension({
 	name: "spike",
 	tools: [
 		defineTool({
@@ -781,6 +922,13 @@ const spikeExtension = defineExtension({
 		}),
 	],
 });
+
+/** 带审批闸门的扩展（v0.33.0）：工具名与描述不变，只在 execute 外按 read/write/exec 策略判断。 */
+const spikeExtension = {
+	...baseSpikeExtension,
+	tools: (baseSpikeExtension.tools ?? []).map((tool) => withApproval(tool as never)),
+};
+
 /** 把 data URL 解析成 pi-ai 的图片块；不合法的丢弃。 */
 function toImageBlocks(images: string[] | undefined): { type: "image"; data: string; mimeType: string }[] {
 	if (!images?.length) return [];
@@ -846,7 +994,11 @@ function parseFrontmatter(text: string): { name: string; description: string; bo
 }
 
 /** 工具搜索扩展：模型先搜再加载被延迟的工具（v0.13.0）。 */
-const toolSearchExtension = createToolSearchExtension();
+const baseToolSearchExtension = createToolSearchExtension();
+const toolSearchExtension = {
+	...baseToolSearchExtension,
+	tools: (baseToolSearchExtension.tools ?? []).map((tool) => withApproval(tool as never)),
+};
 /** MCP 工具总数达到该阈值时改为延迟披露，避免工具列表撑爆上下文。 */
 const DEFER_MCP_THRESHOLD = 12;
 
@@ -855,10 +1007,15 @@ const AVAILABLE_MODELS = ["deepseek-flash", "deepseek-v4-pro"];
 const DEFAULT_MODEL_ID = "deepseek-flash";
 
 /** Code mode 扩展：单例即可（沙箱无状态，脚本每次执行新建 VM）。 */
-const codemodeExtension = createCodemodeExtension({
+const baseCodemodeExtension = createCodemodeExtension({
 	sandbox: createInlineCodemodeSandbox({ memoryLimitBytes: 64 * 1024 * 1024 }),
 	models: false,
 });
+/** 同样套审批闸门（v0.33.0）：codemode 属 exec 级。 */
+const codemodeExtension = {
+	...baseCodemodeExtension,
+	tools: (baseCodemodeExtension.tools ?? []).map((tool) => withApproval(tool as never)),
+};
 
 /** 已连接的 MCP 客户端缓存：同一 DO 实例内复用，配置变更时清空。 */
 const mcpCache = new Map<string, { client: McpClient; tools: { name: string; description?: string; inputSchema?: unknown }[] }>();
@@ -915,7 +1072,8 @@ async function buildMcpExtension(sql: { exec(q: string, ...b: unknown[]): { toAr
 			);
 		}
 	}
-	return defineExtension({ name: "mcp", tools });
+	// MCP 工具默认按写入处理（外部服务可能有副作用），统一套审批闸门（v0.33.0）
+	return defineExtension({ name: "mcp", tools: tools.map((tool) => withApproval(tool as never)) });
 }
 
 export class SpikeAgent extends DurableObject {
@@ -2292,6 +2450,17 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 					{ id: "plan", name: "计划清单", description: "update_plan 维护分步计划", enabled: true },
 					{ id: "subagents", name: "子代理", description: "dispatch_tasks 并行分派子任务", enabled: true },
 					{ id: "goal", name: "目标模式", description: "目标 + token 预算 + 自动续转 + 完成校验", enabled: true },
+					...((): { id: string; name: string; description: string; enabled: boolean; detail?: string }[] => {
+						const a = approvalSettings();
+						const on = a.read !== "allow" || a.write !== "allow" || a.exec !== "allow";
+						return [{
+							id: "approval",
+							name: "工具审批",
+							description: "read/write/exec 三档 + 逐工具覆盖",
+							enabled: on,
+							detail: `读 ${a.read} / 写 ${a.write} / 执行 ${a.exec}`,
+						}];
+					})(),
 					{ id: "web_search", name: "联网搜索", description: "web_search / web_fetch_page", enabled: getSetting("web_search", "1") === "1" },
 				];
 				const data = [
@@ -2311,12 +2480,78 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 					],
 				});
 			}
+			/* ---- 工具审批（v0.33.0） ---- */
+			if (url.pathname === "/approvals" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const sid = url.searchParams.get("sessionId") ?? "1";
+				const rows = sqlFacade!
+					.exec(
+						"SELECT id, tool, category, args, created_at FROM approvals WHERE session_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 20",
+						sid,
+					)
+					.toArray() as { id: number; tool: string; category: string; args: string; created_at: string }[];
+				return Response.json({ approvals: rows });
+			}
+			if (url.pathname === "/approvals" && request.method === "POST") {
+				ensureTables(sqlFacade!);
+				const body = (await request.json().catch(() => ({}))) as { id?: number; action?: string };
+				const id = Math.floor(Number(body.id));
+				const action = body.action;
+				if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false, error: "缺少待审批 id" }, { status: 400 });
+				if (action !== "once" && action !== "always" && action !== "deny") {
+					return Response.json({ ok: false, error: "action 必须是 once / always / deny" }, { status: 400 });
+				}
+				const rows = sqlFacade!.exec("SELECT id, session_id, tool, status FROM approvals WHERE id = ?", id).toArray() as {
+					id: number; session_id: string; tool: string; status: string;
+				}[];
+				const row = rows[0];
+				if (!row) return Response.json({ ok: false, error: "待审批不存在" }, { status: 404 });
+				if (row.status === "pending") {
+					const now = new Date().toISOString();
+					if (action === "deny") {
+						sqlFacade!.exec("UPDATE approvals SET status = 'denied', decided_at = ? WHERE id = ?", now, id);
+						sqlFacade!.exec("DELETE FROM approval_grants WHERE session_id = ? AND tool = ?", row.session_id, row.tool);
+					} else {
+						sqlFacade!.exec("UPDATE approvals SET status = 'approved', decided_at = ? WHERE id = ?", now, id);
+						sqlFacade!.exec(
+							`INSERT INTO approval_grants (session_id, tool, uses, created_at) VALUES (?, ?, ?, ?)
+							 ON CONFLICT(session_id, tool) DO UPDATE SET uses = CASE WHEN approval_grants.uses < 0 THEN -1 ELSE excluded.uses END`,
+							row.session_id, row.tool, action === "always" ? -1 : 1, now,
+						);
+					}
+				}
+				const resume =
+					action === "deny"
+						? `用户拒绝了对工具「${row.tool}」的调用，请不要再用它，改换方案或向用户说明。`
+						: `已批准工具「${row.tool}」（${action === "always" ? "以后允许" : "本次"}），请继续刚才的操作。`;
+				return Response.json({ ok: true, id, action, tool: row.tool, resume });
+			}
+			if (url.pathname === "/tools" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const names = new Set<string>();
+				// 内置扩展（spike / codemode / tool-search）+ 已连接的 MCP 工具
+				for (const ext of [spikeExtension, codemodeExtension, toolSearchExtension, this.mcpExt] as unknown as {
+					tools?: { name?: string }[];
+				}[]) {
+					for (const tool of ext?.tools ?? []) if (tool.name) names.add(tool.name);
+				}
+				return Response.json({
+					approval: approvalSettings(),
+					tools: [...names].sort().map((name) => ({
+						name,
+						category: toolCategory(name),
+						policy: toolPolicy(name),
+						override: getSetting(`approval_tool_${name}`, "follow"),
+					})),
+				});
+			}
 			if (url.pathname === "/settings" && request.method === "GET") {
 				ensureTables(sqlFacade!);
 				return Response.json({
 					webSearch: getSetting("web_search", "1") === "1",
 					thinkingLevel: currentThinkingLevel(),
 					compaction: compactionSettings(),
+					approval: approvalSettings(),
 				});
 			}
 			if (url.pathname === "/settings" && request.method === "POST") {
@@ -2324,6 +2559,23 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 				if (typeof body.webSearch === "boolean") setSetting("web_search", body.webSearch ? "1" : "0");
 				if (body.thinkingLevel === "off" || body.thinkingLevel === "low" || body.thinkingLevel === "high") {
 					setSetting("thinking_level", body.thinkingLevel);
+				}
+				// 工具审批（v0.33.0）：三档策略 + 逐工具覆盖
+				const ap = (body as { approval?: Record<string, unknown> }).approval;
+				if (ap && typeof ap === "object") {
+					for (const level of ["read", "write", "exec"] as const) {
+						const value = ap[level];
+						if (value === "allow" || value === "ask" || value === "deny") setSetting(`approval_${level}`, value);
+					}
+				}
+				const apTools = (body as { approvalTools?: Record<string, unknown> }).approvalTools;
+				if (apTools && typeof apTools === "object") {
+					for (const [name, value] of Object.entries(apTools)) {
+						if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(name)) continue;
+						if (value === "follow" || value === "allow" || value === "ask" || value === "deny") {
+							setSetting(`approval_tool_${name}`, value);
+						}
+					}
 				}
 				const c = (body as { compaction?: Record<string, unknown> }).compaction;
 				let compactionChanged = false;
@@ -2351,6 +2603,7 @@ article.md{background:#111c31;border:1px solid #1e293b;border-radius:14px;paddin
 					webSearch: getSetting("web_search", "1") === "1",
 					thinkingLevel: currentThinkingLevel(),
 					compaction: compactionSettings(),
+					approval: approvalSettings(),
 				});
 			}
 			if (url.pathname === "/compact" && request.method === "POST") {

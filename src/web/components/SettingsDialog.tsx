@@ -40,6 +40,10 @@ interface SettingsDialogProps {
 	onChangeCompaction: (patch: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>) => void;
 	/** 手动压缩的目标会话（v0.31.0）。 */
 	sessionId: string;
+	/** 工具审批策略（v0.33.0）。 */
+	approval: { read: string; write: string; exec: string } | null;
+	onChangeApproval: (patch: Partial<{ read: string; write: string; exec: string }>) => void;
+	onChangeApprovalTool: (name: string, policy: string) => void;
 	/** 记忆库（v0.21.0 从工作台移入设置）。 */
 	memories: MemoryInfo[];
 	memoriesLoading: boolean;
@@ -113,6 +117,9 @@ export function SettingsDialog({
 	compaction,
 	onChangeCompaction,
 	sessionId,
+	approval,
+	onChangeApproval,
+	onChangeApprovalTool,
 	memories,
 	memoriesLoading,
 	memoriesError,
@@ -125,6 +132,8 @@ export function SettingsDialog({
 	const restoreRef = useRef<HTMLInputElement>(null);
 	const [tab, setTab] = useState<SettingsTab>("general");
 	const [clearing, setClearing] = useState(false);
+	/** 工具清单（v0.33.0）：打开「对话」tab 时读取，用于逐工具覆盖。 */
+	const [toolList, setToolList] = useState<{ name: string; category: string; policy: string; override: string }[]>([]);
 	/** 手动压缩（v0.31.0）。 */
 	const [compactState, setCompactState] = useState<"idle" | "running" | "done" | "error">("idle");
 	const [compactMessage, setCompactMessage] = useState("");
@@ -146,6 +155,23 @@ export function SettingsDialog({
 			setCompactMessage(err instanceof Error ? err.message : String(err));
 		}
 	};
+
+	// 工具清单（v0.33.0）
+	useEffect(() => {
+		if (!open || tab !== "chat") return;
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.tools();
+				if (alive && Array.isArray(data.tools)) setToolList(data.tools);
+			} catch {
+				// 接口不可用时保持空列表
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [open, tab]);
 
 	// 供应商（v0.27.0）
 	const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -434,6 +460,62 @@ export function SettingsDialog({
 								</div>
 							</Section>
 
+
+							<Section title="工具审批">
+								<p className="mb-2 text-xs leading-relaxed text-slate-500">
+									按 read / write / exec 三档控制工具：放行 = 直接执行；询问 = 聊天里出现待审批条，点允许后才执行；禁止 = 直接拒绝。
+								</p>
+								<div className="grid grid-cols-3 gap-2">
+									{([
+										["read", "读取"],
+										["write", "写入"],
+										["exec", "执行"],
+									] as const).map(([level, label]) => (
+										<label key={level} className="text-xs text-slate-400">
+											{label}
+											<select
+												value={approval?.[level] ?? "allow"}
+												onChange={(e) => onChangeApproval({ [level]: e.target.value })}
+												className="mt-1 w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100"
+											>
+												<option value="allow">放行</option>
+												<option value="ask">询问</option>
+												<option value="deny">禁止</option>
+											</select>
+										</label>
+									))}
+								</div>
+								<details className="mt-3 rounded-md border border-slate-800 p-2">
+									<summary className="cursor-pointer text-xs text-slate-400">
+										逐工具覆盖（{toolList.length} 个工具）
+									</summary>
+									<ul className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+										{toolList.map((tool) => (
+											<li key={tool.name} className="flex items-center justify-between gap-2 text-xs">
+												<span className="min-w-0 truncate text-slate-300" title={`${tool.name} · ${tool.category}`}>
+													{tool.name}
+													<span className="ml-1 text-[10px] text-slate-500">{tool.category}</span>
+												</span>
+												<select
+													value={tool.override}
+													onChange={(e) => {
+														const next = e.target.value;
+														onChangeApprovalTool(tool.name, next);
+														setToolList((prev) => prev.map((t) => (t.name === tool.name ? { ...t, override: next } : t)));
+													}}
+													aria-label={`${tool.name} 的审批策略`}
+													className="w-24 shrink-0 rounded-md border border-slate-700 bg-slate-800/70 px-1 py-1 text-[11px] text-slate-100"
+												>
+													<option value="follow">跟随分级</option>
+													<option value="allow">放行</option>
+													<option value="ask">询问</option>
+													<option value="deny">禁止</option>
+												</select>
+											</li>
+										))}
+									</ul>
+								</details>
+							</Section>
 							<Section title="网页搜索">
 								<div className="flex items-start justify-between gap-4">
 									<div className="min-w-0">

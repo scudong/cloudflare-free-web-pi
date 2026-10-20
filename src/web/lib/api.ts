@@ -235,19 +235,41 @@ export const api = {
 	setModel: (sessionId: string, modelId: string) =>
 		requestJson<{ ok?: boolean }>("/api/model", jsonPost({ sessionId, modelId })),
 
-	/** 全局设置（v0.20.0 网页搜索；v0.22.0 增加思考档位）。 */
+	/** 全局设置（v0.20.0 网页搜索；v0.22.0 思考档位；v0.33.0 工具审批）。 */
 	settings: () =>
 		requestJson<{
 			webSearch?: boolean;
 			thinkingLevel?: string;
 			compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number };
+			approval?: { read: string; write: string; exec: string };
 		}>("/api/settings"),
 
 	setSettings: (patch: {
 		webSearch?: boolean;
 		thinkingLevel?: string;
 		compaction?: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>;
+		approval?: Partial<{ read: string; write: string; exec: string }>;
+		approvalTools?: Record<string, string>;
 	}) => requestJson<{ ok?: boolean }>("/api/settings", jsonPost(patch)),
+
+	/** 工具清单与生效策略（v0.33.0）。 */
+	tools: () =>
+		requestJson<{
+			approval?: { read: string; write: string; exec: string };
+			tools?: { name: string; category: string; policy: string; override: string }[];
+		}>("/api/tools"),
+
+	/** 待审批的工具调用（v0.33.0）。 */
+	approvals: (sessionId: string) =>
+		requestJson<{
+			approvals?: { id: number; tool: string; category: string; args: string; created_at: string }[];
+		}>(withQuery("/api/approvals", { sessionId })),
+
+	decideApproval: (id: number, action: "once" | "always" | "deny") =>
+		requestJson<{ ok?: boolean; tool?: string; action?: string; resume?: string; error?: string }>(
+			"/api/approvals",
+			jsonPost({ id, action }),
+		),
 
 	/** 当前会话的分步计划（v0.22.0）。 */
 	plan: (sessionId: string) =>
