@@ -1,0 +1,27 @@
+name: smoke
+
+# 每 6 小时打一次线上接口 + 真跑一次 codemode，用来发现「部署后过了几天才坏」的问题。
+# 也可以手动触发。需要 secret：SMOKE_PASSWORD
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    if: ${{ github.repository == 'scudong/pi-harness' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 线上冒烟
+        env:
+          PI_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          if [ -z "$PI_PASSWORD" ]; then
+            echo "未配置 SMOKE_PASSWORD secret，跳过"
+            exit 0
+          fi
+          npm run smoke -- --deep

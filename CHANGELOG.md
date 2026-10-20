@@ -2,6 +2,14 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-20（冒烟接入 CI）
+
+### 部署后自动冒烟 + 每 6 小时巡检（v0.37.2）
+- `deploy.yml` 在 `wrangler deploy` 之后加一步：轮询 `/api/version` 等 DO 换到本次构建（最多 6 分钟），然后 `npm run smoke -- --deep`
+- 新增 `smoke.yml`：每 6 小时 + 手动触发跑一次线上冒烟，抓「部署几天后才坏」的问题
+- 密码走仓库 secret `SMOKE_PASSWORD`（已配置）；未配置时自动跳过而不是失败
+- 冒烟脚本的 `--deep` 会清掉自己创建的会话，不在侧栏堆积
+
 ## 2026-10-20（线上冒烟测试）
 
 ### npm run smoke：部署后一条命令验收（v0.37.1）

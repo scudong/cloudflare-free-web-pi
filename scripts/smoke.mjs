@@ -155,10 +155,12 @@ await check("GET /api/custom-tools", async () => {
 });
 
 // ---- 深度：真实对话验证工具执行链路 ----
+let deepSessionId = null;
 if (DEEP) {
 	await check("POST /api/chat/stream（codemode 实跑）", async () => {
 		const created = await call("/api/sessions", { method: "POST" });
 		const sessionId = created.json?.id;
+		deepSessionId = sessionId;
 		expect(sessionId, "建会话失败");
 		const res = await fetch(`${BASE}/api/chat/stream`, {
 			method: "POST",
@@ -172,6 +174,8 @@ if (DEEP) {
 		expect(/408/.test(text), "结果不对（12*34 应为 408）");
 		return "codemode 正常";
 	});
+	// 清掉冒烟用的会话，避免在侧栏堆积
+	if (deepSessionId) await call(`/api/sessions?id=${deepSessionId}`, { method: "DELETE" }).catch(() => {});
 }
 
 // ---- 输出 ----

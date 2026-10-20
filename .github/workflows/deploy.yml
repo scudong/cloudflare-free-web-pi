@@ -21,3 +21,27 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # 部署后冒烟：先等 Durable Object 换成本次构建（最多 ~6 分钟），再打线上接口 + 真跑一次 codemode
+      - name: 线上冒烟
+        env:
+          PI_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          if [ -z "$PI_PASSWORD" ]; then
+            echo "未配置 SMOKE_PASSWORD secret，跳过线上冒烟"
+            exit 0
+          fi
+          BASE=https://pi-harness-gw.pages.dev
+          JAR=$(mktemp)
+          curl -s -c "$JAR" -X POST "$BASE/api/login" -H 'content-type: application/json' \
+            -d "{\"password\":\"$PI_PASSWORD\"}" > /dev/null
+          for i in $(seq 1 18); do
+            BUILD=$(curl -s -b "$JAR" "$BASE/api/version" | grep -o '"build":"[^"]*"' | cut -d'"' -f4)
+            echo "试图 $i：线上构建 ${BUILD:-未知}"
+            if [ "$BUILD" = "${{ github.sha }}" ]; then
+              echo "DO 已切到本次构建"
+              break
+            fi
+            sleep 20
+          done
+          npm run smoke -- --deep
