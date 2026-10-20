@@ -1,0 +1,128 @@
+src/web/components/Sidebar.tsx
+  00512495ff504ece 2,13-14,37,41,46-59,78,86,93-98
+src/web/lib/api.ts
+  00512495ff504ece 87-93
+src/web/App.tsx
+  00512495ff504ece 56-60,436-459,895,897-898,906,915-937,1209,1217,1226,1243,1269-1283,1297-1300,1312,1350
+tests/README.md
+  00512495ff504ece 72
+src/web/components/ChatHeader.tsx
+  00512495ff504ece 13-17,21-34,38-48,85-95
+tests/unit/sessionTree.test.ts
+  00512495ff504ece 1-48
+src/web/types.ts
+  00512495ff504ece 31,53-56
+tests/api/api.test.ts
+  00512495ff504ece 353-389
+src/worker.ts
+  00512495ff504ece 56-66,1114-1143,1145-1147,1151-1154,2045-2058
+src/web/lib/entries.ts
+  00512495ff504ece 155-163
+src/web/lib/collections.ts
+  00512495ff504ece 49-51
+CHANGELOG.md
+  00512495ff504ece 5-23
+src/web/lib/sessionTree.ts
+  00512495ff504ece 1-44
+src/web/components/Workbench.tsx
+  00512495ff504ece 22-23,104,114,173-183,245,299,305-318
+src/web/components/MessageList.tsx
+  00512495ff504ece 11-18,20,34-48,175-176,179,240,243-244
+src/web/components/LeftPanels.tsx
+  00512495ff504ece 6,10-25,37,44,70,154,162,190,311,327,369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "8b9663e37836bf4b2f750319230dbe0231ba8b34",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 483,
+      "total_deletions": 44,
+      "accepted_lines": 471,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/MessageList.tsx": {
+          "additions": 31,
+          "deletions": 8,
+          "accepted_lines": 30
+        },
+        "src/web/lib/api.ts": {
+          "additions": 7,
+          "accepted_lines": 7
+        },
+        "src/web/components/Sidebar.tsx": {
+          "additions": 27,
+          "deletions": 4,
+          "accepted_lines": 27
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 26,
+          "deletions": 7,
+          "accepted_lines": 26
+        },
+        "src/web/components/Workbench.tsx": {
+          "additions": 31,
+          "deletions": 1,
+          "accepted_lines": 31
+        },
+        "src/worker.ts": {
+          "additions": 68,
+          "deletions": 9,
+          "accepted_lines": 62
+        },
+        "src/web/lib/sessionTree.ts": {
+          "additions": 44,
+          "accepted_lines": 44
+        },
+        "tests/README.md": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/components/ChatHeader.tsx": {
+          "additions": 41,
+          "deletions": 1,
+          "accepted_lines": 41
+        },
+        "src/web/types.ts": {
+          "additions": 5,
+          "deletions": 1,
+          "accepted_lines": 5
+        },
+        "tests/unit/sessionTree.test.ts": {
+          "additions": 48,
+          "accepted_lines": 48
+        },
+        "tests/api/api.test.ts": {
+          "additions": 37,
+          "accepted_lines": 37
+        },
+        "CHANGELOG.md": {
+          "additions": 19,
+          "accepted_lines": 19
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "src/web/lib/entries.ts": {
+          "additions": 9,
+          "deletions": 1,
+          "accepted_lines": 9
+        },
+        "src/web/App.tsx": {
+          "additions": 86,
+          "deletions": 12,
+          "accepted_lines": 81
+        }
+      }
+    }
+  }
+}
