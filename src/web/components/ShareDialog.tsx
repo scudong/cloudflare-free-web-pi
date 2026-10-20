@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
-import { shareUrlFor } from "../lib/format";
+import { api, type ShareLinkInfo } from "../lib/api";
+import { formatTime, shareUrlFor } from "../lib/format";
 import { readTheme } from "../lib/theme";
 import { Icon } from "./Icon";
 
@@ -24,9 +24,36 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 	const [ttl, setTtl] = useState(604800);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
-	const [result, setResult] = useState<{ url: string; expiresAt: number } | null>(null);
+	const [result, setResult] = useState<{ url: string; expiresAt: number; reused?: boolean; createdAt?: string } | null>(null);
+	const [existing, setExisting] = useState<ShareLinkInfo | null>(null);
 	const [copied, setCopied] = useState(false);
 	const inputRef = useRef<HTMLInputElement>(null);
+
+	// 打开时读取已有链接：有就直接展示，避免每次都生成新 token（v0.40.0）
+	useEffect(() => {
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.shares(sessionId, "file", name);
+				const latest = data.shares?.[0];
+				if (!alive || !latest) return;
+				setExisting(latest);
+				setResult((prev) =>
+					prev ?? {
+						url: shareUrlFor(latest.url, window.location.origin),
+						expiresAt: Number(latest.expiresAt) || 0,
+						reused: true,
+						createdAt: latest.createdAt,
+					},
+				);
+			} catch {
+				// 读取失败不影响新建链接
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [sessionId, name]);
 
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent) => {
@@ -47,7 +74,7 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 				if (!data.url) throw new Error(data.error || "生成分享链接失败");
 				// 域名一律用当前页面：pages.dev 反代下服务端看到的是 workers.dev 地址
 				const url = shareUrlFor(data.url, window.location.origin);
-				setResult({ url, expiresAt: Number(data.expiresAt) || 0 });
+				setResult({ url, expiresAt: Number(data.expiresAt) || 0, reused: false, createdAt: new Date().toISOString() });
 			} catch (err) {
 				setError(err instanceof Error ? err.message : String(err));
 			} finally {
@@ -122,6 +149,12 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 						))}
 					</div>
 
+					{result?.reused && (
+						<p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+							已复用{existing ? `创建于 ${formatTime(existing.createdAt)} 的` : "已有"}链接；调整有效期后点「重新生成链接」才会创建新链接。
+						</p>
+					)}
+
 					<button
 						type="button"
 						onClick={generate}
@@ -162,6 +195,9 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 								在新窗口打开
 							</a>
 							<p className="mt-1.5 text-[11px] text-emerald-200/70">
+								{result.reused && (
+									<span className="mr-1 rounded bg-emerald-500/20 px-1 text-[10px] text-emerald-200">已有</span>
+								)}
 								{result.expiresAt > 0
 									? `有效期至 ${new Date(result.expiresAt).toLocaleString("zh-CN", { hour12: false })}`
 									: "永久有效"}

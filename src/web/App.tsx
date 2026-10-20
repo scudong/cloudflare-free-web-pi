@@ -1159,10 +1159,17 @@ export default function App() {
 	const handleShare = useCallback(() => {
 		void (async () => {
 			try {
-				const data = await api.share(sessionId, readTheme());
-				if (!data.url) throw new Error("no url");
+				// 已有未过期的会话分享链接就直接复用（v0.40.0）
+				const existing = await api.shares(sessionId, "conversation").catch(() => null);
+				const reused = existing?.shares?.[0];
+				let url = reused?.url ?? "";
+				if (!url) {
+					const data = await api.share(sessionId, readTheme());
+					url = data.url ?? "";
+				}
+				if (!url) throw new Error("no url");
 				// 域名一律用当前页面：pages.dev 反代下服务端看到的是 workers.dev 地址
-				const absolute = shareUrlFor(data.url, window.location.origin);
+				const absolute = shareUrlFor(url, window.location.origin);
 				try {
 					await navigator.clipboard.writeText(absolute);
 					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `只读分享链接已复制：${absolute}` }]);

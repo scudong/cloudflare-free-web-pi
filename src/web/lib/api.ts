@@ -19,6 +19,17 @@ export interface ChatResult {
 	error?: string;
 }
 
+/** 已生成的分享链接（v0.40.0）：打开分享弹窗时直接复用。 */
+export interface ShareLinkInfo {
+	token: string;
+	url: string;
+	kind: string;
+	name: string;
+	expiresAt: number;
+	theme: string;
+	createdAt: string;
+}
+
 export class ApiError extends Error {
 	readonly status: number;
 
@@ -327,6 +338,12 @@ export const api = {
 		requestJson<{ ok?: boolean; token?: string; url?: string; expiresAt?: number; error?: string }>(
 			"/api/share",
 			jsonPost({ sessionId, kind: "file", name, ttlSeconds, theme }),
+		),
+
+	/** 列出未过期的分享链接（v0.40.0）：用于复用已生成的链接。 */
+	shares: (sessionId: string, kind: "conversation" | "file", name?: string) =>
+		requestJson<{ shares?: ShareLinkInfo[] }>(
+			withQuery("/api/shares", { sessionId, kind, ...(name ? { name } : {}) }),
 		),
 
 	automations: () => requestJson<{ automations?: unknown[] }>("/api/automations"),

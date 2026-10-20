@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, PointerEvent } from "react";
 import { expandTemplate } from "../lib/template";
 import { Icon } from "./Icon";
 import type { PromptInfo, SkillInfo } from "../types";
@@ -59,6 +59,25 @@ function compressImage(file: File): Promise<string | null> {
 }
 
 const MAX_HEIGHT = 160;
+/** 输入框手动高度（v0.40.0）：拖动顶部手柄调整，双击恢复自动。 */
+const MIN_INPUT_HEIGHT = 44;
+const MAX_INPUT_HEIGHT = 480;
+const INPUT_HEIGHT_KEY = "pi-harness.composer-height";
+
+function maxInputHeight(): number {
+	if (typeof window === "undefined") return MAX_INPUT_HEIGHT;
+	return Math.max(MIN_INPUT_HEIGHT, Math.min(MAX_INPUT_HEIGHT, Math.round(window.innerHeight * 0.6)));
+}
+
+function readInputHeight(): number | null {
+	try {
+		const raw = Number(localStorage.getItem(INPUT_HEIGHT_KEY));
+		if (!Number.isFinite(raw) || raw < MIN_INPUT_HEIGHT) return null;
+		return Math.min(Math.round(raw), maxInputHeight());
+	} catch {
+		return null;
+	}
+}
 const SKILL_MENU_LIMIT = 8;
 
 /** 找出光标前正在输入的 /技能 片段（行首或空格后）。 */
@@ -79,6 +98,10 @@ export function Composer({ pending, onSend, onStop, onInterject, skills, prompts
 	const [skillIndex, setSkillIndex] = useState(0);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
+	/** 手动高度（v0.40.0）；null = 按内容自动伸缩。 */
+	const [inputHeight, setInputHeight] = useState<number | null>(readInputHeight);
+	const heightRef = useRef<number | null>(inputHeight);
+	const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
 	type MenuItem = { kind: "skill" | "prompt"; name: string; description: string; content?: string };
 	const candidates: MenuItem[] = [
@@ -135,13 +158,71 @@ export function Composer({ pending, onSend, onStop, onInterject, skills, prompts
 		})();
 	};
 
-	// 输入内容变化（含发送后清空）时自适应高度；只做 DOM 操作，不 setState
+	// 输入内容变化（含发送后清空）时自适应高度；手动高度优先，只做 DOM 操作，不 setState
 	useEffect(() => {
 		const el = textareaRef.current;
 		if (!el) return;
+		if (inputHeight != null) {
+			el.style.height = `${inputHeight}px`;
+			return;
+		}
 		el.style.height = "auto";
 		el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
-	}, [text]);
+	}, [text, inputHeight]);
+
+	const applyHeight = (next: number) => {
+		const clamped = Math.max(MIN_INPUT_HEIGHT, Math.min(MAX_INPUT_HEIGHT, maxInputHeight(), Math.round(next)));
+		heightRef.current = clamped;
+		setInputHeight(clamped);
+	};
+
+	const persistInputHeight = () => {
+		try {
+			if (heightRef.current == null) localStorage.removeItem(INPUT_HEIGHT_KEY);
+			else localStorage.setItem(INPUT_HEIGHT_KEY, String(heightRef.current));
+		} catch {
+			// 无 localStorage 时只在本次会话生效
+		}
+	};
+
+	const startResize = (event: PointerEvent<HTMLButtonElement>) => {
+		const el = textareaRef.current;
+		dragRef.current = { startY: event.clientY, startHeight: inputHeight ?? el?.offsetHeight ?? MIN_INPUT_HEIGHT };
+		event.currentTarget.setPointerCapture(event.pointerId);
+		event.preventDefault();
+	};
+
+	const resizeMove = (event: PointerEvent<HTMLButtonElement>) => {
+		const drag = dragRef.current;
+		if (!drag) return;
+		applyHeight(drag.startHeight - (event.clientY - drag.startY));
+	};
+
+	const endResize = (event: PointerEvent<HTMLButtonElement>) => {
+		if (!dragRef.current) return;
+		dragRef.current = null;
+		try {
+			event.currentTarget.releasePointerCapture(event.pointerId);
+		} catch {
+			// 指针已释放
+		}
+		persistInputHeight();
+	};
+
+	const resetInputHeight = () => {
+		dragRef.current = null;
+		heightRef.current = null;
+		setInputHeight(null);
+		persistInputHeight();
+	};
+
+	const nudgeInputHeight = (event: KeyboardEvent<HTMLButtonElement>) => {
+		if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+		event.preventDefault();
+		const el = textareaRef.current;
+		applyHeight((heightRef.current ?? el?.offsetHeight ?? MIN_INPUT_HEIGHT) + (event.key === "ArrowUp" ? 16 : -16));
+		persistInputHeight();
+	};
 
 	const submit = () => {
 		const trimmed = text.trim();
@@ -253,7 +334,22 @@ export function Composer({ pending, onSend, onStop, onInterject, skills, prompts
 					</div>
 				</div>
 			)}
-			<div className="relative mx-auto flex w-full max-w-3xl items-end gap-2 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:border-x sm:border-slate-800/60">
+			<div className="relative mx-auto w-full max-w-3xl px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:border-x sm:border-slate-800/60">
+				<button
+					type="button"
+					aria-label="调整输入框高度：拖动，双击恢复自动"
+					title="拖动调整高度，双击恢复自动"
+					onPointerDown={startResize}
+					onPointerMove={resizeMove}
+					onPointerUp={endResize}
+					onPointerCancel={endResize}
+					onDoubleClick={resetInputHeight}
+					onKeyDown={nudgeInputHeight}
+					className="mx-auto flex h-3 w-16 cursor-row-resize touch-none items-center justify-center rounded text-slate-600 transition-colors hover:text-slate-400 focus:outline-none focus-visible:text-sky-400"
+				>
+					<Icon name="grip" className="h-3.5 w-3.5" />
+				</button>
+				<div className="flex items-end gap-2 pt-1">
 				{/* 技能菜单（v0.23.0）：输入 / 自动弹出 */}
 				{menuOpen && (
 					<div
@@ -375,7 +471,8 @@ export function Composer({ pending, onSend, onStop, onInterject, skills, prompts
 					>
 						发送
 					</button>
-				)}
+					)}
+				</div>
 			</div>
 		</div>
 	);

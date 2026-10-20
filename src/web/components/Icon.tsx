@@ -18,6 +18,7 @@ import {
 	FolderOpen,
 	GitBranch,
 	Globe,
+	GripHorizontal,
 	HardDriveDownload,
 	Link2,
 	ListChecks,
@@ -110,6 +111,7 @@ const ICONS = {
 	checkboxOn: SquareCheckBig,
 	checkboxOff: Square,
 	subagent: Users,
+	grip: GripHorizontal,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

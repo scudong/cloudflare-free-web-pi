@@ -359,10 +359,48 @@ describe("文件分享", () => {
 		expect(await page.text()).toContain("分享链接已过期");
 	});
 
+	it("已生成的链接可复用", async () => {
+		const created = await post("/api/share", {
+			sessionId: "1",
+			kind: "file",
+			name: "share-test.md",
+			ttlSeconds: 3600,
+			theme: "light",
+		});
+		const list = await api("/api/shares?sessionId=1&kind=file&name=share-test.md");
+		expect(list.status).toBe(200);
+		const item = (list.json.shares as { token: string; url: string; expiresAt: number; theme: string }[]).find(
+			(entry) => entry.token === created.json.token,
+		);
+		expect(item).toBeTruthy();
+		expect(item?.url).toContain(`/s/${created.json.token}`);
+		expect(item?.expiresAt).toBeGreaterThan(Date.now());
+		expect(item?.theme).toBe("light");
+	});
+
+	it("过期链接不再出现在复用列表", async () => {
+		const created = await post("/api/share", { sessionId: "1", kind: "file", name: "share-test.md", ttlSeconds: 0.05 });
+		await new Promise((resolve) => setTimeout(resolve, 120));
+		const list = await api("/api/shares?sessionId=1&kind=file&name=share-test.md");
+		expect(
+			(list.json.shares as { token: string }[]).some((entry) => entry.token === created.json.token),
+		).toBe(false);
+	});
+
 	it("文件不存在时拒绝生成", async () => {
 		const res = await post("/api/share", { sessionId: "1", kind: "file", name: "no-such-file.md", ttlSeconds: 3600 });
 		expect(res.status).toBe(400);
 		expect(res.json.error).toContain("文件不存在");
+	});
+
+	it("会话分享也能列出", async () => {
+		const createdSession = await post("/api/sessions", {});
+		const id = createdSession.json.id as string;
+		const shared = await post("/api/share", { sessionId: id, kind: "conversation", ttlSeconds: 0 });
+		const list = await api(`/api/shares?sessionId=${id}&kind=conversation`);
+		expect(list.status).toBe(200);
+		expect((list.json.shares as { token: string }[]).some((entry) => entry.token === shared.json.token)).toBe(true);
+		await api(`/api/sessions?id=${id}`, { method: "DELETE" });
 	});
 
 	it("未知 token 返回 404", async () => {

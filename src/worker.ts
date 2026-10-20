@@ -2319,6 +2319,37 @@ export class SpikeAgent extends DurableObject {
 		return { token, expiresAt };
 	}
 
+	/** 列出尚未过期的分享链接（v0.40.0）：打开分享弹窗时直接复用，避免每次生成新 token。 */
+	async listShares(
+		sessionId: string | undefined,
+		kind: "conversation" | "file",
+		name?: string,
+	): Promise<{ token: string; kind: string; name: string; expiresAt: number; theme: string; createdAt: string }[]> {
+		await this.open();
+		const conversation = await this.conversationFor(await this.open(), sessionId);
+		const now = Date.now();
+		const rows =
+			kind === "file"
+				? sqlFacade!.exec(
+						"SELECT token, kind, name, expires_at, theme, created_at FROM shares WHERE kind = 'file' AND session_id = ? AND name = ? AND (expires_at = 0 OR expires_at > ?) ORDER BY created_at DESC",
+						String(conversation.id), (name ?? "").trim(), now,
+					).toArray()
+				: sqlFacade!.exec(
+						"SELECT token, kind, name, expires_at, theme, created_at FROM shares WHERE kind = 'conversation' AND session_id = ? AND (expires_at = 0 OR expires_at > ?) ORDER BY created_at DESC",
+						String(conversation.id), now,
+					).toArray();
+		return (rows as { token: string; kind: string; name: string; expires_at: number; theme: string; created_at: string }[]).map(
+			(row) => ({
+				token: row.token,
+				kind: row.kind,
+				name: row.name,
+				expiresAt: Number(row.expires_at ?? 0),
+				theme: row.theme ?? "dark",
+				createdAt: row.created_at,
+			}),
+		);
+	}
+
 	/** 分享页（服务端渲染，只读）。html 文件原样输出，其余按 Markdown 渲染。 */
 	async renderShare(token: string, themeOverride?: string | null): Promise<SharePage | null> {
 		await this.open();
@@ -2998,6 +3029,18 @@ export class SpikeAgent extends DurableObject {
 						{ status: 400 },
 					);
 				}
+			}
+			if (url.pathname === "/shares" && request.method === "GET") {
+				const kind = url.searchParams.get("kind") === "file" ? "file" : "conversation";
+				const name = url.searchParams.get("name") ?? undefined;
+				if (kind === "file" && !name?.trim()) {
+					return Response.json({ error: "缺少文件名" }, { status: 400 });
+				}
+				const origin = new URL(request.url).origin;
+				const shares = (await this.listShares(url.searchParams.get("sessionId") ?? undefined, kind, name)).map(
+					(share) => ({ ...share, url: `${origin}/s/${share.token}` }),
+				);
+				return Response.json({ shares });
 			}
 			if (url.pathname.startsWith("/s/") && request.method === "GET") {
 				const page = await this.renderShare(url.pathname.slice(3), url.searchParams.get("theme"));

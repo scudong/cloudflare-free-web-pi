@@ -103,6 +103,7 @@ npx wrangler deploy
 | GET | `/api/plan?sessionId=` | 当前会话的分步计划 |
 | GET / POST / PATCH / DELETE | `/api/automations` | 定时任务 |
 | POST | `/api/share` · GET `/s/<token>` | 只读分享（`kind=conversation/file`，`ttlSeconds` 可选，0 = 永久；`theme` 记录分享页配色） |
+| GET | `/api/shares?sessionId=&kind=&name=` | 未过期的分享链接（打开弹窗时复用） |
 | GET | `/api/export?format=md` | 导出 Markdown |
 | GET / POST | `/api/backup` · `/api/restore` | 全量备份 / 合并恢复 |
 | GET | `/api/version` | 线上构建号（CI 注入 git SHA） |
