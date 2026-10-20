@@ -19,11 +19,11 @@
           midnight: { cls: "theme-midnight", scheme: "dark", color: "#0b1220" }
         };
         var param = new URLSearchParams(location.search).get("theme");
-        var saved = param || localStorage.getItem("pi-theme") || "dark";
+        var saved = param || localStorage.getItem("pi-theme") || "light";
         if (saved === "system") {
           saved = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
         }
-        var meta = META[saved] || META.dark;
+        var meta = META[saved] || META.light;
         if (meta.cls) document.documentElement.classList.add(meta.cls);
         document.querySelector('meta[name="color-scheme"]').content = meta.scheme;
         document.querySelector('meta[name="theme-color"]').content = meta.color;

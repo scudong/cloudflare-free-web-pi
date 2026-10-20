@@ -648,6 +648,8 @@ export default function App() {
 				return;
 			}
 			setAuth({ required: true, authenticated: true, owner: !!result.owner });
+			// 登录前页面已在无 cookie 状态拉过面板数据，直接重载清掉 401 缓存（v0.43.2）
+			window.location.reload();
 		} catch {
 			setLoginError("密码不正确");
 		}

@@ -23,8 +23,8 @@ describe("主题注册表", () => {
 });
 
 describe("主题读写（无 DOM 时安全降级）", () => {
-	it("无法访问 localStorage 时回落到 dark", () => {
-		expect(readTheme()).toBe("dark");
+	it("无法访问 localStorage 时回落到浅色", () => {
+		expect(readTheme()).toBe("light");
 	});
 
 	it("applyTheme 在无 DOM 环境不抛错", () => {

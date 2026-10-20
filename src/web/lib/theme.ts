@@ -30,14 +30,14 @@ export function isThemeId(value: string): value is ThemeId {
 	return THEMES.some((t) => t.id === value);
 }
 
-/** 读当前主题：URL 参数 > localStorage > 深色；system 按媒体查询解析。 */
+/** 读当前主题：URL 参数 > localStorage > 浅色（首次进入默认，v0.43.1）；system 按媒体查询解析。 */
 export function readTheme(): ThemeId {
 	try {
-		const raw = new URLSearchParams(window.location.search).get("theme") ?? localStorage.getItem(THEME_KEY) ?? "dark";
+		const raw = new URLSearchParams(window.location.search).get("theme") ?? localStorage.getItem(THEME_KEY) ?? "light";
 		if (raw === "system") return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-		return isThemeId(raw) ? raw : "dark";
+		return isThemeId(raw) ? raw : "light";
 	} catch {
-		return "dark";
+		return "light";
 	}
 }
 
