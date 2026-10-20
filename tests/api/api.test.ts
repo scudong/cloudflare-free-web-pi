@@ -314,6 +314,38 @@ describe("知识库", () => {
 		expect(res.json.hits.length).toBeGreaterThan(0);
 	});
 
+	it("预检索默认开启并返回注入块", async () => {
+		const pref = await api(`/api/kb/prefetch?q=${encodeURIComponent("久期")}`);
+		expect(pref.json.enabled).toBe(true);
+		expect(pref.json.block).toContain("知识库参考资料");
+		expect(pref.json.block).toContain("债券研究笔记");
+		expect(pref.json.block.length).toBeLessThan(2500);
+	});
+
+	it("预检索内容进入本轮 instructions", async () => {
+		const res = await api(`/api/debug/agent?sessionId=1&message=${encodeURIComponent("组合久期怎么看")}`);
+		expect(res.json.instructions).toContain("知识库参考资料");
+		expect(res.json.instructions).toContain("债券研究笔记");
+	});
+
+	it("关闭预检索后不再注入，模型仍可主动检索", async () => {
+		const before = await api("/api/settings");
+		expect(before.json.kbPrefetch).toBe(true);
+
+		const off = await post("/api/settings", { kbPrefetch: false });
+		expect(off.json.kbPrefetch).toBe(false);
+		const pref = await api(`/api/kb/prefetch?q=${encodeURIComponent("久期")}`);
+		expect(pref.json.block).toBe("");
+		const dbg = await api(`/api/debug/agent?sessionId=1&message=${encodeURIComponent("久期")}`);
+		expect(dbg.json.instructions).not.toContain("知识库参考资料");
+
+		// 主动检索工具不受开关影响
+		const search = await api(`/api/kb/search?q=${encodeURIComponent("久期")}`);
+		expect(search.json.hits.length).toBeGreaterThan(0);
+
+		await post("/api/settings", { kbPrefetch: true });
+	});
+
 	it("未命中返回空", async () => {
 		const res = await api(`/api/kb/search?q=${encodeURIComponent("量子纠缠")}`);
 		expect(res.json.hits).toEqual([]);

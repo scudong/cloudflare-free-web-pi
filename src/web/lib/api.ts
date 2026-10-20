@@ -291,6 +291,8 @@ export const api = {
 	settings: () =>
 		requestJson<{
 			webSearch?: boolean;
+			/** 知识库预检索（v0.46.0）：每轮自动把命中的资料注入系统提示。 */
+			kbPrefetch?: boolean;
 			thinkingLevel?: string;
 			compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number };
 			approval?: { read: string; write: string; exec: string };
@@ -298,6 +300,7 @@ export const api = {
 
 	setSettings: (patch: {
 		webSearch?: boolean;
+		kbPrefetch?: boolean;
 		thinkingLevel?: string;
 		compaction?: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>;
 		approval?: Partial<{ read: string; write: string; exec: string }>;

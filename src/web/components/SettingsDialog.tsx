@@ -33,6 +33,9 @@ interface SettingsDialogProps {
 	/** 网页搜索开关（null = 尚未读到后端设置）。 */
 	webSearch: boolean | null;
 	onToggleWebSearch: (next: boolean) => void;
+	/** 知识库预检索开关（v0.46.0，null = 尚未读取）。 */
+	kbPrefetch: boolean | null;
+	onToggleKbPrefetch: (next: boolean) => void;
 	/** 思考档位（v0.22.0）：off / low / high。 */
 	thinkingLevel: string;
 	onChangeThinkingLevel: (next: string) => void;
@@ -121,6 +124,8 @@ export function SettingsDialog({
 	onRestore,
 	webSearch,
 	onToggleWebSearch,
+	kbPrefetch,
+	onToggleKbPrefetch,
 	thinkingLevel,
 	onChangeThinkingLevel,
 	compaction,
@@ -610,6 +615,18 @@ export function SettingsDialog({
 										))}
 									</ul>
 								</details>
+							</Section>
+							<Section title="知识库预检索">
+								<div className="flex items-start justify-between gap-4">
+									<div className="min-w-0">
+										<p className="text-sm text-slate-200">每轮自动检索知识库</p>
+										<p className="mt-1 text-xs leading-relaxed text-slate-500">
+											发送消息时先用它检索知识库，命中就把前 3 段（最多约 1.8k 字）放进本轮系统提示；没命中不增加内容。关闭后模型仍可主动调用 kb_search。
+										</p>
+									</div>
+									<Switch checked={kbPrefetch !== false} onChange={onToggleKbPrefetch} label="启用知识库预检索" />
+								</div>
+								{kbPrefetch === null && <p className="mt-2 text-xs text-slate-500">正在读取设置…</p>}
 							</Section>
 							<Section title="网页搜索">
 								<div className="flex items-start justify-between gap-4">

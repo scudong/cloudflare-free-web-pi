@@ -80,6 +80,8 @@ export default function App() {
 	const [model, setModel] = useState("deepseek-flash");
 	// 网页搜索开关（v0.20.0）：null 表示尚未读到后端设置
 	const [webSearch, setWebSearch] = useState<boolean | null>(null);
+	// 知识库预检索开关（v0.46.0）：null = 尚未读取
+	const [kbPrefetch, setKbPrefetch] = useState<boolean | null>(null);
 	// 思考档位（v0.22.0）：off / low / high
 	const [thinkingLevel, setThinkingLevel] = useState<string>("low");
 	// 上下文压缩策略（v0.30.0）
@@ -687,14 +689,14 @@ export default function App() {
 				const data = await api.settings();
 				if (alive) {
 					setWebSearch(data.webSearch !== false);
+					if (typeof data.kbPrefetch === "boolean") setKbPrefetch(data.kbPrefetch);
 					if (typeof data.thinkingLevel === "string") setThinkingLevel(data.thinkingLevel);
 					if (data.compaction) setCompaction(data.compaction);
 					if (data.approval) setApprovalSettings(data.approval);
 				}
 			} catch {
 				if (alive) setWebSearch(true);
-			}
-		})();
+			}		})();
 		return () => {
 			alive = false;
 		};
@@ -1292,6 +1294,18 @@ export default function App() {
 		[nextId],
 	);
 
+	/** 知识库预检索开关（v0.46.0）：乐观更新，失败回滚。 */
+	const handleToggleKbPrefetch = useCallback(
+		(next: boolean) => {
+			setKbPrefetch(next);
+			void api.setSettings({ kbPrefetch: next }).catch(() => {
+				setKbPrefetch(!next);
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "知识库预检索设置保存失败。" }]);
+			});
+		},
+		[nextId],
+	);
+
 	/** 思考档位（v0.22.0）：off/低/高，后端在下一次对话生效。 */
 	const handleChangeThinkingLevel = useCallback((next: string) => {
 		const prev = thinkingLevel;
@@ -1617,6 +1631,8 @@ export default function App() {
 				onRestore={handleRestore}
 				webSearch={webSearch}
 				onToggleWebSearch={handleToggleWebSearch}
+				kbPrefetch={kbPrefetch}
+				onToggleKbPrefetch={handleToggleKbPrefetch}
 				thinkingLevel={thinkingLevel}
 				onChangeThinkingLevel={handleChangeThinkingLevel}
 				compaction={compaction}

@@ -114,8 +114,14 @@ await check("GET /api/tools", async () => {
 	return `${names.length} 个工具`;
 });
 
-await check("GET /api/kernel", async () => {
-	const { json } = await call("/api/kernel");
+await check("GET /api/kb/prefetch", async () => {
+	const { json } = await call(`/api/kb/prefetch?q=${encodeURIComponent("测试")}`);
+	expect(typeof json?.enabled === "boolean", "缺少 enabled");
+	expect(typeof json?.block === "string", "缺少 block");
+	return json.enabled ? "预检索开启" : "预检索关闭";
+});
+
+await check("GET /api/kernel", async () => {	const { json } = await call("/api/kernel");
 	const packages = Object.keys(json?.current ?? {});
 	for (const name of ["@earendil-works/pi-durable", "@earendil-works/pi-ai", "@earendil-works/pi-mcp", "@earendil-works/pi-codemode"]) {
 		expect(packages.includes(name), `缺少 ${name}`);

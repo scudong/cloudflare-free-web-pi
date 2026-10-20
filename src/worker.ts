@@ -742,11 +742,22 @@ function kbTokens(text: string): string[] {
 	return tokens;
 }
 
+/** 口语疑问词不作为检索词：几乎每个问题里都有，会淹没真正的主题词。 */
+const KB_STOP_BIGRAMS = new Set([
+	"怎么", "么办", "什么", "如何", "可以", "请问", "是否", "多少", "哪些", "这个", "那个",
+	"我们", "你们", "他们", "一下", "现在", "然后", "就是", "因为", "所以", "如果", "但是",
+	"不是", "没有", "需要", "一个", "这些", "那些", "以及", "还是", "或者", "而且", "关于",
+]);
+
+function kbQueryTokens(query: string): string[] {
+	return [...new Set(kbTokens(query))].filter((token) => !KB_STOP_BIGRAMS.has(token)).slice(0, 32);
+}
+
 /** 查询串 → FTS5 MATCH 表达式；单字返回 null（索引只有二元组）。 */
-function kbFtsQuery(query: string): string | null {
-	const tokens = [...new Set(kbTokens(query))].slice(0, 32);
+function kbFtsQuery(query: string, mode: "and" | "or" = "and"): string | null {
+	const tokens = kbQueryTokens(query);
 	if (!tokens.length || (tokens.length === 1 && tokens[0]!.length < 2)) return null;
-	return tokens.map((token) => `"${token}"`).join(" AND ");
+	return tokens.map((token) => `"${token}"`).join(mode === "and" ? " AND " : " OR ");
 }
 
 /** 按段落聚合成约 800 字的片段，超长段落按 720 字步长切分并留 80 字重叠。 */
@@ -831,17 +842,27 @@ function kbSearch(query: string, limit = 6): KbHit[] {
 	if (!q) return [];
 	const capped = Math.max(1, Math.min(Number(limit) || 6, 20));
 	const match = kbFtsQuery(q);
+	const runFts = (expression: string) =>
+		sqlFacade!
+			.exec(
+				"SELECT kb_fts.rowid AS chunkId, kb_chunks.doc_id AS docId, kb_chunks.seq AS chunkSeq, kb_chunks.text AS text, " +
+					"kb_docs.title AS title, kb_docs.source AS source, bm25(kb_fts, 6.0, 1.0) AS score " +
+					"FROM kb_fts JOIN kb_chunks ON kb_chunks.id = kb_fts.rowid JOIN kb_docs ON kb_docs.id = kb_chunks.doc_id " +
+					"WHERE kb_fts MATCH ? ORDER BY score LIMIT ?",
+				expression, capped,
+			)
+			.toArray() as KbHit[];
 	if (match) {
 		try {
-			return sqlFacade!
-				.exec(
-					"SELECT kb_fts.rowid AS chunkId, kb_chunks.doc_id AS docId, kb_chunks.seq AS chunkSeq, kb_chunks.text AS text, " +
-						"kb_docs.title AS title, kb_docs.source AS source, bm25(kb_fts, 6.0, 1.0) AS score " +
-						"FROM kb_fts JOIN kb_chunks ON kb_chunks.id = kb_fts.rowid JOIN kb_docs ON kb_docs.id = kb_chunks.doc_id " +
-						"WHERE kb_fts MATCH ? ORDER BY score LIMIT ?",
-					match, capped,
-				)
-				.toArray() as KbHit[];
+			const rows = runFts(match);
+			if (rows.length) return rows;
+			// 自然语言问句里会出现「期怎」「么看」这类跨词二元组，AND 可能全空：
+			// 退化为 OR，由 bm25 的 IDF 把真正相关的片段排到前面。
+			const loose = kbFtsQuery(q, "or");
+			if (loose && loose !== match) {
+				const looseRows = runFts(loose);
+				if (looseRows.length) return looseRows;
+			}
 		} catch (err) {
 			console.warn("kb fts search failed", String(err).slice(0, 120));
 		}
@@ -854,6 +875,34 @@ function kbSearch(query: string, limit = 6): KbHit[] {
 			like, like, capped,
 		)
 		.toArray() as KbHit[];
+}
+
+/* 预检索（v0.46.0）：每轮把用户消息当查询，命中时把前几段拼进 instructions。
+ * 模型仍然可以继续调用 kb_search；这里只是提前把最可能相关的内容放到眼前。 */
+const KB_PREFETCH_TOP = 3;
+const KB_PREFETCH_CHARS = 600;
+
+function kbPrefetchBlock(message: string): string {
+	if (getSetting("kb_prefetch", "1") !== "1") return "";
+	const query = message.trim().slice(0, 200);
+	if (query.length < 2) return "";
+	const hits = kbSearch(query, KB_PREFETCH_TOP);
+	if (!hits.length) return "";
+	const seen = new Set<number>();
+	const lines: string[] = [];
+	for (const hit of hits) {
+		if (hit.chunkId) {
+			if (seen.has(hit.chunkId)) continue;
+			seen.add(hit.chunkId);
+		}
+		const text = String(hit.text ?? "").slice(0, KB_PREFETCH_CHARS);
+		if (!text.trim()) continue;
+		lines.push(
+			`[${lines.length + 1}] ${hit.title}${hit.source ? `（${hit.source}）` : ""} · 片段 ${Number(hit.chunkSeq) + 1}\n${text}`,
+		);
+	}
+	if (!lines.length) return "";
+	return `\n\n## 知识库参考资料（按当前问题自动检索，可能相关；不相关就忽略）\n${lines.join("\n\n---\n\n")}\n\n需要更多内容时调用 kb_search 继续检索；引用资料时注明文档标题。`;
 }
 
 const baseSpikeExtension = defineExtension({
@@ -2106,7 +2155,7 @@ export class SpikeAgent extends DurableObject {
 				// 思考档位（v0.22.0）：off 时不产生 thinking 事件，前端自然不显示思考块。
 				thinkingLevel: currentThinkingLevel(),
 				extensions: this.agentExtensions() as never,
-				instructions: this.buildInstructions(inv, sessionId),
+				instructions: this.buildInstructions(inv, sessionId, effectiveMessage),
 			},
 			ctx,
 		);
@@ -2309,8 +2358,8 @@ export class SpikeAgent extends DurableObject {
 		}
 	}
 
-	/** 组装本轮 instructions：基础规则 + 技能索引 + 可选显式技能正文 + 进行中的目标。 */
-	private buildInstructions(inv: { name: string; content: string } | null, sessionId?: string): string {
+	/** 组装本轮 instructions：基础规则 + 技能索引 + 显式技能 + 进行中的目标 + 知识库预检索（v0.46.0）。 */
+	private buildInstructions(inv: { name: string; content: string } | null, sessionId?: string, message?: string): string {
 		const base =
 			"你在 pi-harness（GitHub: scudong/pi-harness）里运行：一个部署在 Cloudflare Workers 上的 pi-durable harness。GitHub 上另有同名项目（如 wangmiaozero/pi-harness），被问到本项目时以 scudong/pi-harness 为准，不要混为一谈。\n" +
 			"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。";
@@ -2320,8 +2369,9 @@ export class SpikeAgent extends DurableObject {
 			goal && goal.status === "active"
 				? `\n\n## 目标模式（进行中）\n目标：${goal.objective}\n进度：第 ${goal.turns + 1} 轮，已用 ${goal.tokens_used} / ${goal.token_budget} tokens。\n- 这一轮必须有实际进展，不要只回复「继续」。\n- 全部达成后调用 complete_goal，并附可核对的证据。\n- 确实无法推进时调用 report_goal 说明阻塞原因。`
 				: "";
-		if (!inv) return withSkills + goalBlock;
-		return `${withSkills}${goalBlock}\n\n## 用户显式调用的技能：${inv.name}\n下面是该技能的完整说明，请严格按照它执行，不要声称找不到该技能：\n\n${inv.content}`;
+		const kbBlock = message ? kbPrefetchBlock(message) : "";
+		if (!inv) return withSkills + goalBlock + kbBlock;
+		return `${withSkills}${goalBlock}\n\n## 用户显式调用的技能：${inv.name}\n下面是该技能的完整说明，请严格按照它执行，不要声称找不到该技能：\n\n${inv.content}${kbBlock}`;
 	}
 
 	/** 会话存储出错后重建 Harness（pi-durable 要求 close + reopen）。 */
@@ -3099,7 +3149,7 @@ export class SpikeAgent extends DurableObject {
 				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 				thinkingLevel: currentThinkingLevel(),
 				extensions: this.agentExtensions() as never,
-				instructions: this.buildInstructions(inv, sessionId),
+				instructions: this.buildInstructions(inv, sessionId, effectiveMessage),
 			},
 			ctx,
 		);
@@ -3324,6 +3374,10 @@ export class SpikeAgent extends DurableObject {
 					mcpToolCount: mcpExtDbg ? (mcpExtDbg.tools?.length ?? 0) : 0,
 					customToolCount: (this.customExt as { tools?: unknown[] } | null)?.tools?.length ?? 0,
 					installed: this.registryRef?.snapshot().installed().map((e) => e.name) ?? null,
+					// 传 message 时返回本轮 instructions，用于确认技能 / 知识库预检索的注入（v0.46.0）
+					instructions: url.searchParams.get("message")
+						? this.buildInstructions(null, url.searchParams.get("sessionId") ?? "1", url.searchParams.get("message") ?? "")
+						: undefined,
 				});
 			}
 			if (request.method === "GET" && url.pathname === "/sessions") {
@@ -3427,6 +3481,16 @@ export class SpikeAgent extends DurableObject {
 				const q = url.searchParams.get("q") ?? "";
 				if (!q.trim()) return Response.json({ hits: [] });
 				return Response.json({ hits: kbSearch(q, Number(url.searchParams.get("limit") ?? 8)) });
+			}
+			// 预检索预览（v0.46.0）：返回本轮会注入 instructions 的原文，便于排查
+			if (url.pathname === "/kb/prefetch" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const q = url.searchParams.get("q") ?? "";
+				return Response.json({
+					enabled: getSetting("kb_prefetch", "1") === "1",
+					hits: q.trim() ? kbSearch(q, KB_PREFETCH_TOP) : [],
+					block: q.trim() ? kbPrefetchBlock(q) : "",
+				});
 			}
 			if (url.pathname === "/kb" && request.method === "DELETE") {
 				ensureTables(sqlFacade!);
@@ -3931,14 +3995,17 @@ export class SpikeAgent extends DurableObject {
 				ensureTables(sqlFacade!);
 				return Response.json({
 					webSearch: getSetting("web_search", "1") === "1",
+					kbPrefetch: getSetting("kb_prefetch", "1") === "1",
 					thinkingLevel: currentThinkingLevel(),
 					compaction: compactionSettings(),
 					approval: approvalSettings(),
 				});
 			}
 			if (url.pathname === "/settings" && request.method === "POST") {
-				const body = (await request.json()) as { webSearch?: boolean; thinkingLevel?: string };
+				const body = (await request.json()) as { webSearch?: boolean; kbPrefetch?: boolean; thinkingLevel?: string };
 				if (typeof body.webSearch === "boolean") setSetting("web_search", body.webSearch ? "1" : "0");
+				// 知识库预检索开关（v0.46.0）
+				if (typeof body.kbPrefetch === "boolean") setSetting("kb_prefetch", body.kbPrefetch ? "1" : "0");
 				if (body.thinkingLevel === "off" || body.thinkingLevel === "low" || body.thinkingLevel === "high") {
 					setSetting("thinking_level", body.thinkingLevel);
 				}
@@ -3983,6 +4050,7 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({
 					ok: true,
 					webSearch: getSetting("web_search", "1") === "1",
+					kbPrefetch: getSetting("kb_prefetch", "1") === "1",
 					thinkingLevel: currentThinkingLevel(),
 					compaction: compactionSettings(),
 					approval: approvalSettings(),

@@ -19,7 +19,7 @@
 | 网页 | `web_search` 联网搜索 + `web_fetch_page` 抓取正文（DeepSeek 搜索 API，设置中可开关）；`http_fetch` 直接抓取；**Browserbase MCP** 云端浏览器（导航/点击/提取，无需本地 Chrome） |
 | 记忆 | `remember` / `recall` + 每 6 条自动 `reflect` 抽取长期事实（带去重） |
 | 文件 | 按会话隔离的虚拟文件系统（`write_file` / `read_file` / `list_files`），右栏可预览 Markdown 与 HTML；**左栏「全部文件」跨会话汇总当前用户的所有产出**；Markdown / HTML 可生成带有效期的公开分享链接 |
-| 知识库 | **每个用户独立的知识库**（每人一个 DO）：粘贴资料自动分块 + 中文全文索引（FTS5 / bm25），模型侧 `kb_search` / `kb_add` / `kb_list` / `kb_delete`；左栏「知识库」可检索、查看全文、删除 |
+| 知识库 | **每个用户独立的知识库**（每人一个 DO）：粘贴资料自动分块 + 中文全文索引（FTS5 / bm25），模型侧 `kb_search` / `kb_add` / `kb_list` / `kb_delete`；**每轮按用户消息自动预检索并注入前 3 段**（设置→对话可关）；左栏「知识库」可检索、查看全文、删除 |
 | 能力 | **能力注册表**（内置/数据/协议三类汇总）、**提示模板**（`/` 展开，支持 `$1` 占位）、**规则文件**（每轮注入）、自定义技能（`SKILL.md` 规范）+ 一键安装 `badlogic/pi-skills` 社区技能；模型按需 `load_skill`，也可在输入框用 `/技能名` 显式调用 |
 | 扩展 | 任意 **MCP** 服务器（Streamable HTTP，支持自定义请求头） |
 | 定时 | Durable Object alarm 驱动的定时任务（每天 HH:MM / 每隔 N 分钟） |
@@ -98,6 +98,7 @@ npx wrangler deploy
 | GET | `/api/files/all?q=` | 当前用户所有会话的文件（跨会话总览） |
 | GET / POST / DELETE | `/api/kb` | 用户知识库：文档列表 / 入库 / 删除 |
 | GET | `/api/kb/doc?id=` · `/api/kb/search?q=` | 知识库文档全文 / 检索片段 |
+| GET | `/api/kb/prefetch?q=` | 本轮会自动注入的知识库参考资料（调试 / 排查用） |
 | GET / POST / DELETE | `/api/skills` | 技能增删查 |
 | GET | `/api/skills/community` | 社区技能目录（badlogic/pi-skills） |
 | POST | `/api/skills/import` | `{url}` 从 GitHub/raw/任意 md 导入技能 |
