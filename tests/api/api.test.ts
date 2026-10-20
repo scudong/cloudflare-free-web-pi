@@ -278,6 +278,77 @@ describe("备份与恢复", () => {
 	});
 });
 
+describe("文件分享", () => {
+	const MD = "# 分享测试\n\n**重点** 与 `code`\n\n- 第一条\n- 第二条\n\n| 列 | 值 |\n| --- | --- |\n| a | 1 |";
+	const HTML = '<!doctype html><html><body><h1 id="shared">HTML 分享</h1><script>document.title="ok"</script></body></html>';
+
+	beforeAll(async () => {
+		await post("/api/restore", {
+			version: 1,
+			data: {
+				files: [
+					{ conversation_id: "1", name: "share-test.md", content: MD, updated_at: new Date().toISOString() },
+					{ conversation_id: "1", name: "share-test.html", content: HTML, updated_at: new Date().toISOString() },
+				],
+			},
+		});
+	});
+
+	it("Markdown 生成带域名的链接并渲染", async () => {
+		const created = await post("/api/share", { sessionId: "1", kind: "file", name: "share-test.md", ttlSeconds: 3600 });
+		expect(created.status).toBe(200);
+		expect(created.json.ok).toBe(true);
+		const url = new URL(created.json.url as string);
+		expect(url.protocol).toBe("http:");
+		expect(url.host).toBeTruthy();
+		expect(url.pathname).toMatch(/^\/s\/[a-z0-9]+$/);
+		expect(created.json.expiresAt).toBeGreaterThan(Date.now());
+
+		const page = await fetch(created.json.url);
+		const html = await page.text();
+		expect(page.status).toBe(200);
+		expect(page.headers.get("content-type")).toContain("text/html");
+		expect(html).toContain("<h1>分享测试</h1>");
+		expect(html).toContain("<strong>重点</strong>");
+		expect(html).toContain("<li>第一条</li>");
+		expect(html).toContain("<table>");
+		expect(html).toContain("链接有效期至");
+	});
+
+	it("HTML 原样输出并带 sandbox CSP", async () => {
+		const created = await post("/api/share", { sessionId: "1", kind: "file", name: "share-test.html", ttlSeconds: 0 });
+		expect(created.json.expiresAt).toBe(0);
+
+		const page = await fetch(created.json.url);
+		const body = await page.text();
+		expect(page.status).toBe(200);
+		expect(page.headers.get("content-type")).toContain("text/html");
+		expect(page.headers.get("content-security-policy")).toContain("sandbox");
+		expect(body).toContain('<h1 id="shared">HTML 分享</h1>');
+	});
+
+	it("过期后返回 410", async () => {
+		const created = await post("/api/share", { sessionId: "1", kind: "file", name: "share-test.md", ttlSeconds: 0.05 });
+		expect(created.json.expiresAt).toBeGreaterThan(0);
+		await new Promise((resolve) => setTimeout(resolve, 120));
+
+		const page = await fetch(created.json.url);
+		expect(page.status).toBe(410);
+		expect(await page.text()).toContain("分享链接已过期");
+	});
+
+	it("文件不存在时拒绝生成", async () => {
+		const res = await post("/api/share", { sessionId: "1", kind: "file", name: "no-such-file.md", ttlSeconds: 3600 });
+		expect(res.status).toBe(400);
+		expect(res.json.error).toContain("文件不存在");
+	});
+
+	it("未知 token 返回 404", async () => {
+		const page = await fetch(`${BASE}/s/doesnotexist`);
+		expect(page.status).toBe(404);
+	});
+});
+
 describe("工具注册（防回归）", () => {
 	it("关键工具都已注册给模型", async () => {
 		const { json } = await api("/api/debug/agent");

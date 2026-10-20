@@ -317,7 +317,17 @@ export const api = {
 		requestJson<{ ok?: boolean; goal?: GoalInfo | null }>(withQuery("/api/goal", { sessionId }), { method: "DELETE" }),
 
 	share: (sessionId: string) =>
-		requestJson<{ ok?: boolean; token?: string; url?: string }>("/api/share", jsonPost({ sessionId, kind: "conversation" })),
+		requestJson<{ ok?: boolean; token?: string; url?: string; expiresAt?: number }>(
+			"/api/share",
+			jsonPost({ sessionId, kind: "conversation" }),
+		),
+
+	/** 分享工作台文件（v0.38.0）：md 渲染成分享页，html 原样输出；ttlSeconds=0 永久。 */
+	shareFile: (sessionId: string, name: string, ttlSeconds: number) =>
+		requestJson<{ ok?: boolean; token?: string; url?: string; expiresAt?: number; error?: string }>(
+			"/api/share",
+			jsonPost({ sessionId, kind: "file", name, ttlSeconds }),
+		),
 
 	automations: () => requestJson<{ automations?: unknown[] }>("/api/automations"),
 

@@ -1159,7 +1159,8 @@ export default function App() {
 			try {
 				const data = await api.share(sessionId);
 				if (!data.url) throw new Error("no url");
-				const absolute = `${window.location.origin}${data.url}`;
+				// v0.38.0 起服务端返回带域名的绝对地址；老服务端返回相对路径时兜底
+				const absolute = /^https?:\/\//i.test(data.url) ? data.url : `${window.location.origin}${data.url}`;
 				try {
 					await navigator.clipboard.writeText(absolute);
 					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `只读分享链接已复制：${absolute}` }]);

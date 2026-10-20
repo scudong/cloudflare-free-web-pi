@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { renderMarkdown } from "../lib/rich";
 import { formatSize, formatTime } from "../lib/format";
+import { ShareDialog } from "./ShareDialog";
 import type { FileInfo } from "../types";
 
 interface WorkbenchProps {
@@ -116,6 +117,9 @@ function FileView({
 	const [mode, setMode] = useState<"preview" | "source">("preview");
 	// HTML 文件用 sandbox iframe 渲染，其余走 Markdown（v0.15.0）
 	const isHtml = /\.html?$/i.test(name);
+	// 可分享的文件类型（v0.38.0）：Markdown 渲染成分享页，HTML 原样输出
+	const canShare = /\.(md|markdown|html?)$/i.test(name);
+	const [shareOpen, setShareOpen] = useState(false);
 	const [content, setContent] = useState("");
 	const [state, setState] = useState<ContentState>("loading");
 	const [error, setError] = useState("");
@@ -191,6 +195,17 @@ function FileView({
 				>
 					{wide ? "⤡" : "⤢"}
 				</button>
+				{canShare && (
+					<button
+						type="button"
+						onClick={() => setShareOpen(true)}
+						aria-label={`分享 ${name}`}
+						title="分享链接"
+						className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
+					>
+						🔗
+					</button>
+				)}
 				<button
 					type="button"
 					onClick={() => onDelete(name)}
@@ -226,6 +241,7 @@ function FileView({
 					)}
 				</div>
 			</div>
+			{shareOpen && <ShareDialog sessionId={sessionId} name={name} onClose={() => setShareOpen(false)} />}
 		</div>
 	);
 }

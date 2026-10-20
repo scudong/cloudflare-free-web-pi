@@ -2,6 +2,21 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-20（文件分享）
+
+### Markdown / HTML 文件分享 + 有效期（v0.38.0）
+- 工作台打开 `.md` / `.html` 文件时，标题栏出现 🔗：选有效期（1 小时 / 1 天 / 7 天 / 30 天 / 永久）→ 生成链接 → 复制
+- 链接带域名前缀（服务端用请求自身的 origin 拼），拿到链接的人**无需登录**即可打开
+- Markdown：服务端渲染成完整分享页（标题 / 列表 / 代码块 / 引用 / 表格 / 任务项），手机可直接阅读
+- HTML：原样输出，可交互；响应头带 `Content-Security-Policy: sandbox allow-scripts`，产物落在不透明源，读不到本站 cookie / Storage
+- 过期：`shares.expires_at`（0 = 永久），过期页返回 **410** 并显示失效时间；创建新链接时顺手清理过期记录
+- 会话分享接口同样接受 `ttlSeconds`；旧链接（无过期字段）行为不变，页脚显示「链接有效期至 …」
+- `POST /api/share` 新增 `kind=file`、`name`、`ttlSeconds`；响应返回绝对 `url` 与 `expiresAt`
+- 分享页统一 `noindex` / `no-referrer` / `X-Content-Type-Options: nosniff`
+
+### 金标
+- 新增 5 条（Markdown 渲染 / HTML + CSP / 过期 410 / 文件不存在 400 / 未知 token 404），总计 **94 条**
+
 ## 2026-10-20（冒烟接入 CI）
 
 ### 部署后自动冒烟 + 每 6 小时巡检（v0.37.2）
