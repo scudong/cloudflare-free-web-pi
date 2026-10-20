@@ -1,0 +1,36 @@
+scripts/smoke.mjs
+  00512495ff504ece 1-184
+package.json
+  00512495ff504ece 12-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "c9346870ec9d909549b670364de8bca60826f7cb",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 186,
+      "total_deletions": 1,
+      "accepted_lines": 186,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "package.json": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "scripts/smoke.mjs": {
+          "additions": 184,
+          "accepted_lines": 184
+        }
+      }
+    }
+  }
+}
