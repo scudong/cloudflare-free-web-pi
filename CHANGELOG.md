@@ -4,6 +4,12 @@
 
 ## 2026-10-21（公开发布准备）
 
+### 测试配置与 CI 修复（v0.53.1）
+- 新增 `wrangler.test.jsonc`：测试专用配置，去掉 `AI` / `KB_VEC` 绑定
+- 两个 API 测试文件改为 `wrangler dev --config wrangler.test.jsonc`，避免无凭证 CI 因远程绑定启动超时
+- 开发配置继续保留绑定；测试用 `CF_DISABLE_VECTOR=1` 验证 FTS / 回退路径
+- 128 条金标全过
+
 ### 知识库向量检索（v0.53.0）
 - 新增三档检索：关键词（FTS5）/ 向量（Vectorize + bge-m3）/ 混合（RRF 融合）
 - 设置 → 对话 → 「知识库检索」可切换；显示已索引 / 总段数，支持重建向量索引
