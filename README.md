@@ -6,7 +6,7 @@
 
 ### Your own AI workspace, on Cloudflare's free tier.
 
-**Durable agent runtime · per-user spaces · Chinese knowledge base · shareable files.**<br>
+**Durable agent runtime · per-user spaces · Chinese knowledge base · files shared from your own domain.**<br>
 One Worker and Durable Objects. No server, no external database.
 
 [![Release](https://img.shields.io/github/v/release/scudong/cloudflare-free-web-pi?label=release&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/releases) [![Stars](https://img.shields.io/github/stars/scudong/cloudflare-free-web-pi?style=flat&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/stargazers) [![License](https://img.shields.io/badge/license-MIT-0ea5e9)](LICENSE) [![Tests](https://img.shields.io/badge/tests-126-22c55e)](tests)<br>
@@ -24,17 +24,17 @@ Most AI chat apps are rented, not owned:
 
 - Close the tab and the context is gone.
 - The report lives in a chat log, not a file you can send.
-- Sharing means copy-paste, screenshots, or a vendor link.
+- Sharing means copy-paste, screenshots, or a link on someone else's domain.
 - A team sharing one account has one shared history.
 - Self-hosting usually means a VPS, Postgres, Redis, and a weekend.
 
-Cloudflare Free Web Pi is the opposite: a workspace you deploy to your own Cloudflare account, with a durable agent, isolated spaces, a knowledge base, and files you can share.
+Cloudflare Free Web Pi is the opposite: a workspace you deploy to your own Cloudflare account, with a durable agent, isolated spaces, a knowledge base, and files you share from your own domain.
 
 ## What you get
 
 - **A durable agent, not a chat shell.** Work is persisted before it runs. Restart the Durable Object and it continues. Cron automations and goal mode keep going with the browser closed.
 - **Per-user spaces.** Invite codes; each user gets their own Durable Object — sessions, files, memory, knowledge base, and share tokens are isolated. The owner issues, resets, and revokes codes from the UI.
-- **Files with a share button.** The agent writes Markdown and HTML into a workbench. One click produces a public page with an expiry (1 hour to forever), four themes, and a table of contents.
+- **Files with a share button — on your own domain.** The agent writes Markdown and HTML into a workbench. One click produces a public page served from your Cloudflare domain (the default `*.pages.dev` subdomain, or a custom domain you bind) with an expiry (1 hour to forever), four themes, and a table of contents.
 - **A knowledge base that answers first.** Per-user FTS5 index with Chinese bigram tokenization and bm25. The top 3 chunks are injected before every turn; the model can also call `kb_search` itself.
 - **Real tools.** 27 built-in tools in the default install: web search, MCP servers, skills, prompts, rules, custom JS tools, parallel subagents, and a QuickJS codemode sandbox.
 - **Control and visibility.** Read/write/exec tool approvals with per-tool overrides, thinking levels, a context meter, manual compaction, step plans, and structured `ask_user` cards.

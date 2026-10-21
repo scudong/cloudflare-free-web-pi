@@ -50,7 +50,7 @@ Stack:
 Files are first-class:
 
 the agent writes Markdown/HTML into a workbench.
-One click → a public page with an expiry (1h → forever), four themes, and a table of contents.
+One click → a public page on **your own domain** (pages.dev or a custom domain you bind), with an expiry (1h → forever), four themes, and a TOC.
 
 The recipient doesn't log in.
 
@@ -165,7 +165,7 @@ No login for the recipient.
 以前让 AI 写报告，流程是：复制 → 排版 → 传网盘 → 发微信。
 
 现在它直接把内容写进右侧工作台，Markdown 或 HTML 都能预览。
-点分享，生成一个网页链接：
+点分享，生成一个**走你自己域名**的网页链接（默认 pages.dev，也可以绑自己的域名）：
 
 · 可以设置有效期：1 小时 / 1 天 / 7 天 / 30 天 / 永久
 · 可以带当前配色（浅色、深色、米黄、午夜蓝）

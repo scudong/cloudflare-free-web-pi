@@ -34,7 +34,7 @@ Each invitee gets their own Durable Object: sessions, files, memory, knowledge b
 **5/**
 The agent writes Markdown/HTML into a workbench.
 
-One click → a public link with an expiry (1h / 1d / 7d / 30d / forever), four themes, and a table of contents. Reports become web pages you can send to a colleague.
+One click → a public link on **your own domain**, with an expiry (1h / 1d / 7d / 30d / forever), four themes, and a table of contents. Reports become web pages you can send to a colleague.
 
 **6/**
 Per-user knowledge base, no vector DB:

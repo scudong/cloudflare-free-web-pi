@@ -4,6 +4,12 @@
 
 ## 2026-10-21（公开发布准备）
 
+### 独立域名分享卖点 + 语义检索方案（v0.52.0）
+- README（英文首页 / 中文副页）把「文件分享」升级为「走你自己 Cloudflare 域名的分享」：默认 `*.pages.dev`，可绑自定义域名
+- 同步更新卖点文档、首发 thread、7 天文案里的分享描述
+- 新增 `docs/semantic-search-options.md`：当前未使用 Supabase；评估 pgvector 作为可选向量索引的架构、免费额度风险、与 Vectorize 的对比与落地顺序
+- 明确 Supabase 只做可重建的派生索引，不替换 DO 主存储；默认 FTS5 不变
+
 ### 前 7 天逐日文案（v0.51.0）
 - 新增 `marketing/06-seven-day-posts.md`：7 天 ×（X 英文 + 小红书中文），含配图路径、置顶评论、标签
 - Day 1 首发 thread、Day 2 中文检索、Day 3 文件分享、Day 4 测试、Day 5 多用户隔离、Day 6 成本、Day 7 求反馈

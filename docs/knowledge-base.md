@@ -65,6 +65,6 @@ kb_fts    FTS5(title_tokens, body_tokens)   -- rowid = kb_chunks.id
 
 ## 后续可加
 
-- 混合检索：给每个分块存 `bge-m3` 向量，关键词 + 向量分数融合；索引放在同一 DO 的 SQLite 或按用户 namespace 的 Vectorize。
+- 混合检索：给每个分块存 `bge-m3` 向量，关键词 + 向量分数融合；索引放在同一 DO 的 SQLite 或按用户 namespace 的 Vectorize。Supabase pgvector 的可选方案见 [semantic-search-options.md](semantic-search-options.md)。
 - 文档导入：R2 上传 + PDF/DOCX 文本抽取。
 - 引用回链：检索结果带分享页 / 原文件链接。
