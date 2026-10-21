@@ -39,6 +39,10 @@ type AgentScope = {
 	env?: { AI?: unknown; KB_VEC?: unknown; CF_DISABLE_VECTOR?: string };
 	/** 当前 DO 的稳定标识，用作 Vectorize 元数据过滤与向量 id 前缀。 */
 	scopeId?: string;
+	/** 本次请求的公开 Origin：分享工具据此拼绝对链接（alarm 触发时为空）。 */
+	origin?: string;
+	/** 当前请求的用户键（x-pi-user），分享 token 复用同一前缀。 */
+	userKey?: string;
 };
 const agentScope = new AsyncLocalStorage<AgentScope>();
 
@@ -164,6 +168,28 @@ function getSetting(key: string, fallback: string): string {
 
 function setSetting(key: string, value: string): void {
 	sqlFacade!.exec("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+}
+
+/** 分享默认有效期（秒）：0 = 永久；与分享弹窗默认的 7 天一致。 */
+const DEFAULT_SHARE_TTL = 7 * 86400;
+const MAX_SHARE_TTL = 365 * 86400;
+
+function shareDefaultTtl(): number {
+	const raw = Number(getSetting("share_ttl_seconds", String(DEFAULT_SHARE_TTL)));
+	return Number.isFinite(raw) && raw >= 0 ? Math.min(Math.floor(raw), MAX_SHARE_TTL) : DEFAULT_SHARE_TTL;
+}
+
+/** 解析分享有效期：未传（undefined/null/""）沿用设置默认；显式 0 表示永久。 */
+function shareTtlSeconds(value: unknown): number {
+	if (value === undefined || value === null || value === "") return shareDefaultTtl();
+	const raw = Number(value);
+	if (!Number.isFinite(raw) || raw < 0) return shareDefaultTtl();
+	return Math.min(raw, MAX_SHARE_TTL);
+}
+
+/** 分享页署名：设置里的 displayName，未设置时回落到产品名。 */
+function shareAuthor(): string {
+	return getSetting("display_name", "").trim().slice(0, 40) || "π Harness";
 }
 
 /** 思考档位：off / low / high（deepseek-flash 支持 low/high/max，v4-pro 支持 high/max）。 */
@@ -311,6 +337,8 @@ const TOOL_CATEGORY: Record<string, ApprovalCategory> = {
 	complete_goal: "read",
 	report_goal: "read",
 	write_file: "write",
+	share_file: "write",
+	share_conversation: "write",
 	remember: "write",
 	codemode: "exec",
 	dispatch_tasks: "exec",
@@ -475,6 +503,7 @@ const CUSTOM_TOOL_NAME = /^[a-zA-Z][a-zA-Z0-9_]{1,40}$/;
 /** 保留名：不能覆盖内置工具。 */
 const RESERVED_TOOL_NAMES = new Set([
 	"now", "remember", "recall", "list_skills", "load_skill", "install_skill", "read_file", "list_files", "write_file",
+	"share_file", "share_conversation",
 	"kb_search", "kb_add", "kb_list", "kb_delete",
 	"update_plan", "dispatch_tasks", "web_search", "web_fetch_page", "http_fetch", "tool_search",
 	"codemode", "set_goal", "complete_goal", "report_goal", "ask_user",
@@ -1661,6 +1690,86 @@ const baseSpikeExtension = defineExtension({
 			},
 		}),
 		defineTool({
+			name: "share_file",
+			description:
+				"把工作台文件生成公开只读分享链接（写操作）。用户说「分享」「发我个链接」「转给同事」时直接调用；同一文件已有未过期链接会复用，不重复生成。ttlSeconds 不传时用设置里的默认有效期。",
+			parameters: Type.Object({
+				name: Type.String({ description: "工作台文件名，如 report.md" }),
+				ttlSeconds: Type.Optional(Type.Number({ description: "有效期（秒），0 = 永久；不传沿用设置默认" })),
+			}),
+			execute: async (args, api) => {
+				const a = args as { name?: unknown; ttlSeconds?: unknown };
+				const name = String(a.name ?? "").trim().replace(/^[/.]+/, "").slice(0, 120);
+				if (!name) return { output: [{ type: "text", text: "文件名不能为空。请先用 write_file 生成文件再分享。" }] };
+				try {
+					const { share, reused } = shareForTool("file", String(api.conversationId), name, a.ttlSeconds);
+					const url = shareUrlForToken(share.token);
+					const expiry = shareExpiryLabel(share.expiresAt);
+					return {
+						output: [{
+							type: "text",
+							text: `${reused ? "已复用未过期的分享链接" : "已生成分享链接"}：${url}（${expiry}）。请在回复里原样给出这个完整链接。`,
+						}],
+						details: {
+							share: {
+								kind: "file",
+								name,
+								url,
+								expiresAt: share.expiresAt,
+								createdAt: share.createdAt,
+								reused,
+							},
+						},
+					};
+				} catch (err) {
+					return {
+						output: [{
+							type: "text",
+							text: `分享失败：${err instanceof Error ? err.message : String(err)}。先用 write_file 写入文件再调用 share_file。`,
+						}],
+					};
+				}
+			},
+		}),
+		defineTool({
+			name: "share_conversation",
+			description:
+				"把当前对话生成公开只读分享链接（写操作）。用户要把这段对话发给别人时调用；已有未过期链接会复用。ttlSeconds 不传时用设置里的默认有效期。",
+			parameters: Type.Object({
+				ttlSeconds: Type.Optional(Type.Number({ description: "有效期（秒），0 = 永久；不传沿用设置默认" })),
+			}),
+			execute: async (args, api) => {
+				const a = args as { ttlSeconds?: unknown };
+				const conversationId = String(api.conversationId);
+				try {
+					const { share, reused } = shareForTool("conversation", conversationId, "", a.ttlSeconds);
+					const url = shareUrlForToken(share.token);
+					const expiry = shareExpiryLabel(share.expiresAt);
+					const title = sessionTitle(conversationId);
+					return {
+						output: [{
+							type: "text",
+							text: `${reused ? "已复用未过期的对话分享链接" : "已生成对话分享链接"}：${url}（${expiry}）。请在回复里原样给出这个完整链接。`,
+						}],
+						details: {
+							share: {
+								kind: "conversation",
+								name: title,
+								url,
+								expiresAt: share.expiresAt,
+								createdAt: share.createdAt,
+								reused,
+							},
+						},
+					};
+				} catch (err) {
+					return {
+						output: [{ type: "text", text: `分享失败：${err instanceof Error ? err.message : String(err)}。` }],
+					};
+				}
+			},
+		}),
+		defineTool({
 			name: "kb_search",
 			description:
 				"检索当前用户的知识库（用户上传的资料、长期参考文档）。回答涉及用户私人资料或历史资料时先检索；返回命中的片段与文档名。",
@@ -2273,17 +2382,25 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:1.4rem 1rem 2
 `;
 }
 
-/** 分享页外壳（只读、noindex）。expiresAt > 0 时页脚显示有效期。 */
-function sharePage(title: string, body: string, expiresAt = 0, theme: ShareThemeId = "dark", toc = ""): string {
+/** 分享页外壳（只读、noindex）。页脚显示署名与生成时间；expiresAt > 0 时再显示有效期。 */
+function sharePage(
+	title: string,
+	body: string,
+	expiresAt = 0,
+	theme: ShareThemeId = "dark",
+	toc = "",
+	meta: { author: string; createdAt: string } = { author: "π Harness", createdAt: new Date().toISOString() },
+): string {
 	const until =
 		expiresAt > 0
-			? `链接有效期至 ${new Date(expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}`
+			? ` · 链接有效期至 ${new Date(expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}`
 			: "";
+	const generated = new Date(meta.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
 	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · 分享</title>
 <style>${shareCss(theme)}</style></head><body>
 <header><span class="badge">只读分享</span><h1>${escapeHtml(title)}</h1></header>
 <main class="${toc ? "with-toc" : "single"}">${toc}${body}</main>
-<footer>由 π Harness 生成 · 只读视图${until ? ` · ${escapeHtml(until)}` : ""}</footer>
+<footer>由 ${escapeHtml(meta.author)} 分享 · 生成于 ${escapeHtml(generated)} · 只读视图${escapeHtml(until)}</footer>
 </body></html>`;
 }
 
@@ -2296,6 +2413,115 @@ function expiredSharePage(title: string, expiresAt: number, theme: ShareThemeId 
 		contentType: "text/html; charset=utf-8",
 		body: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>分享已过期</title><style>${shareCss(theme)}</style></head><body>${body}</body></html>`,
 	};
+}
+
+/* ---------------- 分享记录（v0.55.0）：API 与模型工具共用同一套落库 / 复用逻辑 ---------------- */
+
+type ShareKind = "conversation" | "file";
+type ShareRecord = { token: string; kind: string; name: string; expiresAt: number; theme: string; createdAt: string };
+
+/** 未过期的分享链接（新→旧）。 */
+function listShareRows(conversationId: string, kind: ShareKind, name?: string): ShareRecord[] {
+	const now = Date.now();
+	const rows =
+		kind === "file"
+			? sqlFacade!.exec(
+					"SELECT token, kind, name, expires_at, theme, created_at FROM shares WHERE kind = 'file' AND session_id = ? AND name = ? AND (expires_at = 0 OR expires_at > ?) ORDER BY created_at DESC",
+					conversationId, (name ?? "").trim(), now,
+				).toArray()
+			: sqlFacade!.exec(
+					"SELECT token, kind, name, expires_at, theme, created_at FROM shares WHERE kind = 'conversation' AND session_id = ? AND (expires_at = 0 OR expires_at > ?) ORDER BY created_at DESC",
+					conversationId, now,
+				).toArray();
+	return (rows as { token: string; kind: string; name: string; expires_at: number; theme: string; created_at: string }[]).map(
+		(row) => ({
+			token: row.token,
+			kind: row.kind,
+			name: row.name,
+			expiresAt: Number(row.expires_at ?? 0),
+			theme: row.theme ?? "dark",
+			createdAt: row.created_at,
+		}),
+	);
+}
+
+/** 生成一条分享记录。ttlSeconds 已解析：0 = 永久。 */
+function createShareRow(
+	conversationId: string,
+	kind: ShareKind,
+	name: string,
+	ttlSeconds: number,
+	theme: string | undefined,
+	tokenPrefix: string,
+): ShareRecord {
+	const fileName = name.trim();
+	if (kind === "file") {
+		if (!fileName) throw new Error("缺少文件名");
+		const exists = sqlFacade!.exec(
+			"SELECT 1 AS ok FROM vfs_v2 WHERE conversation_id = ? AND name = ?",
+			conversationId, fileName,
+		).toArray();
+		if (!exists.length) throw new Error("文件不存在");
+	}
+	// 清掉已过期的分享，避免表无限增长
+	sqlFacade!.exec("DELETE FROM shares WHERE expires_at > 0 AND expires_at <= ?", Date.now());
+	const expiresAt = ttlSeconds > 0 ? Date.now() + Math.min(ttlSeconds, MAX_SHARE_TTL) * 1000 : 0;
+	const themeId: ShareThemeId = isShareTheme(theme) ? theme : "dark";
+	const bytes = crypto.getRandomValues(new Uint8Array(12));
+	const token = `${tokenPrefix}${[...bytes].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("")}`;
+	const createdAt = new Date().toISOString();
+	sqlFacade!.exec(
+		"INSERT INTO shares (token, kind, session_id, name, expires_at, theme, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		token, kind, conversationId, fileName, expiresAt, themeId, createdAt,
+	);
+	return { token, kind, name: fileName, expiresAt, theme: themeId, createdAt };
+}
+
+/** 复用条件：未过期，且有效期覆盖本次请求（显式 0 = 永久）。 */
+function reusableShare(rows: ShareRecord[], ttlSeconds: number): ShareRecord | undefined {
+	// 显式「永久」只能复用永久的；其它 TTL 允许 10 秒误差，避免「7 天」重问时因几毫秒差新建 token
+	if (ttlSeconds === 0) return rows.find((row) => row.expiresAt === 0);
+	const needed = Date.now() + ttlSeconds * 1000 - 10_000;
+	return rows.find((row) => row.expiresAt === 0 || row.expiresAt >= needed);
+}
+
+/** 绝对分享链接：优先本次请求 Origin（alarm 触发时回落到 share_origin 设置）。 */
+function shareUrlForToken(token: string): string {
+	const origin = scope().origin || getSetting("share_origin", "");
+	return `${origin}/s/${token}`;
+}
+
+function shareExpiryLabel(expiresAt: number): string {
+	return expiresAt > 0
+		? `有效期至 ${new Date(expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}`
+		: "永久有效";
+}
+
+/** 模型工具入口：先复用未过期链接，否则按解析后的 TTL 新建。 */
+function shareForTool(
+	kind: ShareKind,
+	conversationId: string,
+	name: string,
+	ttlValue: unknown,
+): { share: ShareRecord; reused: boolean } {
+	const ttl = shareTtlSeconds(ttlValue);
+	const explicit = ttlValue !== undefined && ttlValue !== null && ttlValue !== "";
+	const unexpired = listShareRows(conversationId, kind, name.trim());
+	// 不传 ttlSeconds（沿用设置默认）时直接复用任意未过期链接；显式要求则必须覆盖本次 TTL
+	const existing = explicit ? reusableShare(unexpired, ttl) : unexpired[0];
+	if (existing) return { share: existing, reused: true };
+	const userKey = scope().userKey ?? "";
+	const tokenPrefix = USER_ID_RE.test(userKey) ? `${userKey}.` : "";
+	return { share: createShareRow(conversationId, kind, name, ttl, undefined, tokenPrefix), reused: false };
+}
+
+function sessionTitle(conversationId: string): string {
+	try {
+		const rows = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", conversationId).toArray() as { title?: string }[];
+		return rows[0]?.title?.trim() || "当前对话";
+	} catch {
+		return "当前对话";
+	}
 }
 
 export class SpikeAgent extends DurableObject {
@@ -2673,6 +2899,8 @@ export class SpikeAgent extends DurableObject {
 				apiKey: (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null,
 				env: this.env as AgentScope["env"],
 				scopeId: (this.ctx.id as { name?: string }).name ?? this.ctx.id.toString(),
+				origin: getSetting("share_origin", ""),
+				userKey: "",
 			},
 			() => this.handleAlarm(),
 		);
@@ -2779,6 +3007,9 @@ export class SpikeAgent extends DurableObject {
 		// 子代理（v0.29.0）：可并行的独立子任务交给它们
 		out +=
 			"\n当有 2–4 个**互不依赖**的子任务（如分别调研几个对象再做对比）时，用 dispatch_tasks 并行分派给子代理，比串行逐个做更快；子代理看不到主对话，每个 prompt 要自包含。";
+		// 分享（v0.55.0）：模型能直接生成链接，不能把用户推给配置项
+		out +=
+			"\n用户说「分享 / 发我个链接 / 转给同事 / 生成公开链接」时，直接调用 share_file（工作台文件）或 share_conversation（当前对话），并把返回的完整 URL 原样写进回复；不要回答「做不到」，也不要让用户去别处配置。";
 		return out;
 	}
 
@@ -2985,27 +3216,15 @@ export class SpikeAgent extends DurableObject {
 	): Promise<{ token: string; expiresAt: number }> {
 		await this.open();
 		const conversation = await this.conversationFor(await this.open(), sessionId);
-		const fileName = (name ?? "").trim();
-		if (kind === "file") {
-			if (!fileName) throw new Error("缺少文件名");
-			const exists = sqlFacade!.exec(
-				"SELECT 1 AS ok FROM vfs_v2 WHERE conversation_id = ? AND name = ?",
-				String(conversation.id), fileName,
-			).toArray();
-			if (!exists.length) throw new Error("文件不存在");
-		}
-		// 清掉已过期的分享，避免表无限增长
-		sqlFacade!.exec("DELETE FROM shares WHERE expires_at > 0 AND expires_at <= ?", Date.now());
-		const ttl = Number(ttlSeconds);
-		const expiresAt = Number.isFinite(ttl) && ttl > 0 ? Date.now() + Math.round(Math.min(ttl, 365 * 86400) * 1000) : 0;
-		const themeId: ShareThemeId = isShareTheme(theme) ? theme : "dark";
-		const bytes = crypto.getRandomValues(new Uint8Array(12));
-		const token = `${tokenPrefix}${[...bytes].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("")}`;
-		sqlFacade!.exec(
-			"INSERT INTO shares (token, kind, session_id, name, expires_at, theme, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			token, kind, String(conversation.id), fileName, expiresAt, themeId, new Date().toISOString(),
+		const share = createShareRow(
+			String(conversation.id),
+			kind,
+			name ?? "",
+			shareTtlSeconds(ttlSeconds),
+			theme,
+			tokenPrefix,
 		);
-		return { token, expiresAt };
+		return { token: share.token, expiresAt: share.expiresAt };
 	}
 
 	/** 列出尚未过期的分享链接（v0.40.0）：打开分享弹窗时直接复用，避免每次生成新 token。 */
@@ -3013,30 +3232,10 @@ export class SpikeAgent extends DurableObject {
 		sessionId: string | undefined,
 		kind: "conversation" | "file",
 		name?: string,
-	): Promise<{ token: string; kind: string; name: string; expiresAt: number; theme: string; createdAt: string }[]> {
+	): Promise<ShareRecord[]> {
 		await this.open();
 		const conversation = await this.conversationFor(await this.open(), sessionId);
-		const now = Date.now();
-		const rows =
-			kind === "file"
-				? sqlFacade!.exec(
-						"SELECT token, kind, name, expires_at, theme, created_at FROM shares WHERE kind = 'file' AND session_id = ? AND name = ? AND (expires_at = 0 OR expires_at > ?) ORDER BY created_at DESC",
-						String(conversation.id), (name ?? "").trim(), now,
-					).toArray()
-				: sqlFacade!.exec(
-						"SELECT token, kind, name, expires_at, theme, created_at FROM shares WHERE kind = 'conversation' AND session_id = ? AND (expires_at = 0 OR expires_at > ?) ORDER BY created_at DESC",
-						String(conversation.id), now,
-					).toArray();
-		return (rows as { token: string; kind: string; name: string; expires_at: number; theme: string; created_at: string }[]).map(
-			(row) => ({
-				token: row.token,
-				kind: row.kind,
-				name: row.name,
-				expiresAt: Number(row.expires_at ?? 0),
-				theme: row.theme ?? "dark",
-				createdAt: row.created_at,
-			}),
-		);
+		return listShareRows(String(conversation.id), kind, name);
 	}
 
 	/** 分享页（服务端渲染，只读）。html 文件原样输出，其余按 Markdown 渲染。 */
@@ -3095,6 +3294,7 @@ export class SpikeAgent extends DurableObject {
 					expiresAt,
 					theme,
 					shareToc(headings),
+					{ author: shareAuthor(), createdAt: share.created_at },
 				),
 			};
 		}
@@ -3122,7 +3322,10 @@ export class SpikeAgent extends DurableObject {
 		return {
 			status: 200,
 			contentType: "text/html; charset=utf-8",
-			body: sharePage(title, parts.join("") || "<p class='empty'>（暂无内容）</p>", expiresAt, theme, shareToc(headings)),
+			body: sharePage(title, parts.join("") || "<p class='empty'>（暂无内容）</p>", expiresAt, theme, shareToc(headings), {
+				author: shareAuthor(),
+				createdAt: share.created_at,
+			}),
 		};
 	}
 
@@ -3439,13 +3642,24 @@ export class SpikeAgent extends DurableObject {
 							toolName?: string;
 							toolCallId?: string;
 							parentToolCallId?: string;
-							result?: { summary?: unknown };
+							entry?: { model?: readonly { content?: unknown; details?: unknown }[] };
+							result?: { details?: unknown };
 						};
+						const message = call.entry?.model?.[0];
+						let summary: string | undefined;
+						if (message && Array.isArray(message.content)) {
+							summary = message.content
+								.filter((b): b is { type: string; text?: string } => Boolean(b) && typeof b === "object" && b.type === "text")
+								.map((b) => b.text ?? "")
+								.join("")
+								.trim() || undefined;
+						}
 						await send("tool_end", {
 							name: call.toolName ?? "tool",
 							id: call.toolCallId,
 							parentId: call.parentToolCallId,
-							summary: typeof call.result?.summary === "string" ? call.result.summary : undefined,
+							summary,
+							details: call.result?.details ?? message?.details,
 						});
 					}
 				}
@@ -3567,6 +3781,8 @@ export class SpikeAgent extends DurableObject {
 				apiKey: (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null,
 				env: this.env as AgentScope["env"],
 				scopeId: (this.ctx.id as { name?: string }).name ?? this.ctx.id.toString(),
+				origin: new URL(request.url).origin,
+				userKey: request.headers.get("x-pi-user") ?? "",
 			},
 			() => this.handleFetch(request),
 		);
@@ -4022,6 +4238,7 @@ export class SpikeAgent extends DurableObject {
 					{ id: "tool_search", name: "工具搜索", description: "工具多时按需检索加载", enabled: true },
 					{ id: "compaction", name: "上下文压缩", description: "接近上下文上限时自动摘要旧内容", enabled: settings.enabled, detail: `保留 ${settings.keepRecentTokens} tokens / 预留 ${settings.reserveTokens}` },
 					{ id: "plan", name: "计划清单", description: "update_plan 维护分步计划", enabled: true },
+					{ id: "share", name: "分享链接", description: "share_file / share_conversation 生成只读链接", enabled: true },
 					{ id: "subagents", name: "子代理", description: "dispatch_tasks 并行分派子任务", enabled: true },
 					{ id: "goal", name: "目标模式", description: "目标 + token 预算 + 自动续转 + 完成校验", enabled: true },
 					...((): { id: string; name: string; description: string; enabled: boolean; detail?: string }[] => {
@@ -4245,7 +4462,9 @@ export class SpikeAgent extends DurableObject {
 				}
 				const resume =
 					action === "deny"
-						? `用户拒绝了对工具「${row.tool}」的调用，请不要再用它，改换方案或向用户说明。`
+						? row.tool === "share_file" || row.tool === "share_conversation"
+							? `用户拒绝了对工具「${row.tool}」的调用，本次分享已取消：不要声称链接已生成，简短回复「已取消分享」即可。`
+							: `用户拒绝了对工具「${row.tool}」的调用，请不要再用它，改换方案或向用户说明。`
 						: `已批准工具「${row.tool}」（${action === "always" ? "以后允许" : "本次"}），请继续刚才的操作。`;
 				return Response.json({ ok: true, id, action, tool: row.tool, resume });
 			}
@@ -4279,10 +4498,19 @@ export class SpikeAgent extends DurableObject {
 					thinkingLevel: currentThinkingLevel(),
 					compaction: compactionSettings(),
 					approval: approvalSettings(),
+					displayName: getSetting("display_name", ""),
+					shareTtlSeconds: shareDefaultTtl(),
 				});
 			}
 			if (url.pathname === "/settings" && request.method === "POST") {
-				const body = (await request.json()) as { webSearch?: boolean; kbPrefetch?: boolean; kbRetrieval?: string; thinkingLevel?: string };
+				const body = (await request.json()) as {
+					webSearch?: boolean;
+					kbPrefetch?: boolean;
+					kbRetrieval?: string;
+					thinkingLevel?: string;
+					displayName?: string;
+					shareTtlSeconds?: number;
+				};
 				if (typeof body.webSearch === "boolean") setSetting("web_search", body.webSearch ? "1" : "0");
 				// 知识库预检索开关（v0.46.0）
 				if (typeof body.kbPrefetch === "boolean") setSetting("kb_prefetch", body.kbPrefetch ? "1" : "0");
@@ -4292,6 +4520,11 @@ export class SpikeAgent extends DurableObject {
 				}
 				if (body.thinkingLevel === "off" || body.thinkingLevel === "low" || body.thinkingLevel === "high") {
 					setSetting("thinking_level", body.thinkingLevel);
+				}
+				// 分享页署名与默认有效期（v0.55.0）
+				if (typeof body.displayName === "string") setSetting("display_name", body.displayName.trim().slice(0, 40));
+				if (typeof body.shareTtlSeconds === "number" && Number.isFinite(body.shareTtlSeconds) && body.shareTtlSeconds >= 0) {
+					setSetting("share_ttl_seconds", String(Math.min(Math.floor(body.shareTtlSeconds), MAX_SHARE_TTL)));
 				}
 				// 工具审批（v0.33.0）：三档策略 + 逐工具覆盖
 				const ap = (body as { approval?: Record<string, unknown> }).approval;
@@ -4340,6 +4573,8 @@ export class SpikeAgent extends DurableObject {
 					thinkingLevel: currentThinkingLevel(),
 					compaction: compactionSettings(),
 					approval: approvalSettings(),
+					displayName: getSetting("display_name", ""),
+					shareTtlSeconds: shareDefaultTtl(),
 				});
 			}
 			if (url.pathname === "/context" && request.method === "GET") {

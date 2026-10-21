@@ -26,6 +26,18 @@ export interface FileArtifact {
 	size?: number;
 }
 
+/** 分享链接（share_file / share_conversation 工具结果，v0.55.0）。 */
+export interface ShareLink {
+	url: string;
+	title: string;
+	kind: "file" | "conversation";
+	/** 0 = 永久。 */
+	expiresAt: number;
+	createdAt?: string;
+	/** 复用了已有未过期链接。 */
+	reused?: boolean;
+}
+
 /** Message list entry. notice = system hint (stopped / reset failed...); tool = orphan tool activity row. */
 export type ChatMessage =
 	| { id: string; role: "user"; text: string; images?: string[]; /** 后端条目 id（v0.32.0：分支用）。 */ entryId?: number }
@@ -39,6 +51,8 @@ export type ChatMessage =
 			error?: boolean;
 			/** 本轮产出的文件（由 write_file 工具结果提取）。 */
 			files?: FileArtifact[];
+			/** 本轮生成的分享链接（v0.55.0）。 */
+			shares?: ShareLink[];
 	  }
 	| { id: string; role: "tool"; tools: ToolCallInfo[] }
 	| { id: string; role: "notice"; text: string };

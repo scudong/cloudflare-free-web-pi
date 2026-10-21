@@ -77,3 +77,4 @@ tests/
 | **pi 内核版本** | `unit/kernel.test.ts` |
 | **自定义工具** | `api/api.test.ts` · 自定义工具 |
 | **交互式问答** | `api/api.test.ts` · 交互式问答 |
+| **分享工具 / 链接卡** | `api/api.test.ts` · 文件分享 / 工具注册 + `unit/entries.test.ts` · 分享链接 |

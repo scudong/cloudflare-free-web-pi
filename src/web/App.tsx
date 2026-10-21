@@ -22,12 +22,44 @@ import { parseAutomations, parseCustomTools, parseFiles, parseMemories, parsePro
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { ApprovalInfo, AskQuestion, AutomationInfo, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
+import type { ApprovalInfo, AskQuestion, AutomationInfo, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLink, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
 const LEFT_OPEN_KEY = "pi-harness.left-open";
 const RIGHT_OPEN_KEY = "pi-harness.right-open";
+
+/** 工具结果 details → 分享链接卡数据（v0.55.0）。宽容解析，缺字段就返回 null。 */
+function shareFromToolDetails(details: unknown): ShareLink | null {
+	if (!details || typeof details !== "object" || !("share" in details)) return null;
+	const share = details.share;
+	if (!share || typeof share !== "object" || !("url" in share) || typeof share.url !== "string") return null;
+	const kind = "kind" in share && share.kind === "conversation" ? "conversation" : "file";
+	const name = "name" in share && typeof share.name === "string" ? share.name : "";
+	return {
+		url: share.url,
+		title: name || (kind === "conversation" ? "对话分享" : "文件分享"),
+		kind,
+		expiresAt: "expiresAt" in share && typeof share.expiresAt === "number" ? share.expiresAt : 0,
+		createdAt: "createdAt" in share && typeof share.createdAt === "string" ? share.createdAt : undefined,
+		reused: "reused" in share && share.reused === true,
+	};
+}
+
+/** 历史回放里的分享链接：域名统一换成当前页面的 origin。 */
+function withAbsoluteShareLinks(messages: ChatMessage[]): ChatMessage[] {
+	return messages.map((message) =>
+		message.role === "assistant" && message.shares?.length
+			? {
+					...message,
+					shares: message.shares.map((link) => ({
+						...link,
+						url: shareUrlFor(link.url, window.location.origin, readTheme()),
+					})),
+				}
+			: message,
+	);
+}
 type PanelState = "loading" | "ready" | "error";
 type MobileTab = "chat" | "files";
 
@@ -86,6 +118,9 @@ export default function App() {
 	const [kbRetrieval, setKbRetrieval] = useState("fts");
 	// 思考档位（v0.22.0）：off / low / high
 	const [thinkingLevel, setThinkingLevel] = useState<string>("low");
+	// 分享页署名与默认有效期（v0.55.0）
+	const [displayName, setDisplayName] = useState("");
+	const [shareTtlSeconds, setShareTtlSeconds] = useState(604800);
 	// 上下文压缩策略（v0.30.0）
 	const [compaction, setCompaction] = useState<{
 		enabled: boolean;
@@ -175,7 +210,7 @@ export default function App() {
 				setSessionName(typeof session.name === "string" ? session.name : "");
 				// 后端直接返回数组；兼容旧格式 { entries: [...] }
 				const list = Array.isArray(entries) ? entries : (entries as { entries?: unknown[] } | null)?.entries;
-				setMessages(parseEntries(list));
+				setMessages(withAbsoluteShareLinks(parseEntries(list)));
 				setLoadError(null);
 			} catch (err) {
 				if (!alive) return;
@@ -275,6 +310,7 @@ export default function App() {
 				let thinkingBuf = "";
 				const tools: ToolCallInfo[] = [];
 				const artifacts: FileArtifact[] = [];
+				const shareLinks: ShareLink[] = [];
 				/** 压缩提示（v0.31.0）：start 时插一条 notice，end 时把它改成完成态。 */
 				let compactionNoticeId: string | null = null;
 				const ensureBubble = () => {
@@ -292,6 +328,7 @@ export default function App() {
 										thinking: thinkingBuf || undefined,
 										tools: tools.length ? tools.map((t) => ({ ...t })) : [],
 										files: artifacts.length ? [...artifacts] : undefined,
+										shares: shareLinks.length ? [...shareLinks] : undefined,
 									}
 								: m,
 						),
@@ -305,6 +342,7 @@ export default function App() {
 					thinkingBuf = "";
 					tools.length = 0;
 					artifacts.length = 0;
+					shareLinks.length = 0;
 					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: label }]);
 				};
 				// update_plan 的入参就是最新计划：聊天里实时渲染，不用等工具结果
@@ -404,6 +442,12 @@ export default function App() {
 											? truncateOneLine(event.summary, TOOL_SUMMARY_MAX)
 											: "完成";
 								}
+								// 分享工具：details 里带链接 → 直接渲染链接卡（v0.55.0）
+								const share = shareFromToolDetails(event.details);
+								if (share) {
+									const url = shareUrlFor(share.url, window.location.origin, readTheme());
+									if (!shareLinks.some((link) => link.url === url)) shareLinks.push({ ...share, url });
+								}
 								syncBubble();
 							} else if (event.type === "done") {
 								void refreshApprovals();
@@ -420,6 +464,7 @@ export default function App() {
 													thinking: thinkingBuf || undefined,
 													tools: tools.length ? tools.map((t) => ({ ...t, status: (t.status === "running" ? "done" : t.status) as ToolCallInfo["status"] })) : [],
 													files: artifacts.length ? [...artifacts] : undefined,
+													shares: shareLinks.length ? [...shareLinks] : undefined,
 												}
 											: m,
 									);
@@ -696,6 +741,8 @@ export default function App() {
 					if (typeof data.kbPrefetch === "boolean") setKbPrefetch(data.kbPrefetch);
 					if (typeof data.kbRetrieval === "string") setKbRetrieval(data.kbRetrieval);
 					if (typeof data.thinkingLevel === "string") setThinkingLevel(data.thinkingLevel);
+					if (typeof data.displayName === "string") setDisplayName(data.displayName);
+					if (typeof data.shareTtlSeconds === "number") setShareTtlSeconds(data.shareTtlSeconds);
 					if (data.compaction) setCompaction(data.compaction);
 					if (data.approval) setApprovalSettings(data.approval);
 				}
@@ -1311,6 +1358,33 @@ export default function App() {
 		[nextId],
 	);
 
+	/** 分享页署名（v0.55.0）：失焦保存，失败回滚并提示。 */
+	const handleSaveDisplayName = useCallback(
+		(next: string) => {
+			const previous = displayName;
+			const value = next.trim().slice(0, 40);
+			setDisplayName(value);
+			void api.setSettings({ displayName: value }).catch(() => {
+				setDisplayName(previous);
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "分享署名保存失败。" }]);
+			});
+		},
+		[displayName, nextId],
+	);
+
+	/** 分享默认有效期（v0.55.0）：tool 不传 ttlSeconds 时使用。 */
+	const handleChangeShareTtl = useCallback(
+		(next: number) => {
+			const previous = shareTtlSeconds;
+			setShareTtlSeconds(next);
+			void api.setSettings({ shareTtlSeconds: next }).catch(() => {
+				setShareTtlSeconds(previous);
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "分享有效期设置保存失败。" }]);
+			});
+		},
+		[shareTtlSeconds, nextId],
+	);
+
 	/** 知识库检索模式（v0.53.0）：乐观更新，失败回滚。 */
 	const handleChangeKbRetrieval = useCallback(
 		(next: string) => {
@@ -1657,6 +1731,10 @@ export default function App() {
 				onChangeKbRetrieval={handleChangeKbRetrieval}
 				thinkingLevel={thinkingLevel}
 				onChangeThinkingLevel={handleChangeThinkingLevel}
+				displayName={displayName}
+				onSaveDisplayName={handleSaveDisplayName}
+				shareTtlSeconds={shareTtlSeconds}
+				onChangeShareTtl={handleChangeShareTtl}
 				compaction={compaction}
 				onChangeCompaction={handleChangeCompaction}
 				sessionId={sessionId}
