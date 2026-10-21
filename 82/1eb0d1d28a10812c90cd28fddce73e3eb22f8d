@@ -1,0 +1,76 @@
+src/web/lib/api.ts
+  7c3cf012d2155818 200
+tests/unit/loginGate.test.tsx
+  7c3cf012d2155818 1-23
+wrangler.jsonc
+  7c3cf012d2155818 3-5
+scripts/create-demo-share.mjs
+  7c3cf012d2155818 1-131
+src/web/App.tsx
+  7c3cf012d2155818 17,76,644,1427
+src/worker.ts
+  7c3cf012d2155818 2269-2276,2284-2315,2320,3132,3155-3169,3175-3184,4625-4636,4829-4835,4844,4849
+src/web/components/LoginGate.tsx
+  7c3cf012d2155818 1-75
+tests/api/api.test.ts
+  7c3cf012d2155818 47,63-67,477-478
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "821eb0d1d28a10812c90cd28fddce73e3eb22f8d",
+  "prompts": {
+    "7c3cf012d2155818": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28d4b333-925b-4539-9236-01fb4d90af48",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 334,
+      "total_deletions": 58,
+      "accepted_lines": 333,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/unit/loginGate.test.tsx": {
+          "additions": 23,
+          "accepted_lines": 23
+        },
+        "tests/api/api.test.ts": {
+          "additions": 8,
+          "deletions": 1,
+          "accepted_lines": 8
+        },
+        "src/web/lib/api.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "wrangler.jsonc": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 3
+        },
+        "src/web/components/LoginGate.tsx": {
+          "additions": 75,
+          "accepted_lines": 75
+        },
+        "scripts/create-demo-share.mjs": {
+          "additions": 131,
+          "accepted_lines": 131
+        },
+        "src/web/App.tsx": {
+          "additions": 4,
+          "deletions": 45,
+          "accepted_lines": 4
+        },
+        "src/worker.ts": {
+          "additions": 89,
+          "deletions": 10,
+          "accepted_lines": 88
+        }
+      }
+    }
+  }
+}

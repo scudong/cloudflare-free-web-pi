@@ -1,0 +1,61 @@
+tests/api/ingest.test.ts
+  7c3cf012d2155818 1-14,16-26,28-36,38,41,43,46-142,148-149,151-162,166-170,174-176,179-183,187-192,196-200,204-210,214-222,225-229,233-237,240-241
+README.zh-CN.md
+  7c3cf012d2155818 112
+tests/fixtures/wrangler.ingest.jsonc
+  7c3cf012d2155818 1-19
+docs/knowledge-base.md
+  7c3cf012d2155818 60-80,85,90
+tests/fixtures/ai-mock-worker.ts
+  7c3cf012d2155818 1-44
+tests/fixtures/wrangler.ai-mock.jsonc
+  7c3cf012d2155818 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "cc4ba172dd1cc73f8c853d6d9e0a783c63ed3a31",
+  "prompts": {
+    "7c3cf012d2155818": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28d4b333-925b-4539-9236-01fb4d90af48",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 329,
+      "total_deletions": 2,
+      "accepted_lines": 292,
+      "overriden_lines": 37,
+      "per_file_stats": {
+        "tests/api/ingest.test.ts": {
+          "additions": 237,
+          "accepted_lines": 200,
+          "overriden_lines": 37
+        },
+        "docs/knowledge-base.md": {
+          "additions": 23,
+          "deletions": 2,
+          "accepted_lines": 23
+        },
+        "tests/fixtures/wrangler.ingest.jsonc": {
+          "additions": 19,
+          "accepted_lines": 19
+        },
+        "tests/fixtures/ai-mock-worker.ts": {
+          "additions": 44,
+          "accepted_lines": 44
+        },
+        "tests/fixtures/wrangler.ai-mock.jsonc": {
+          "additions": 5,
+          "accepted_lines": 5
+        },
+        "README.zh-CN.md": {
+          "additions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
