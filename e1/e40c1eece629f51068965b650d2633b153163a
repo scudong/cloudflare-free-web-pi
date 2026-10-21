@@ -1,0 +1,113 @@
+scripts/create-demo-share.mjs
+  7c3cf012d2155818 1-131
+tests/unit/loginGate.test.tsx
+  7c3cf012d2155818 1-23
+tests/api/api.test.ts
+  7c3cf012d2155818 47,63-67
+src/web/components/LoginGate.tsx
+  7c3cf012d2155818 1-75
+src/web/App.tsx
+  7c3cf012d2155818 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "e1e40c1eece629f51068965b650d2633b153163a",
+  "prompts": {
+    "65a98388a9d3101c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "409a88fa-569f-4901-a375-c989e1077e38",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 953,
+      "total_deletions": 19,
+      "accepted_lines": 72,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/api.ts": {
+          "additions": 73,
+          "deletions": 1,
+          "accepted_lines": 72
+        },
+        "src/web/components/KnowledgePanel.tsx": {
+          "additions": 95,
+          "deletions": 14,
+          "accepted_lines": 89
+        },
+        "tests/unit/ingest.test.ts": {
+          "additions": 164,
+          "accepted_lines": 164
+        },
+        "src/web/lib/ingest.ts": {
+          "additions": 237,
+          "deletions": 1,
+          "accepted_lines": 236
+        },
+        "src/web/components/KbImport.tsx": {
+          "additions": 382,
+          "deletions": 3,
+          "accepted_lines": 379
+        },
+        "src/web/components/Icon.tsx": {
+          "additions": 2,
+          "accepted_lines": 2
+        }
+      }
+    },
+    "7c3cf012d2155818": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28d4b333-925b-4539-9236-01fb4d90af48",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 335,
+      "total_deletions": 61,
+      "accepted_lines": 237,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "scripts/create-demo-share.mjs": {
+          "additions": 131,
+          "accepted_lines": 131
+        },
+        "wrangler.jsonc": {
+          "additions": 4,
+          "deletions": 4,
+          "accepted_lines": 4
+        },
+        "tests/unit/loginGate.test.tsx": {
+          "additions": 23,
+          "accepted_lines": 23
+        },
+        "src/web/components/LoginGate.tsx": {
+          "additions": 75,
+          "accepted_lines": 75
+        },
+        "tests/api/api.test.ts": {
+          "additions": 8,
+          "deletions": 1,
+          "accepted_lines": 8
+        },
+        "src/web/lib/api.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/worker.ts": {
+          "additions": 89,
+          "deletions": 10,
+          "accepted_lines": 88
+        },
+        "src/web/App.tsx": {
+          "additions": 4,
+          "deletions": 45,
+          "accepted_lines": 4
+        }
+      }
+    }
+  }
+}
