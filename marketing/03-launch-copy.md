@@ -1,7 +1,7 @@
 # 发布文案
 
-> 占位符：`<repo>` = 仓库地址，`<demo>` = 演示地址 / 演示邀请码，`<shot>` = 截图。
-> 先准备一个公开演示（演示码或只读空间），否则帖子发出后读者进不来。
+> 占位符：`<repo>` = 仓库地址，`<shot>` = 截图。
+> 当前决定：暂不做公开演示；帖子只放仓库与截图，不写「在线试用」。
 
 ## X（英文 thread，6 条）
 
@@ -41,7 +41,7 @@ Per-user knowledge base, no vector DB:
 
 FTS5 + Chinese bigram tokenization + bm25. Before every turn, the top 3 chunks are injected automatically. The model can also call `kb_search` itself.
 
-Built on pi-durable. Repo: `<repo>` · Demo: `<demo>`
+Built on pi-durable. Repo: `<repo>`
 
 ## X（短版，中英都可发）
 
@@ -111,4 +111,4 @@ Self-hosted AI workspace on Cloudflare: one Worker, no server, no database. Per-
 - 架构图可以用 README 里的 ASCII 改一张极简图：浏览器 → Worker → Durable Object。
 - X 发 thread 时，第 1 条配主截图；第 5 条配分享弹窗；第 6 条配知识库。
 - 避免写「完全免费」：统一说「Cloudflare 免费额度内，模型按量计费」。
-- 发布前确认 `<demo>` 能打开；没有演示码就先别发。
+- 当前没有公开演示，帖子不要写「在线试用」或放登录页链接。
