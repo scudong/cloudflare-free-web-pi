@@ -4,6 +4,13 @@
 
 ## 2026-10-21（公开发布准备）
 
+### 测试收尾竞态 + 门户面清理（v0.54.0）
+- 修掉 `npm test` 本地跑不出一份全绿的根因：两个 API 测试的 `afterAll` 先 `kill` 再立刻 `rmSync` persist 目录，workerd 还在落盘 → `ENOTEMPTY`，vitest 记成「整个文件失败」，即使 128 条用例全部通过
+- 新增 `tests/api/teardown.ts`：等 detached 进程组退出（SIGTERM → 5s → SIGKILL）后再删目录，删不掉就重试；连续 3 次 `npm test` 均 exit 0 / 128 passed
+- README 不再写死测试条数：徽章换成 CI workflow 徽章（自更新），正文只描述测试方式
+- 外对文案里的「126 条」统一作废（真实数一直是 128，v0.53.0 起如此）
+- README 英文首页补线上地址；中文首页补 icon / 徽章 / 导航；工具数 27 → 24（按 `src/worker.ts` 实际注册清点）
+
 ### 测试配置与 CI 修复（v0.53.1）
 - 新增 `wrangler.test.jsonc`：测试专用配置，去掉 `AI` / `KB_VEC` 绑定
 - 两个 API 测试文件改为 `wrangler dev --config wrangler.test.jsonc`，避免无凭证 CI 因远程绑定启动超时

@@ -9,12 +9,14 @@
 **Durable agent runtime · per-user spaces · Chinese knowledge base · files shared from your own domain.**<br>
 One Worker and Durable Objects. No server, no external database.
 
-[![Release](https://img.shields.io/github/v/release/scudong/cloudflare-free-web-pi?label=release&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/releases) [![Stars](https://img.shields.io/github/stars/scudong/cloudflare-free-web-pi?style=flat&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/stargazers) [![License](https://img.shields.io/badge/license-MIT-0ea5e9)](LICENSE) [![Tests](https://img.shields.io/badge/tests-126-22c55e)](tests)<br>
+[![Release](https://img.shields.io/github/v/release/scudong/cloudflare-free-web-pi?label=release&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/releases) [![Stars](https://img.shields.io/github/stars/scudong/cloudflare-free-web-pi?style=flat&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/stargazers) [![License](https://img.shields.io/badge/license-MIT-0ea5e9)](LICENSE) [![Deploy](https://github.com/scudong/cloudflare-free-web-pi/actions/workflows/deploy.yml/badge.svg)](https://github.com/scudong/cloudflare-free-web-pi/actions/workflows/deploy.yml)<br>
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white) ![Durable Objects](https://img.shields.io/badge/Durable%20Objects-SQLite-0ea5e9) ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
 
-**English** · [简体中文](README.zh-CN.md) · [Quick start](#quick-start) · [Features](#what-you-get) · [How it works](#how-it-works) · [Deploy](#deploy)
+**English** · [简体中文](README.zh-CN.md) · [Live site](https://pi-harness-gw.pages.dev) · [Quick start](#quick-start) · [Features](#what-you-get) · [How it works](#how-it-works) · [Deploy](#deploy)
 
 <img src="docs/screenshot.png" width="880" alt="Chat with tool calls, a Markdown file preview, and the knowledge base in the left rail">
+
+<sub>Live: **[pi-harness-gw.pages.dev](https://pi-harness-gw.pages.dev)** · password-protected instance — request an invite code in [Discussions](https://github.com/scudong/cloudflare-free-web-pi/discussions).</sub>
 
 </div>
 
@@ -36,7 +38,7 @@ Cloudflare Free Web Pi is the opposite: a workspace you deploy to your own Cloud
 - **Per-user spaces.** Invite codes; each user gets their own Durable Object — sessions, files, memory, knowledge base, and share tokens are isolated. The owner issues, resets, and revokes codes from the UI.
 - **Files with a share button — on your own domain.** The agent writes Markdown and HTML into a workbench. One click produces a public page served from your Cloudflare domain (the default `*.pages.dev` subdomain, or a custom domain you bind) with an expiry (1 hour to forever), four themes, and a table of contents.
 - **A knowledge base that answers first.** Per-user FTS5 index with Chinese bigram tokenization and bm25. The top 3 chunks are injected before every turn; the model can also call `kb_search` itself. Switch to Vectorize + bge-m3, or hybrid retrieval (RRF), in Settings.
-- **Real tools.** 27 built-in tools in the default install: web search, MCP servers, skills, prompts, rules, custom JS tools, parallel subagents, and a QuickJS codemode sandbox.
+- **Real tools.** 24 built-in tools in the default install: web search, MCP servers, skills, prompts, rules, custom JS tools, parallel subagents, and a QuickJS codemode sandbox.
 - **Control and visibility.** Read/write/exec tool approvals with per-tool overrides, thinking levels, a context meter, manual compaction, step plans, and structured `ask_user` cards.
 - **Chinese-first, four themes.** The UI, prompts, and docs are written in Chinese; light, dark, sepia, and midnight themes; pages.dev proxy for access from mainland China.
 
@@ -56,7 +58,7 @@ npx wrangler dev     # Worker + Durable Objects: http://localhost:8787
 
 Open `http://localhost:5173`, enter the password, and start a conversation. The full Chinese setup guide, feature table, and HTTP API reference are in [README.zh-CN.md](README.zh-CN.md).
 
-Run the golden tests with `npm test` — 126 unit, API, and multi-user isolation tests, including real `wrangler dev` instances.
+Run the golden tests with `npm test` — unit, API, and multi-user isolation cases, including real `wrangler dev` instances (about 40 seconds). The deploy badge above is the source of truth for pass/fail; this README does not track a test count.
 
 ## How it works
 
@@ -76,7 +78,7 @@ npx wrangler secret put ACCESS_PASSWORD
 npx wrangler deploy
 ```
 
-Or push to `main` and let GitHub Actions deploy. Add `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `SMOKE_PASSWORD` to the repository secrets; CI runs the 126 tests, deploys, and smoke-tests the live Worker.
+Or push to `main` and let GitHub Actions deploy. Add `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `SMOKE_PASSWORD` to the repository secrets; CI runs the test suite, deploys, and smoke-tests the live Worker.
 
 ## Is it for you?
 

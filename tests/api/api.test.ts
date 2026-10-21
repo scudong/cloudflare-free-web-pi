@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stopServer } from "./teardown";
 
 const ROOT = join(__dirname, "../..");
 const PORT = Number(process.env.TEST_PORT ?? 8797);
@@ -49,15 +50,8 @@ beforeAll(async () => {
 	await waitForServer();
 }, 180_000);
 
-afterAll(() => {
-	if (proc?.pid) {
-		try {
-			process.kill(-proc.pid, "SIGTERM");
-		} catch {
-			proc.kill("SIGTERM");
-		}
-	}
-	rmSync(STATE, { recursive: true, force: true });
+afterAll(async () => {
+	await stopServer(proc, STATE);
 });
 
 describe("访问控制", () => {

@@ -1,10 +1,18 @@
+<div align="center">
+
+<img src="docs/icon.svg" width="96" alt="Cloudflare Free Web Pi">
+
 # Cloudflare Free Web Pi（π Harness）
 
-[English](README.md) · **简体中文**
+[![Release](https://img.shields.io/github/v/release/scudong/cloudflare-free-web-pi?label=release&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/releases) [![Stars](https://img.shields.io/github/stars/scudong/cloudflare-free-web-pi?style=flat&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/stargazers) [![License](https://img.shields.io/badge/license-MIT-0ea5e9)](LICENSE) [![Deploy](https://github.com/scudong/cloudflare-free-web-pi/actions/workflows/deploy.yml/badge.svg)](https://github.com/scudong/cloudflare-free-web-pi/actions/workflows/deploy.yml)
+
+[English](README.md) · **简体中文** · [在线地址](https://pi-harness-gw.pages.dev) · [快速开始](#快速开始)
+
+</div>
 
 把 [pi](https://github.com/earendil-works/pi) 的 **durable harness 内核**跑在 Cloudflare Worker 上：会话、工具调用、记忆、文件全部持久化在 Durable Object 的 SQLite 里，不依赖任何外部数据库。
 
-- **在线地址**：https://pi-harness-gw.pages.dev （pages.dev 反代，中国大陆可达）
+- **在线地址**：https://pi-harness-gw.pages.dev （pages.dev 反代，中国大陆可达；需访问密码，邀请码可向作者索取）
 - **运行成本**：Cloudflare 免费额度内；模型走 DeepSeek（按量计费，个人用量每月几元）
 
 > 本项目是社区项目，与 Cloudflare, Inc. 无隶属关系；Cloudflare、Workers、Durable Objects 是其商标。
@@ -60,7 +68,7 @@ Cloudflare Worker（静态前端 + API 入口）
 
 ```bash
 npm install
-npm test                     # 金标回归（单元 + 接口），约 3 秒
+npm test                     # 金标回归（单元 + 接口），约 40 秒
 
 # 本地开发（.dev.vars 里放密钥）
 echo "DEEPSEEK_API_KEY=sk-..." >> .dev.vars
@@ -123,7 +131,9 @@ npx wrangler deploy
 
 ## 内置工具
 
-`now` · `remember` · `recall` · `kb_search` · `kb_add` · `kb_list` · `kb_delete` · `update_plan` · `dispatch_tasks` · `list_skills` · `load_skill` · `web_search` · `web_fetch_page` · `http_fetch` · `write_file` · `read_file` · `list_files` · `codemode` · `tool_search`，以及所有已配置 MCP 服务器的工具（`mcp__<服务器>__<工具>`）。
+`now` · `remember` · `recall` · `kb_search` · `kb_add` · `kb_list` · `kb_delete` · `update_plan` · `dispatch_tasks` · `list_skills` · `load_skill` · `install_skill` · `web_search` · `web_fetch_page` · `http_fetch` · `write_file` · `read_file` · `list_files` · `codemode` · `tool_search` · `set_goal` · `complete_goal` · `report_goal` · `ask_user`，以及所有已配置 MCP 服务器的工具（`mcp__<服务器>__<工具>`）。
+
+共 24 个内置工具；另可在左栏「技能 → 自定义工具」用 JS 写自定义工具。
 
 ---
 
@@ -157,7 +167,7 @@ CHANGELOG.md             # 逐版本更新记录
 
 完整记录见 [CHANGELOG.md](./CHANGELOG.md)。里程碑：
 
-`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏 · `v0.22` 思考/计划/轨迹 · `v0.23` 输入框调用技能 · `v0.24` 四套主题 · `v0.25` Arco 色卡 · `v0.26` 设置分 tab · `v0.27` 模型供应商 · `v0.28` 金标回归 · `v0.29` 子代理编排 · `v0.30` 能力注册表
+`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏 · `v0.22` 思考/计划/轨迹 · `v0.23` 输入框调用技能 · `v0.24` 四套主题 · `v0.25` Arco 色卡 · `v0.26` 设置分 tab · `v0.27` 模型供应商 · `v0.28` 金标回归 · `v0.29` 子代理编排 · `v0.30` 能力注册表 · `v0.49` README 英文首页 · `v0.50` 流量计划与素材 · `v0.51` 前 7 天逐日文案 · `v0.52` 独立域名分享 · `v0.53` 知识库向量检索
 
 ## 致谢
 
