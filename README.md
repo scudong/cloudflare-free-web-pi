@@ -1,4 +1,4 @@
-# Cloudflare Free Pi Agent（π Harness）
+# Cloudflare Free Web Pi（π Harness）
 
 把 [pi](https://github.com/earendil-works/pi) 的 **durable harness 内核**跑在 Cloudflare Worker 上：会话、工具调用、记忆、文件全部持久化在 Durable Object 的 SQLite 里，不依赖任何外部数据库。
 

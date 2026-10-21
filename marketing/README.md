@@ -23,7 +23,7 @@
 
 ## 发布前待办
 
-- [ ] 仓库名改为 `cloudflare-free-pi-agent`（见 02；短名备选 `cf-free-pi-agent`）
+- [ ] 仓库名改为 `cloudflare-free-web-pi`（见 02；短名备选 `cf-free-web-pi`）
 - [ ] 加 LICENSE（建议 MIT）
 - [ ] 准备公开演示：演示邀请码或只读演示空间（当前线上需要访问密码）
 - [ ] README 补一段英文摘要（X 受众）

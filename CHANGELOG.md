@@ -4,6 +4,12 @@
 
 ## 2026-10-21（公开发布准备）
 
+### 命名调整：Cloudflare Free Web Pi（v0.47.1）
+- 仓库名改为 `cloudflare-free-web-pi`（v0.47.0 的 `cloudflare-free-pi-agent` 已被替换，GitHub 旧链接 301）
+- README / 页面 title / 顶栏 / worker 指令 / CI 仓库守卫同步改为 Web Pi
+- 重新生成 README 截图，顶栏显示 **Free Web Pi**
+- 命名依据：Cloudflare + Free + Web + Pi 四个词完整可搜；GitHub / npm 均无同名
+
 ### 仓库改名 Cloudflare Free Pi Agent（v0.47.0）
 - GitHub 仓库：`scudong/pi-harness` → `scudong/cloudflare-free-pi-agent`（GitHub 会自动 301 旧链接）
 - README 标题、页面 `<title>` / description、顶栏品牌同步改为 **Cloudflare Free Pi Agent / Free Pi Agent**
