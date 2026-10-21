@@ -4,6 +4,13 @@
 
 ## 2026-10-21（公开发布准备）
 
+### 知识库导入通道（v0.56.0）
+- 新增 `POST /api/kb/ingest`：`multipart/form-data` 上传 PDF / DOCX / MD / TXT，或 JSON `{url}` 导入网页；复用 `kbAddDoc` 入库、分块、建索引，不引入解析库与新存储
+- PDF / DOCX 走 Workers AI `toMarkdown()`；MD / TXT 直接读文本，无 `AI` 绑定也能用
+- 链接抓取复用 `web_fetch_page` 的 DeepSeek Fetch API，标题取页面 `<title>`；`DEEPSEEK_BASE_URL` 可指向自建代理（默认官方地址）
+- 失败不静默：413 `too_large` / 415 `unsupported_type` / 422 `empty_content` / 501 `ai_unavailable`；链接另有 400 `invalid_url`、502 `fetch_failed`
+- 金标新增：PDF 解析 mock 路径（RPC service binding 提供 `toMarkdown`）、链接导入成功与失败路径、无 AI 绑定回退
+
 ### 上手通道：空会话起步卡 + 设置内「部署自检」（`1d7524c`）
 - 空会话页新增 3 张起步卡（写周报并分享 / 存知识库再提问 / 每日摘要定时任务），点击只把提示词写入输入框，不直接发送
 - 设置 → 通用新增「部署自检」：检查模型密钥、模型供应商、知识库检索、分享域名、线上构建号，失败项给出修复命令
