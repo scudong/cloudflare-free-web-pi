@@ -17,12 +17,12 @@ import { KnowledgePanel } from "./components/KnowledgePanel";
 import { Icon } from "./components/Icon";
 import { api } from "./lib/api";
 import { shareUrlFor } from "./lib/format";
-import { parseEntries, truncateOneLine } from "./lib/entries";
+import { parseEntries, parseShareResult, truncateOneLine } from "./lib/entries";
 import { parseAutomations, parseCustomTools, parseFiles, parseMemories, parsePrompts, parseRules, parseSessions, parseSkills } from "./lib/collections";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { ApprovalInfo, AskQuestion, AutomationInfo, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, SkillInfo, ToolCallInfo } from "./types";
+import type { ApprovalInfo, AskQuestion, AutomationInfo, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLinkInfo, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -275,6 +275,8 @@ export default function App() {
 				let thinkingBuf = "";
 				const tools: ToolCallInfo[] = [];
 				const artifacts: FileArtifact[] = [];
+				/** 本轮生成的分享链接卡（v0.55.0）。 */
+				const shares: ShareLinkInfo[] = [];
 				/** 压缩提示（v0.31.0）：start 时插一条 notice，end 时把它改成完成态。 */
 				let compactionNoticeId: string | null = null;
 				const ensureBubble = () => {
@@ -292,6 +294,7 @@ export default function App() {
 										thinking: thinkingBuf || undefined,
 										tools: tools.length ? tools.map((t) => ({ ...t })) : [],
 										files: artifacts.length ? [...artifacts] : undefined,
+										shares: shares.length ? [...shares] : undefined,
 									}
 								: m,
 						),
@@ -305,6 +308,7 @@ export default function App() {
 					thinkingBuf = "";
 					tools.length = 0;
 					artifacts.length = 0;
+					shares.length = 0;
 					setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: label }]);
 				};
 				// update_plan 的入参就是最新计划：聊天里实时渲染，不用等工具结果
@@ -403,6 +407,12 @@ export default function App() {
 										typeof event.summary === "string" && event.summary
 											? truncateOneLine(event.summary, TOOL_SUMMARY_MAX)
 											: "完成";
+									// 保留完整结果：分享链接卡要从里面解析 URL 与有效期（v0.55.0）
+									if (typeof event.summary === "string" && event.summary) target.full = event.summary;
+								}
+								if (typeof event.summary === "string" && event.summary) {
+									const share = parseShareResult(name, event.summary);
+									if (share && !shares.some((item) => item.url === share.url)) shares.push(share);
 								}
 								syncBubble();
 							} else if (event.type === "done") {
@@ -420,6 +430,7 @@ export default function App() {
 													thinking: thinkingBuf || undefined,
 													tools: tools.length ? tools.map((t) => ({ ...t, status: (t.status === "running" ? "done" : t.status) as ToolCallInfo["status"] })) : [],
 													files: artifacts.length ? [...artifacts] : undefined,
+													shares: shares.length ? [...shares] : undefined,
 												}
 											: m,
 									);

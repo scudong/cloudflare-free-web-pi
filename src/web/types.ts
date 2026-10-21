@@ -26,6 +26,15 @@ export interface FileArtifact {
 	size?: number;
 }
 
+/** 分享工具产出的只读链接（v0.55.0：share_file / share_conversation）。 */
+export interface ShareLinkInfo {
+	url: string;
+	title: string;
+	/** 人读的有效期文案，如「有效期至 2026-10-28 20:00」或「长期有效」。 */
+	expiresLabel: string;
+	kind: "file" | "conversation";
+}
+
 /** Message list entry. notice = system hint (stopped / reset failed...); tool = orphan tool activity row. */
 export type ChatMessage =
 	| { id: string; role: "user"; text: string; images?: string[]; /** 后端条目 id（v0.32.0：分支用）。 */ entryId?: number }
@@ -39,6 +48,8 @@ export type ChatMessage =
 			error?: boolean;
 			/** 本轮产出的文件（由 write_file 工具结果提取）。 */
 			files?: FileArtifact[];
+			/** 本轮生成的分享链接（由 share_file / share_conversation 工具结果提取）。 */
+			shares?: ShareLinkInfo[];
 	  }
 	| { id: string; role: "tool"; tools: ToolCallInfo[] }
 	| { id: string; role: "notice"; text: string };

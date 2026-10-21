@@ -104,6 +104,23 @@ describe("设置", () => {
 		const after = await api("/api/settings");
 		expect(["off", "low", "high"]).toContain(after.json.thinkingLevel);
 	});
+
+	it("分享署名与默认有效期读写（v0.55.0）", async () => {
+		const before = await api("/api/settings");
+		expect(typeof before.json.shareTtlSeconds).toBe("number");
+		expect(typeof before.json.displayName).toBe("string");
+
+		const set = await post("/api/settings", { displayName: "  前端-fan  ", shareTtlSeconds: 3600 });
+		expect(set.json.displayName).toBe("前端-fan");
+		expect(set.json.shareTtlSeconds).toBe(3600);
+
+		const after = await api("/api/settings");
+		expect(after.json.displayName).toBe("前端-fan");
+		expect(after.json.shareTtlSeconds).toBe(3600);
+
+		// 恢复默认，避免影响其它用例
+		await post("/api/settings", { displayName: "", shareTtlSeconds: 7 * 24 * 3600 });
+	});
 });
 
 describe("模型供应商", () => {
@@ -473,6 +490,23 @@ describe("文件分享", () => {
 		expect(html).toContain("--bg:#17171a");
 	});
 
+	it("分享页页脚显示署名与生成时间（v0.55.0）", async () => {
+		await post("/api/settings", { displayName: "前端-fan" });
+		try {
+			const created = await post("/api/share", { sessionId: "1", kind: "file", name: "share-test.md", ttlSeconds: 3600 });
+			const html = await (await fetch(created.json.url)).text();
+			expect(html).toContain("署名：前端-fan");
+			expect(html).toContain("生成于");
+			// 署名参与 HTML 转义
+			await post("/api/settings", { displayName: "<b>x</b>" });
+			const escaped = await post("/api/share", { sessionId: "1", kind: "file", name: "share-test.md", ttlSeconds: 3600 });
+			const escapedHtml = await (await fetch(escaped.json.url)).text();
+			expect(escapedHtml).toContain("署名：&lt;b&gt;x&lt;/b&gt;");
+		} finally {
+			await post("/api/settings", { displayName: "" });
+		}
+	});
+
 	it("分享页记录主题，?theme= 可覆盖", async () => {
 		const created = await post("/api/share", {
 			sessionId: "1",
@@ -651,6 +685,10 @@ describe("工具注册（防回归）", () => {
 		}
 		// 目标模式（v0.31.0）
 		for (const name of ["set_goal", "complete_goal", "report_goal"]) {
+			expect(tools).toContain(name);
+		}
+		// 分享工具（v0.55.0）
+		for (const name of ["share_file", "share_conversation"]) {
 			expect(tools).toContain(name);
 		}
 	});
@@ -836,6 +874,9 @@ describe("工具审批", () => {
 		expect(byName.get("write_file")).toMatchObject({ category: "write" });
 		expect(byName.get("codemode")).toMatchObject({ category: "exec" });
 		expect(byName.get("dispatch_tasks")).toMatchObject({ category: "exec" });
+		// 分享工具属于写操作，受 write 档审批约束（v0.55.0）
+		expect(byName.get("share_file")).toMatchObject({ category: "write" });
+		expect(byName.get("share_conversation")).toMatchObject({ category: "write" });
 	});
 
 	it("改分级策略后生效策略跟随", async () => {

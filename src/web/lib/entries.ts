@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolCallInfo } from "../types";
+import type { ChatMessage, ShareLinkInfo, ToolCallInfo } from "../types";
 
 /** 工具活动条摘要的最大长度（字）。 */
 export const TOOL_SUMMARY_MAX = 60;
@@ -85,6 +85,28 @@ function artifactsOf(toolName: string, text: string): { name: string; size?: num
 	return [{ name: m[1]!.trim(), ...(Number.isFinite(size) ? { size } : {}) }];
 }
 
+const SHARE_TOOL_NAMES = new Set(["share_file", "share_conversation"]);
+
+/**
+ * 从分享工具的返回文本里解析链接卡（v0.55.0）。
+ * 后端格式固定为：`已生成分享链接：<url>\n<title> · 有效期至 <yyyy-MM-dd HH:mm>`（或「长期有效」）。
+ */
+export function parseShareResult(toolName: string, text: string): ShareLinkInfo | null {
+	if (!SHARE_TOOL_NAMES.has(toolName)) return null;
+	const url = /https?:\/\/[^\s<>"')]+\/s\/[A-Za-z0-9._-]+/.exec(text)?.[0];
+	if (!url) return null;
+	const after = text.slice(text.indexOf(url) + url.length).trim();
+	const line = (after.split("\n")[0] ?? "").trim();
+	const [titleRaw, ...rest] = line.split("·");
+	const title = (titleRaw ?? "").trim() || (toolName === "share_file" ? "文件" : "对话");
+	return {
+		url,
+		title,
+		expiresLabel: rest.join("·").trim() || "有效期未知",
+		kind: toolName === "share_file" ? "file" : "conversation",
+	};
+}
+
 function pickString(o: Record<string, unknown>, keys: string[]): string {
 	for (const key of keys) {
 		const v = o[key];
@@ -132,6 +154,8 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 	let pendingTools: ToolCallInfo[] = [];
 	/** 待挂到下一条助手消息的文件产出。 */
 	let pendingFiles: { name: string; size?: number }[] = [];
+	/** 待挂到下一条助手消息的分享链接（v0.55.0）。 */
+	let pendingShares: ShareLinkInfo[] = [];
 	let seq = 0;
 
 	const flushStandaloneTools = () => {
@@ -152,6 +176,8 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			const images = imagesOf(body);
 			if (!text && images.length === 0) continue;
 			flushStandaloneTools();
+			// 上一轮没有落助手消息的分享结果不再挂到下一轮
+			pendingShares = [];
 			const entryId = typeof entry.id === "number" ? entry.id : undefined;
 			messages.push({
 				id: `u${seq++}`,
@@ -169,6 +195,8 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			if (!text && tools.length === 0 && !thinking) continue;
 			const files = pendingFiles;
 			pendingFiles = [];
+			const shares = pendingShares;
+			pendingShares = [];
 			messages.push({
 				id: `a${seq++}`,
 				role: "assistant",
@@ -176,6 +204,7 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 				tools: tools.length ? tools : undefined,
 				thinking: thinking || undefined,
 				files: files.length ? files : undefined,
+				shares: shares.length ? shares : undefined,
 			});
 		} else if (kind === "compaction") {
 			// pi.compaction：早期对话被摘要成一条记录（v0.31.0），聊天里显示为一条系统提示
@@ -210,6 +239,9 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			pendingTools.push({ name, summary: prefix + summary, full: prefix + rawSummary, ...(args ? { args } : {}) });
 			// 文件产出：留到下一条助手消息一起渲染（v0.25.2 修正归属）
 			pendingFiles.push(...artifactsOf(name, rawSummary));
+			// 分享链接卡：同样挂到下一条助手消息（v0.55.0），同一 URL 只保留一张
+			const share = parseShareResult(name, rawSummary);
+			if (share && !pendingShares.some((item) => item.url === share.url)) pendingShares.push(share);
 		}
 		// 其他 kind：宽容跳过
 	}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEntries } from "../../src/web/lib/entries";
+import { parseEntries, parseShareResult } from "../../src/web/lib/entries";
 
 /** 构造一条 pi 条目。 */
 function entry(id: number, kind: string, model: unknown) {
@@ -81,8 +81,69 @@ describe("parseEntries · 工具与产出", () => {
 	});
 });
 
-describe("parseEntries · 上下文压缩（v0.31.0）", () => {
-	it("pi.compaction 渲染成一条系统提示", () => {
+describe("parseShareResult · 分享链接卡（v0.55.0）", () => {
+	it("解析文件分享的 URL、标题与有效期", () => {
+		const text = "已生成分享链接：https://pi.example.com/s/abcd1234\nreport.md · 有效期至 2026-10-28 20:00";
+		expect(parseShareResult("share_file", text)).toEqual({
+			url: "https://pi.example.com/s/abcd1234",
+			title: "report.md",
+			expiresLabel: "有效期至 2026-10-28 20:00",
+			kind: "file",
+		});
+	});
+
+	it("对话分享与长期有效", () => {
+		const text = "已生成分享链接：http://localhost:8787/s/xyz\n本周周报 · 长期有效";
+		expect(parseShareResult("share_conversation", text)).toMatchObject({
+			url: "http://localhost:8787/s/xyz",
+			title: "本周周报",
+			expiresLabel: "长期有效",
+			kind: "conversation",
+		});
+	});
+
+	it("非分享工具、缺少链接时返回 null", () => {
+		expect(parseShareResult("write_file", "已写入 report.md（12 字符）。")).toBeNull();
+		expect(parseShareResult("share_file", "分享失败：文件不存在")).toBeNull();
+	});
+});
+
+describe("parseEntries · 分享链接（v0.55.0）", () => {
+	it("share_file 结果挂到紧随其后的助手消息上", () => {
+		const raw = [
+			entry(2, "pi.assistant", [{ content: [{ type: "text", text: "链接给你" }] }]),
+			entry(1, "pi.tool-result", [
+				{
+					toolName: "share_file",
+					content: [{ type: "text", text: "已生成分享链接：https://pi.example.com/s/tok123\nreport.md · 有效期至 2026-10-28 20:00" }],
+				},
+			]),
+		];
+		const messages = parseEntries(raw);
+		const assistant = messages.find((m) => m.role === "assistant") as {
+			shares?: { url: string; title: string; kind: string }[];
+		};
+		expect(assistant.shares).toEqual([
+			{ url: "https://pi.example.com/s/tok123", title: "report.md", expiresLabel: "有效期至 2026-10-28 20:00", kind: "file" },
+		]);
+	});
+
+	it("同一 URL 只保留一张卡", () => {
+		const result = [
+			entry(1, "pi.tool-result", [
+				{ toolName: "share_file", content: [{ type: "text", text: "已生成分享链接：https://pi.example.com/s/tok123\nreport.md · 长期有效" }] },
+			]),
+			entry(2, "pi.tool-result", [
+				{ toolName: "share_file", content: [{ type: "text", text: "已生成分享链接：https://pi.example.com/s/tok123\nreport.md · 长期有效" }] },
+			]),
+			entry(3, "pi.assistant", [{ content: [{ type: "text", text: "好了" }] }]),
+		];
+		const assistant = parseEntries(result).find((m) => m.role === "assistant") as { shares?: unknown[] };
+		expect(assistant.shares).toHaveLength(1);
+	});
+});
+
+describe("parseEntries · 上下文压缩（v0.31.0）", () => {	it("pi.compaction 渲染成一条系统提示", () => {
 		const raw = [
 			entry(1, "pi.user", [{ role: "user", content: "问" }]),
 			entry(2, "pi.compaction", [{ content: "（更早的对话摘要）" }]),

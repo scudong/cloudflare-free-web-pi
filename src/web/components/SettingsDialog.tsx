@@ -208,6 +208,99 @@ function DeploymentCheck() {
 	);
 }
 
+/** 分享默认有效期选项（v0.55.0）：0 = 长期有效。 */
+const SHARE_TTL_OPTIONS = [
+	{ value: 3600, label: "1 小时" },
+	{ value: 24 * 3600, label: "1 天" },
+	{ value: 7 * 24 * 3600, label: "7 天" },
+	{ value: 30 * 24 * 3600, label: "30 天" },
+	{ value: 0, label: "长期有效" },
+];
+
+/**
+ * 分享设置（v0.55.0）：署名写进分享页页脚，默认有效期作为 share_file /
+ * share_conversation 不传 ttlSeconds 时的兜底。两者都存全局设置。
+ */
+function ShareSettings() {
+	const [displayName, setDisplayName] = useState<string | null>(null);
+	const [ttl, setTtl] = useState<number | null>(null);
+	const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+	useEffect(() => {
+		void (async () => {
+			try {
+				const data = await api.settings();
+				setDisplayName(data.displayName ?? "");
+				setTtl(typeof data.shareTtlSeconds === "number" ? data.shareTtlSeconds : 7 * 24 * 3600);
+			} catch {
+				setDisplayName("");
+				setTtl(7 * 24 * 3600);
+				setMessage({ kind: "error", text: "读取设置失败，稍后重试。" });
+			}
+		})();
+	}, []);
+
+	const save = async (patch: { displayName?: string; shareTtlSeconds?: number }) => {
+		setMessage(null);
+		try {
+			await api.setSettings(patch);
+			setMessage({ kind: "ok", text: "已保存" });
+		} catch {
+			setMessage({ kind: "error", text: "保存失败，请重试。" });
+		}
+	};
+
+	return (
+		<Section title="分享">
+			<p className="mb-3 text-xs leading-relaxed text-slate-500">
+				模型说「分享文件 / 发我个链接」时会调用 share_file / share_conversation 生成只读链接。这里配置分享页页脚的署名与不传 ttlSeconds 时的默认有效期。
+			</p>
+			<label className="block text-xs text-slate-400">
+				署名（显示在分享页页脚）
+				<input
+					type="text"
+					maxLength={40}
+					value={displayName ?? ""}
+					disabled={displayName === null}
+					placeholder="例如：张三"
+					onChange={(e) => setDisplayName(e.target.value)}
+					onBlur={() => {
+						const next = (displayName ?? "").trim();
+						if (next !== displayName) setDisplayName(next);
+						void save({ displayName: next });
+					}}
+					className="mt-1 w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-50"
+				/>
+			</label>
+			<label className="mt-3 block text-xs text-slate-400">
+				默认有效期
+				<select
+					value={ttl ?? 7 * 24 * 3600}
+					disabled={ttl === null}
+					onChange={(e) => {
+						const next = Number(e.target.value);
+						setTtl(next);
+						void save({ shareTtlSeconds: next });
+					}}
+					className="mt-1 w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-50"
+				>
+					{SHARE_TTL_OPTIONS.map((option) => (
+						<option key={option.value} value={option.value}>
+							{option.label}
+						</option>
+					))}
+					{ttl !== null && !SHARE_TTL_OPTIONS.some((option) => option.value === ttl) && (
+						<option value={ttl}>自定义（{ttl} 秒）</option>
+					)}
+				</select>
+			</label>
+			{message && (
+				<p className={`mt-2 text-xs ${message.kind === "error" ? "text-rose-300" : "text-emerald-300"}`}>{message.text}</p>
+			)}
+		</Section>
+	);
+}
+
 const actionButton =
 	"inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-200 shadow-sm transition-colors hover:bg-slate-700/60 hover:text-white";
 
@@ -847,6 +940,7 @@ export function SettingsDialog({
 								</div>
 								{webSearch === null && <p className="mt-2 text-xs text-slate-500">正在读取设置…</p>}
 							</Section>
+							<ShareSettings />
 						</>
 					)}
 

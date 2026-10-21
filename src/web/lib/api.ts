@@ -308,6 +308,10 @@ export const api = {
 			thinkingLevel?: string;
 			compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number };
 			approval?: { read: string; write: string; exec: string };
+			/** 分享署名（v0.55.0）：分享页页脚展示。 */
+			displayName?: string;
+			/** 分享链接默认有效期（秒，0 = 长期有效，v0.55.0）。 */
+			shareTtlSeconds?: number;
 		}>("/api/settings"),
 
 	setSettings: (patch: {
@@ -318,6 +322,8 @@ export const api = {
 		compaction?: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>;
 		approval?: Partial<{ read: string; write: string; exec: string }>;
 		approvalTools?: Record<string, string>;
+		displayName?: string;
+		shareTtlSeconds?: number;
 	}) => requestJson<{ ok?: boolean }>("/api/settings", jsonPost(patch)),
 
 	/** 待回答的问题（v0.37.0）。 */

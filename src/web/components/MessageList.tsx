@@ -5,6 +5,7 @@ import { ToolBar } from "./ToolBar";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { PlanCard } from "./PlanCard";
 import { ArtifactCard } from "./ArtifactCard";
+import { ShareCard } from "./ShareCard";
 import { Icon } from "./Icon";
 
 const AUTO_SCROLL_THRESHOLD = 80;
@@ -71,6 +72,13 @@ function AssistantBubble({
 				<div className="flex flex-wrap gap-2">
 					{message.files.map((file, index) => (
 						<ArtifactCard key={`${file.name}-${index}`} file={file} onOpen={onOpenFile} />
+					))}
+				</div>
+			)}
+			{message.shares && message.shares.length > 0 && (
+				<div className="flex w-full flex-col gap-2">
+					{message.shares.map((share, index) => (
+						<ShareCard key={`${share.url}-${index}`} share={share} />
 					))}
 				</div>
 			)}
