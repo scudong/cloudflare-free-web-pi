@@ -1,0 +1,49 @@
+tests/api/multiuser.test.ts
+  00512495ff504ece 5,75-76
+tests/api/api.test.ts
+  00512495ff504ece 5,53-54
+tests/api/teardown.ts
+  00512495ff504ece 1-45
+CHANGELOG.md
+  00512495ff504ece 7-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "73dc0063db40a8d6a2df873993900bac3e66ec6e",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 58,
+      "total_deletions": 18,
+      "accepted_lines": 58,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "CHANGELOG.md": {
+          "additions": 7,
+          "accepted_lines": 7
+        },
+        "tests/api/teardown.ts": {
+          "additions": 45,
+          "accepted_lines": 45
+        },
+        "tests/api/api.test.ts": {
+          "additions": 3,
+          "deletions": 9,
+          "accepted_lines": 3
+        },
+        "tests/api/multiuser.test.ts": {
+          "additions": 3,
+          "deletions": 9,
+          "accepted_lines": 3
+        }
+      }
+    }
+  }
+}
