@@ -1,10 +1,10 @@
-# ADR-0001：分层规范（后端 Route → Service → Repository → DO；前端 页面 / 特性 / 基础 UI / hooks）
+# ADR-0001：后端分层规范（Route → Service → Repository → DO）
 
 - 状态：提案（Proposed）
 - 日期：2026-10-21
-- 决策人：后端架构-hou（后端半）、前端架构-qian（前端半）
-- 范围：`src/worker.ts` 及后续拆出的后端模块；前端 `src/web`
-- 关联：`docs/architecture-map.md`（现状与 R1-R15 风险编号）
+- 决策人：后端架构-hou（NERE-18）
+- 范围：`src/worker.ts` 及后续拆出的后端模块
+- 关联：`docs/architecture-map.md`（现状与 R1-R15 风险编号）、[`docs/adr/0002-frontend-layering.md`](./0002-frontend-layering.md)（前端分层）
 
 ## 背景
 
