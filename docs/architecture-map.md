@@ -35,6 +35,7 @@ SpikeAgent DO（每用户一个；主人沿用 "spike"，邀请用户 "user:<id>
 | 逻辑模块 | 位置（符号） | 职责 | 主要依赖 | 数据 |
 |---|---|---|---|---|
 | Worker 入口 / 鉴权 | `default export`（`5148-5249`）、`authorizedUser`/`accessToken`（`4960-5050`） | Cookie 解析、HMAC 签名、邀请码登录、主人/邀请用户分流、DO 路由 | `ACCESS_PASSWORD`、`UserRegistry` | 无 |
+| 首屏聚合 | `worker/bootstrap.ts` | 编排 17 个只读面板，逐字段容错；由 `GET /bootstrap` 调用 | 各域读取 helper | 无（只读） |
 | UserRegistry DO | `class UserRegistry`（`5053-5146`） | 邀请码校验、用户 CRUD、吊销 | DO SQLite | `users` |
 | SpikeAgent DO | `class SpikeAgent`（`2639-4949`） | 用户状态所有者、RPC 入口、Harness 生命周期、alarm | pi-durable、DO SQLite | 全部用户数据 |
 | HTTP 路由层 | `handleFetch`（`3903-4948`） | 81 个分支：解析、校验、状态码、**内联 SQL** | DO 方法、模块级 helper | 直接读写 15+ 张表 |
@@ -57,6 +58,7 @@ Worker 剥掉 `/api` 或 `/agent` 前缀后转发给 DO（`src/worker.ts:5211-52
 |---|---|---|
 | 对话 | `POST /chat`、`POST /chat/stream`、`POST /interject`、`POST /abort`、`POST /reset`、`POST /compact` | 前端只用 SSE |
 | 会话 | `GET/POST/PATCH/DELETE /sessions`、`POST /branches`、`GET /entries`、`GET /session` | `sessions_meta` 与 Harness 双写 |
+| 首屏 | `GET /bootstrap` | 17 个只读面板聚合，单字段故障隔离 |
 | 文件 | `GET/DELETE /files`、`GET /files/content`、`GET /files/all` | `vfs_v2` |
 | 知识库 | `GET/POST/DELETE /kb`、`/kb/doc`、`/kb/search`、`/kb/prefetch`、`/kb/status`、`/kb/reindex` | FTS / vector / hybrid |
 | 分享 | `POST /share`、`GET /shares`、`GET /s/<token>` | `/s/` 公开 |
@@ -181,7 +183,7 @@ CI：`.github/workflows/deploy.yml`（test → build → deploy）、`smoke.yml`
 |---|---|---|---|---|---|
 | R1 | P0 | 单文件单体：`handleFetch` 81 个分支、105 处路由内联 SQL | `worker.ts` 5249 行；`3903-4948` | 无法单测业务、合并冲突、改动半径不可控 | 执行 ADR-0001，按域增量拆分 |
 | R2 | P1 | 公开分享页也会启动完整 Harness | `3579`（所有非 `/` 请求 `open()`）+ `3886`（`/s/`）+ `2315-2344` | 冷启动分享页要建扩展/MCP/Harness；MCP 不可用时分享也可能变慢/失败 | 分享文件与 404/过期路径零 Harness；会话分享在 token 命中后再开；评估创建时快照 |
-| R3 | P1 | 首屏 18 个 API 请求，全部进同一个单线程 DO；邀请用户每次再查一次全局 registry | `App.tsx:160-260, 638-1050`；`worker.ts:4637`、`4600-4613` | 首屏延迟 = 18 次串行 DO 往返；registry 成为全站串行点 | 新增 `/api/bootstrap` 聚合并发只读数据；registry 结果做短 TTL 缓存并声明吊销窗口 |
+| R3 | P1 | 首屏 18 个 API 请求，全部进同一个单线程 DO；邀请用户每次再查一次全局 registry | `App.tsx:160-260, 638-1050`；`worker.ts:4637`、`4600-4613` | 首屏延迟 = 18 次串行 DO 往返；registry 成为全站串行点 | 已落地 `GET /api/bootstrap`（NERE-23）：后端只读面板合并为 1 个请求，registry 查询随面板数收敛为每请求一次；前端切换后首屏为 bootstrap + auth 两个请求 |
 | R4 | P1 | schema bootstrap 顺序脆弱：先 ALTER 后 CREATE，异常全吞；DDL 在请求路径执行 | `78-102`（5 个 ALTER 在 `CREATE sessions_meta` 之前）、`63-153`、52 次请求内 `ensureTables` | 全新 DO 首次 `open()` 只得到 4 列；依赖后续某次 `ensureTables` 补列，漏掉的路径会 500 或静默回落默认值 | 版本化迁移（`schema_migrations`），先建表后补列，空库首启测试 |
 | R5 | P1 | 跨 DO 的模块级可变状态 | `customToolNames` `350/563`；`mcpCache` `2063/2086`（只按 server.id） | 同 isolate 多用户时，自定义工具分类和 MCP client 可能串用 | 移到 DO 实例字段或按 `scopeId` 分键 |
 | R6 | P1 | 删除用户不吊销数据与分享 | `4734-4738`；`4828-4836`；`3043-3129` | 被吊销用户的公开链接继续可读，DO 数据与费用继续存在 | 定义吊销语义：立即删 shares（可选清空 DO），分享 404 |

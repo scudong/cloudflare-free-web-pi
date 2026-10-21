@@ -133,3 +133,29 @@ describe("多用户隔离", () => {
 		expect(after.status).toBe(401);
 	});
 });
+
+describe("首屏聚合（邀请用户）", () => {
+	it("新用户一次拿全首屏，只查一次注册表", async () => {
+		const created = await post("/api/users", { name: "首屏用户" }, ownerCookie);
+		const code = created.json.code as string;
+		const login = await post("/api/login", { password: code }, "");
+		const cookie = login.cookie;
+		expect(cookie).toMatch(/^pi_access=u_/);
+
+		const before = await call("/api/debug/registry", {}, ownerCookie);
+		expect(typeof before.json.lookups).toBe("number");
+
+		const boot = await call("/api/bootstrap?sessionId=1", {}, cookie);
+		expect(boot.status).toBe(200);
+		expect(boot.json.errors).toEqual({});
+		expect(boot.json.entries).toEqual([]);
+		expect(boot.json.files).toEqual([]);
+		expect(boot.json.skills).toEqual([]);
+		expect(boot.json.prompts).toEqual([]);
+		expect(boot.json.settings.webSearch).toBe(true);
+		expect(boot.json.models.models.length).toBeGreaterThan(0);
+		// bootstrap 内部 17 个面板共用一个请求 → 注册表只被查一次（旧路径是 17-18 次）。
+		const after = await call("/api/debug/registry", {}, ownerCookie);
+		expect(after.json.lookups - before.json.lookups).toBe(1);
+	});
+});

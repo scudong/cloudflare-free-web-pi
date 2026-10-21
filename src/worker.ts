@@ -22,6 +22,7 @@ import { McpClient, StreamableHttpTransport, toLlmContent } from "@earendil-work
 import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
 // 构建期注入：内核依赖版本（v0.35.0）
 import packageJson from "../package.json";
+import { collectBootstrap } from "./worker/bootstrap";
 
 const ctx = BACKGROUND_CONTEXT;
 
@@ -612,6 +613,73 @@ function listPrompts(): { name: string; description: string; content: string }[]
 	} catch {
 		return [];
 	}
+}
+
+/* ---------------- 只读面板（NERE-23）：单端点与 /bootstrap 共用同一实现 ---------------- */
+
+function listFiles(sessionId: string) {
+	return sqlFacade!
+		.exec("SELECT name, length(content) AS size, updated_at FROM vfs_v2 WHERE conversation_id = ? ORDER BY updated_at DESC", sessionId)
+		.toArray();
+}
+
+function listMemories() {
+	return sqlFacade!.exec("SELECT id, content, created_at, source FROM pi_mem ORDER BY id DESC LIMIT 200").toArray();
+}
+
+function listPendingApprovals(sessionId: string) {
+	return sqlFacade!
+		.exec(
+			"SELECT id, tool, category, args, created_at FROM approvals WHERE session_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 20",
+			sessionId,
+		)
+		.toArray();
+}
+
+function listPendingQuestions(sessionId: string) {
+	const rows = sqlFacade!
+		.exec("SELECT id, payload, created_at FROM questions WHERE session_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 5", sessionId)
+		.toArray() as { id: number; payload: string; created_at: string }[];
+	return rows.map((row) => ({ id: row.id, created_at: row.created_at, ...(JSON.parse(row.payload) as AskPayload) }));
+}
+
+function listSkills() {
+	return sqlFacade!.exec("SELECT name, description, content, created_at FROM skills ORDER BY name").toArray();
+}
+
+function listCustomTools() {
+	return sqlFacade!
+		.exec("SELECT name, description, parameters, code, enabled, created_at FROM custom_tools ORDER BY created_at DESC")
+		.toArray();
+}
+
+function listAutomations() {
+	return sqlFacade!
+		.exec("SELECT id, name, prompt, session_id, schedule, enabled, last_run_at, next_run_at FROM automations ORDER BY created_at DESC")
+		.toArray();
+}
+
+function listMcpServers() {
+	return sqlFacade!.exec("SELECT id, name, url, created_at FROM mcp_servers ORDER BY created_at ASC").toArray();
+}
+
+function ruleViews() {
+	return listRules().map((r) => ({ ...r, enabled: Boolean(r.enabled) }));
+}
+
+/** GET /settings 的响应体；POST /settings 与 /bootstrap 复用，避免键漂移。 */
+function settingsView() {
+	return {
+		webSearch: getSetting("web_search", "1") === "1",
+		kbPrefetch: getSetting("kb_prefetch", "1") === "1",
+		kbRetrieval: kbRetrievalMode(),
+		kbVector: { available: kbVectorAvailable(), index: KB_VECTOR_DEFAULT_INDEX },
+		thinkingLevel: currentThinkingLevel(),
+		compaction: compactionSettings(),
+		approval: approvalSettings(),
+		displayName: getSetting("display_name", ""),
+		shareTtlSeconds: shareDefaultTtl(),
+	};
 }
 
 /* ---------------- pi 内核版本（v0.35.0） ---------------- */
@@ -2918,6 +2986,36 @@ export class SpikeAgent extends DurableObject {
 		return { sessions: rows };
 	}
 
+	/**
+	 * 首屏聚合（NERE-23）：一次读取所有只读面板。
+	 * 各 loader 与单端点共用同一实现；collectBootstrap 负责逐字段容错。
+	 */
+	private async readBootstrap(sessionId: string) {
+		ensureTables(sqlFacade!);
+		return collectBootstrap({
+			session: () => ({ ok: true, name: "pi-harness-spike" }),
+			entries: () => this.entries(sessionId),
+			sessions: async () => (await this.listSessions()).sessions,
+			files: () => listFiles(sessionId),
+			memories: () => listMemories(),
+			approvals: () => listPendingApprovals(sessionId),
+			settings: () => settingsView(),
+			plan: () => readPlan(sessionId),
+			goal: () => goalInfo(readGoalRow(sessionId)),
+			questions: () => listPendingQuestions(sessionId),
+			prompts: () => listPrompts(),
+			rules: () => ruleViews(),
+			customTools: () => listCustomTools(),
+			skills: () => listSkills(),
+			automations: () => listAutomations(),
+			mcpServers: () => listMcpServers(),
+			models: () => {
+				const models = activeModelIds();
+				return { models, default: models[0] ?? DEFAULT_MODEL_ID };
+			},
+		});
+	}
+
 	/** 识别消息开头的「/技能名」（v0.23.0）：命中已安装技能时返回技能正文与去掉前缀的正文。 */
 	private skillInvocation(message: string): { name: string; content: string; rest: string } | null {
 		const trimmed = message.trimStart();
@@ -3952,6 +4050,16 @@ export class SpikeAgent extends DurableObject {
 						: undefined,
 				});
 			}
+			/* ---- 首屏聚合（NERE-23）：只读，一次返回所有面板 ---- */
+			if (request.method === "GET" && url.pathname === "/bootstrap") {
+				const raw = (url.searchParams.get("sessionId") ?? "").trim();
+				const sessionId = raw || "1";
+				// 会话 id 由 Harness 以正整数分配；非法值直接 400，避免落到根会话造成误读。
+				if (!/^[1-9]\d{0,15}$/.test(sessionId)) {
+					return Response.json({ error: "sessionId 必须是正整数" }, { status: 400 });
+				}
+				return Response.json(await this.readBootstrap(sessionId));
+			}
 			if (request.method === "GET" && url.pathname === "/sessions") {
 				return Response.json(await this.listSessions());
 			}
@@ -3996,8 +4104,7 @@ export class SpikeAgent extends DurableObject {
 			if (url.pathname === "/files" && request.method === "GET") {
 				ensureTables(sqlFacade!);
 				const sid = url.searchParams.get("sessionId") ?? "1";
-				const rows = sqlFacade!.exec("SELECT name, length(content) AS size, updated_at FROM vfs_v2 WHERE conversation_id = ? ORDER BY updated_at DESC", sid).toArray();
-				return Response.json({ files: rows });
+				return Response.json({ files: listFiles(sid) });
 			}
 			if (url.pathname === "/files/content" && request.method === "GET") {
 				const name = url.searchParams.get("name") ?? "";
@@ -4182,8 +4289,7 @@ export class SpikeAgent extends DurableObject {
 			}
 			if (url.pathname === "/skills" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				const rows = sqlFacade!.exec("SELECT name, description, content, created_at FROM skills ORDER BY name").toArray();
-				return Response.json({ skills: rows });
+				return Response.json({ skills: listSkills() });
 			}
 			if (url.pathname === "/skills" && request.method === "POST") {
 				const body = (await request.json()) as { name?: string; description?: string; content?: string };
@@ -4279,10 +4385,7 @@ export class SpikeAgent extends DurableObject {
 			}
 			if (url.pathname === "/automations" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				const rows = sqlFacade!.exec(
-					"SELECT id, name, prompt, session_id, schedule, enabled, last_run_at, next_run_at FROM automations ORDER BY created_at DESC",
-				).toArray();
-				return Response.json({ automations: rows });
+				return Response.json({ automations: listAutomations() });
 			}
 			if (url.pathname === "/automations" && request.method === "POST") {
 				const body = (await request.json()) as {
@@ -4361,7 +4464,7 @@ export class SpikeAgent extends DurableObject {
 			/* ---- 规则文件（v0.31.0） ---- */
 			if (url.pathname === "/rules" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				return Response.json({ rules: listRules().map((r) => ({ ...r, enabled: Boolean(r.enabled) })) });
+				return Response.json({ rules: ruleViews() });
 			}
 			if (url.pathname === "/rules" && request.method === "POST") {
 				const body = (await request.json()) as { name?: string; content?: string; enabled?: boolean };
@@ -4433,12 +4536,7 @@ export class SpikeAgent extends DurableObject {
 			if (url.pathname === "/questions" && request.method === "GET") {
 				ensureTables(sqlFacade!);
 				const sid = url.searchParams.get("sessionId") ?? "1";
-				const rows = sqlFacade!
-					.exec("SELECT id, payload, created_at FROM questions WHERE session_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 5", sid)
-					.toArray() as { id: number; payload: string; created_at: string }[];
-				return Response.json({
-					questions: rows.map((row) => ({ id: row.id, created_at: row.created_at, ...(JSON.parse(row.payload) as AskPayload) })),
-				});
+				return Response.json({ questions: listPendingQuestions(sid) });
 			}
 			if (url.pathname === "/questions" && request.method === "POST") {
 				ensureTables(sqlFacade!);
@@ -4472,10 +4570,7 @@ export class SpikeAgent extends DurableObject {
 			/* ---- 自定义工具（v0.36.0） ---- */
 			if (url.pathname === "/custom-tools" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				const rows = sqlFacade!
-					.exec("SELECT name, description, parameters, code, enabled, created_at FROM custom_tools ORDER BY created_at DESC")
-					.toArray();
-				return Response.json({ tools: rows });
+				return Response.json({ tools: listCustomTools() });
 			}
 			if (url.pathname === "/custom-tools" && request.method === "POST") {
 				ensureTables(sqlFacade!);
@@ -4582,13 +4677,7 @@ export class SpikeAgent extends DurableObject {
 			if (url.pathname === "/approvals" && request.method === "GET") {
 				ensureTables(sqlFacade!);
 				const sid = url.searchParams.get("sessionId") ?? "1";
-				const rows = sqlFacade!
-					.exec(
-						"SELECT id, tool, category, args, created_at FROM approvals WHERE session_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 20",
-						sid,
-					)
-					.toArray() as { id: number; tool: string; category: string; args: string; created_at: string }[];
-				return Response.json({ approvals: rows });
+				return Response.json({ approvals: listPendingApprovals(sid) });
 			}
 			if (url.pathname === "/approvals" && request.method === "POST") {
 				ensureTables(sqlFacade!);
@@ -4648,17 +4737,7 @@ export class SpikeAgent extends DurableObject {
 			}
 			if (url.pathname === "/settings" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				return Response.json({
-					webSearch: getSetting("web_search", "1") === "1",
-					kbPrefetch: getSetting("kb_prefetch", "1") === "1",
-					kbRetrieval: kbRetrievalMode(),
-					kbVector: { available: kbVectorAvailable(), index: KB_VECTOR_DEFAULT_INDEX },
-					thinkingLevel: currentThinkingLevel(),
-					compaction: compactionSettings(),
-					approval: approvalSettings(),
-					displayName: getSetting("display_name", ""),
-					shareTtlSeconds: shareDefaultTtl(),
-				});
+				return Response.json(settingsView());
 			}
 			if (url.pathname === "/settings" && request.method === "POST") {
 				const body = (await request.json()) as {
@@ -4722,18 +4801,7 @@ export class SpikeAgent extends DurableObject {
 				}
 				// 压缩策略在 Harness.open 时读取，改了要重建
 				if (compactionChanged) await this.recoverSession();
-				return Response.json({
-					ok: true,
-					webSearch: getSetting("web_search", "1") === "1",
-					kbPrefetch: getSetting("kb_prefetch", "1") === "1",
-					kbRetrieval: kbRetrievalMode(),
-					kbVector: { available: kbVectorAvailable(), index: KB_VECTOR_DEFAULT_INDEX },
-					thinkingLevel: currentThinkingLevel(),
-					compaction: compactionSettings(),
-					approval: approvalSettings(),
-					displayName: getSetting("display_name", ""),
-					shareTtlSeconds: shareDefaultTtl(),
-				});
+				return Response.json({ ok: true, ...settingsView() });
 			}
 			if (url.pathname === "/context" && request.method === "GET") {
 				return Response.json(await this.contextUsage(url.searchParams.get("sessionId") ?? undefined));
@@ -4870,8 +4938,7 @@ export class SpikeAgent extends DurableObject {
 			}
 			if (url.pathname === "/mcp" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				const rows = sqlFacade!.exec("SELECT id, name, url, created_at FROM mcp_servers ORDER BY created_at ASC").toArray();
-				return Response.json({ servers: rows });
+				return Response.json({ servers: listMcpServers() });
 			}
 			if (url.pathname === "/mcp" && request.method === "POST") {
 				const body = (await request.json()) as { name?: string; url?: string; headers?: Record<string, string> };
@@ -4914,8 +4981,7 @@ export class SpikeAgent extends DurableObject {
 			}
 			if (url.pathname === "/memories" && request.method === "GET") {
 				ensureTables(sqlFacade!);
-				const rows = sqlFacade!.exec("SELECT id, content, created_at, source FROM pi_mem ORDER BY id DESC LIMIT 200").toArray();
-				return Response.json({ memories: rows });
+				return Response.json({ memories: listMemories() });
 			}
 			if (url.pathname === "/memories" && request.method === "DELETE") {
 				// all=1 → 一键清空（v0.26.0）
@@ -4989,8 +5055,12 @@ function cookieValue(request: Request, name: string): string | null {
 	return null;
 }
 
+/** 邀请用户状态查询次数（仅测试配置 TEST_REGISTRY_STATS=1 时暴露，用于验收 NERE-23 的请求放大）。 */
+let registryLookups = 0;
+
 /** 邀请用户是否仍然存在（每次请求查注册表，吊销立即生效）。 */
 async function userEnabled(env: { UserRegistry: DurableObjectNamespace }, userId: string): Promise<boolean> {
+	registryLookups++;
 	try {
 		const registry = env.UserRegistry.get(env.UserRegistry.idFromName("registry"));
 		const res = await registry.fetch(
@@ -5148,12 +5218,20 @@ function sessionResponse(token: string, payload: Record<string, unknown>): Respo
 export default {
 	async fetch(
 		request: Request,
-		env: { SpikeAgent: DurableObjectNamespace; UserRegistry: DurableObjectNamespace; ACCESS_PASSWORD?: string },
+		env: { SpikeAgent: DurableObjectNamespace; UserRegistry: DurableObjectNamespace; ACCESS_PASSWORD?: string; TEST_REGISTRY_STATS?: string },
 	): Promise<Response> {
 		const url = new URL(request.url);
 		const password = env.ACCESS_PASSWORD ?? "";
 		const protect = Boolean(password);
 		const userId = await authorizedUser(request, password, env);
+
+		// 测试专用计数端点：只有测试配置显式打开且请求者是主人时才存在。
+		if (url.pathname === "/api/debug/registry" && request.method === "GET") {
+			if (env.TEST_REGISTRY_STATS !== "1" || userId !== OWNER_ID) {
+				return Response.json({ error: "not found" }, { status: 404 });
+			}
+			return Response.json({ lookups: registryLookups });
+		}
 
 		// 登录/登出/状态：不需要已登录。
 		if (url.pathname === "/api/auth" && request.method === "GET") {

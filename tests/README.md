@@ -81,3 +81,4 @@ tests/
 | **自定义工具** | `api/api.test.ts` · 自定义工具 |
 | **交互式问答** | `api/api.test.ts` · 交互式问答 |
 | **分享工具 / 链接卡** | `api/share-tools.test.ts`（成功/复用/过期/审批/默认有效期）+ `api/api.test.ts` · 文件分享 / 工具注册 + `unit/entries.test.ts` · 分享链接 |
+| **首屏聚合 `/api/bootstrap`** | `unit/bootstrap.test.ts` · 逐字段容错 + `api/api.test.ts` · 首屏聚合 + `api/multiuser.test.ts` · 邀请用户注册表计数 |
