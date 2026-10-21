@@ -6,14 +6,18 @@
 
 [![Release](https://img.shields.io/github/v/release/scudong/cloudflare-free-web-pi?label=release&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/releases) [![Stars](https://img.shields.io/github/stars/scudong/cloudflare-free-web-pi?style=flat&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/stargazers) [![License](https://img.shields.io/badge/license-MIT-0ea5e9)](LICENSE) [![Deploy](https://github.com/scudong/cloudflare-free-web-pi/actions/workflows/deploy.yml/badge.svg)](https://github.com/scudong/cloudflare-free-web-pi/actions/workflows/deploy.yml)
 
-[English](README.md) · **简体中文** · [在线地址](https://pi-harness-gw.pages.dev) · [快速开始](#快速开始)
+[English](README.md) · **简体中文** · [快速开始](#快速开始) · [部署](#部署)
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/scudong/cloudflare-free-web-pi)
+
+<sub>一键部署到自己的 Cloudflare 账号；部署时 Build command 填 <code>npm run build:web</code>，详见[部署](#部署)</sub>
 
 </div>
 
 把 [pi](https://github.com/earendil-works/pi) 的 **durable harness 内核**跑在 Cloudflare Worker 上：会话、工具调用、记忆、文件全部持久化在 Durable Object 的 SQLite 里，不依赖任何外部数据库。
 
-- **在线地址**：https://pi-harness-gw.pages.dev （pages.dev 反代，中国大陆可达；需访问密码，邀请码可向作者索取）
 - **运行成本**：Cloudflare 免费额度内；模型走 DeepSeek（按量计费，个人用量每月几元）
+- **作者实例**：https://pi-harness-gw.pages.dev （需邀请码；仅供体验，长期使用请部署自己的实例）
 
 > 本项目是社区项目，与 Cloudflare, Inc. 无隶属关系；Cloudflare、Workers、Durable Objects 是其商标。
 
@@ -43,7 +47,7 @@
 
 ```
 浏览器
-  │  https://pi-harness-gw.pages.dev      ← pages.dev 反代（大陆可达）
+  │  https://<你的 Worker 域名>           ← 可绑定自定义域名 / pages.dev 反代
   ▼
 Cloudflare Worker（静态前端 + API 入口）
   ├── 静态资源：dist-web（React + Vite + Tailwind）
@@ -66,24 +70,62 @@ Cloudflare Worker（静态前端 + API 入口）
 
 ## 快速开始
 
-```bash
-npm install
-npm test                     # 金标回归（单元 + 接口），约 40 秒
+从零到本机可用约三分钟（依赖安装 1–2 分钟，前端构建十秒内，首次启动 `wrangler dev` 约 10–20 秒）。
 
-# 本地开发（.dev.vars 里放密钥）
+```bash
+git clone https://github.com/scudong/cloudflare-free-web-pi.git
+cd cloudflare-free-web-pi
+npm install
+
+# 前端必须先在本地构建：wrangler 把 dist-web/ 当静态资产目录，缺了会直接报错
+npm run build:web
+
+# 本地密钥（只写入 .dev.vars，不会提交）
 echo "DEEPSEEK_API_KEY=sk-..." >> .dev.vars
 echo "ACCESS_PASSWORD=你的访问密码" >> .dev.vars
 
-npm run dev:web              # 前端热更新：http://localhost:5173
 npx wrangler dev             # Worker + DO：http://localhost:8787
 ```
 
-生产部署：
+打开 http://localhost:8787 、输入 `ACCESS_PASSWORD` 即可对话。确认服务起来了：
 
 ```bash
+curl http://localhost:8787/api/auth
+# {"required":true,"authenticated":false,"owner":false}   ← 密码已生效，尚未登录
+```
+
+改前端时用热更新：另开一个终端跑 `npm run dev:web`（http://localhost:5173，`/api` 已代理到 8787）；`wrangler dev` 读的是 `dist-web/`，改完需重跑 `npm run build:web`。
+
+**本地限制**：`wrangler dev` 下 `AI` 与 `Vectorize` 绑定不可用，知识库的向量 / 混合检索在本地是空的；默认的 FTS5 关键词检索正常。向量检索要在部署后的实例上验证。
+
+金标回归（单元 + 接口，约 40 秒）：
+
+```bash
+npm test
+```
+
+---
+
+## 部署
+
+### 一键部署到自己的账号
+
+点首屏的 **Deploy to Cloudflare** 按钮，或用[这个链接](https://deploy.workers.cloudflare.com/?url=https://github.com/scudong/cloudflare-free-web-pi)。Cloudflare 会把仓库复制到你的 GitHub 账号，用 Workers Builds 构建并部署：
+
+- **Build command**：填 `npm run build:web`（仓库没有 `build` 脚本，留空会因缺 `dist-web/` 而失败）
+- **Deploy command**：保持默认 `npx wrangler deploy`
+- 部署完成后到 Worker → Settings → Variables and Secrets 添加 `DEEPSEEK_API_KEY` 和 `ACCESS_PASSWORD`。**不设 `ACCESS_PASSWORD` 时站点是开放模式，任何人都能使用**；改完变量需重新部署一次
+
+Durable Objects、Workers AI 和 Vectorize 索引会按 `wrangler.jsonc` 自动创建并绑定。
+
+### 命令行部署
+
+```bash
+npm install
+npm run build:web                      # 手动部署同样要先构建前端
 npx wrangler secret put DEEPSEEK_API_KEY
 npx wrangler secret put ACCESS_PASSWORD
-npx wrangler secret put BUILD            # 可选：构建号，用于判断线上是否更新
+npx wrangler secret put BUILD          # 可选：构建号，用于判断线上是否更新
 npx wrangler deploy
 ```
 
@@ -109,6 +151,7 @@ npx wrangler deploy
 | GET | `/api/files/content?sessionId=&name=` | 文件内容 |
 | GET | `/api/files/all?q=` | 当前用户所有会话的文件（跨会话总览） |
 | GET / POST / DELETE | `/api/kb` | 用户知识库：文档列表 / 入库 / 删除 |
+| POST | `/api/kb/ingest` | 导入文件（`multipart/form-data` 的 `file`：PDF / DOCX / MD / TXT）或网页（JSON `{url}`），服务端解析后入库 |
 | GET | `/api/kb/doc?id=` · `/api/kb/search?q=` | 知识库文档全文 / 检索片段 |
 | GET | `/api/kb/prefetch?q=` | 本轮会自动注入的知识库参考资料（调试 / 排查用） |
 | GET / POST / DELETE | `/api/skills` | 技能增删查 |

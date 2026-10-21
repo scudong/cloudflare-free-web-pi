@@ -12,11 +12,13 @@ One Worker and Durable Objects. No server, no external database.
 [![Release](https://img.shields.io/github/v/release/scudong/cloudflare-free-web-pi?label=release&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/releases) [![Stars](https://img.shields.io/github/stars/scudong/cloudflare-free-web-pi?style=flat&color=0ea5e9)](https://github.com/scudong/cloudflare-free-web-pi/stargazers) [![License](https://img.shields.io/badge/license-MIT-0ea5e9)](LICENSE) [![Deploy](https://github.com/scudong/cloudflare-free-web-pi/actions/workflows/deploy.yml/badge.svg)](https://github.com/scudong/cloudflare-free-web-pi/actions/workflows/deploy.yml)<br>
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white) ![Durable Objects](https://img.shields.io/badge/Durable%20Objects-SQLite-0ea5e9) ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
 
-**English** · [简体中文](README.zh-CN.md) · [Live site](https://pi-harness-gw.pages.dev) · [Quick start](#quick-start) · [Features](#what-you-get) · [How it works](#how-it-works) · [Deploy](#deploy)
+**English** · [简体中文](README.zh-CN.md) · [Quick start](#quick-start) · [Features](#what-you-get) · [How it works](#how-it-works) · [Deploy](#deploy)
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/scudong/cloudflare-free-web-pi)
 
 <img src="docs/screenshot.png" width="880" alt="Chat with tool calls, a Markdown file preview, and the knowledge base in the left rail">
 
-<sub>Live: **[pi-harness-gw.pages.dev](https://pi-harness-gw.pages.dev)** · password-protected instance — request an invite code in [Discussions](https://github.com/scudong/cloudflare-free-web-pi/discussions).</sub>
+<sub>Author's instance: **[pi-harness-gw.pages.dev](https://pi-harness-gw.pages.dev)** — invite code required; deploy your own for daily use.</sub>
 
 </div>
 
@@ -44,19 +46,32 @@ Cloudflare Free Web Pi is the opposite: a workspace you deploy to your own Cloud
 
 ## Quick start
 
+About three minutes from clone to a working local instance (1–2 minutes installing dependencies, a few seconds to build the UI, 10–20 seconds for `wrangler dev` to come up).
+
 ```bash
 git clone https://github.com/scudong/cloudflare-free-web-pi.git
 cd cloudflare-free-web-pi
 npm install
 
+# Build the React app first: wrangler serves dist-web/ as static assets
+npm run build:web
+
 echo "DEEPSEEK_API_KEY=sk-..." >> .dev.vars
 echo "ACCESS_PASSWORD=your-password" >> .dev.vars
 
-npm run dev:web      # UI: http://localhost:5173
 npx wrangler dev     # Worker + Durable Objects: http://localhost:8787
 ```
 
-Open `http://localhost:5173`, enter the password, and start a conversation. The full Chinese setup guide, feature table, and HTTP API reference are in [README.zh-CN.md](README.zh-CN.md).
+Open `http://localhost:8787` and enter the password. Confirm the Worker is up:
+
+```bash
+curl http://localhost:8787/api/auth
+# {"required":true,"authenticated":false,"owner":false}
+```
+
+For UI work, `npm run dev:web` runs Vite with hot reload on `http://localhost:5173` and proxies `/api` to 8787. `wrangler dev` serves the built `dist-web/`, so re-run `npm run build:web` after frontend changes.
+
+**Local limits**: `wrangler dev` has no working `AI` or `Vectorize` binding, so vector and hybrid knowledge-base retrieval are empty locally. The default FTS5 keyword search works. Verify vector retrieval on a deployed instance.
 
 Run the golden tests with `npm test` — unit, API, and multi-user isolation cases, including real `wrangler dev` instances (about 40 seconds). The deploy badge above is the source of truth for pass/fail; this README does not track a test count.
 
@@ -72,7 +87,20 @@ Run the golden tests with `npm test` — unit, API, and multi-user isolation cas
 
 ## Deploy
 
+### One-click
+
+The **Deploy to Cloudflare** button above (or [this link](https://deploy.workers.cloudflare.com/?url=https://github.com/scudong/cloudflare-free-web-pi)) copies the repository into your GitHub account, builds it with Workers Builds, and deploys it to your Cloudflare account.
+
+- **Build command**: set it to `npm run build:web`. The repo has no `build` script, so leaving this blank deploys without `dist-web/` and fails.
+- **Deploy command**: keep the default `npx wrangler deploy`.
+- After the first deploy, add `DEEPSEEK_API_KEY` and `ACCESS_PASSWORD` under Worker → Settings → Variables and Secrets, then redeploy. **Without `ACCESS_PASSWORD` the site runs open to anyone.**
+- Durable Objects, Workers AI, and the Vectorize index are provisioned from `wrangler.jsonc`.
+
+### From the command line
+
 ```bash
+npm install
+npm run build:web
 npx wrangler secret put DEEPSEEK_API_KEY
 npx wrangler secret put ACCESS_PASSWORD
 npx wrangler deploy

@@ -4,6 +4,13 @@
 
 ## 2026-10-21（公开发布准备）
 
+### 知识库导入通道（v0.56.0）
+- 新增 `POST /api/kb/ingest`：`multipart/form-data` 上传 PDF / DOCX / MD / TXT，或 JSON `{url}` 导入网页；复用 `kbAddDoc` 入库、分块、建索引，不引入解析库与新存储
+- PDF / DOCX 走 Workers AI `toMarkdown()`；MD / TXT 直接读文本，无 `AI` 绑定也能用
+- 链接抓取复用 `web_fetch_page` 的 DeepSeek Fetch API，标题取页面 `<title>`；`DEEPSEEK_BASE_URL` 可指向自建代理（默认官方地址）
+- 失败不静默：413 `too_large` / 415 `unsupported_type` / 422 `empty_content` / 501 `ai_unavailable`；链接另有 400 `invalid_url`、502 `fetch_failed`
+- 金标新增：PDF 解析 mock 路径（RPC service binding 提供 `toMarkdown`）、链接导入成功与失败路径、无 AI 绑定回退
+
 ### 分享工具化 + 分享页署名（v0.55.0）
 - 新增内置工具 `share_file(name, ttlSeconds?)` / `share_conversation(ttlSeconds?)`：模型可直接生成公开只读链接，不再回答「做不到」
 - 工具走 `write` 审批分级；同一文件/对话已有未过期链接时复用 token，`/api/shares` 条目数不增；拒绝审批时提示「已取消分享」
@@ -11,7 +18,7 @@
 - 系统提示补充：用户说「分享 / 发我个链接 / 转给同事」时主动调用分享工具
 - 设置 → 对话新增「分享链接」：显示署名 `displayName` 与模型分享默认有效期 `shareTtlSeconds`；`/api/share` 不传 `ttlSeconds` 也使用该默认值
 - 分享页页脚显示作者署名与生成时间（`displayName` 未设置时回落 `π Harness`）
-- 金标新增：分享工具注册/写入分级、默认有效期与页脚署名、链接卡解析（成功/过期）；`tests/api/share-tools.test.ts` 用本地假 OpenAI 流式上游端到端覆盖成功 / 复用 / 过期 / 审批拒绝；总计 **135 条**金标
+- 金标新增：分享工具注册/写入分级、默认有效期与页脚署名、链接卡解析（成功/过期）；`tests/api/share-tools.test.ts` 用本地假 OpenAI 流式上游端到端覆盖成功 / 复用 / 过期 / 审批拒绝；金标全绿
 
 ### 上手通道：空会话起步卡 + 设置内「部署自检」（`1d7524c`）
 - 空会话页新增 3 张起步卡（写周报并分享 / 存知识库再提问 / 每日摘要定时任务），点击只把提示词写入输入框，不直接发送

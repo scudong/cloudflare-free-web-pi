@@ -384,6 +384,26 @@ describe("知识库", () => {
 		const search = await api(`/api/kb/search?q=${encodeURIComponent("久期")}`);
 		expect(search.json.hits.length).toBe(0);
 	});
+
+	it("无 AI 绑定时 PDF 返回 501，文本导入与粘贴不受影响", async () => {
+		const pdf = new FormData();
+		pdf.append("file", new File(["%PDF-1.4"], "paper.pdf", { type: "application/pdf" }));
+		const res = await api("/api/kb/ingest", { method: "POST", body: pdf });
+		expect(res.status).toBe(501);
+		expect(res.json).toMatchObject({ ok: false, code: "ai_unavailable" });
+		expect(res.json.message).toContain("不支持 PDF");
+
+		const text = new FormData();
+		text.append("file", new File(["# 无 AI 也能导入\n\n正文"], "no-ai.md", { type: "text/markdown" }));
+		const textRes = await api("/api/kb/ingest", { method: "POST", body: text });
+		expect(textRes.status).toBe(200);
+		expect(textRes.json.ok).toBe(true);
+		await api(`/api/kb?id=${textRes.json.docId}`, { method: "DELETE" });
+
+		const paste = await post("/api/kb", { title: "粘贴仍然可用", content: "粘贴正文不受 AI 绑定缺失影响" });
+		expect(paste.status).toBe(200);
+		await api(`/api/kb?id=${paste.json.id}`, { method: "DELETE" });
+	});
 });
 
 describe("全部文件", () => {

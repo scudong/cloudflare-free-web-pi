@@ -35,8 +35,8 @@ type AgentScope = {
 	sql: SqlHandle;
 	harness: unknown | null;
 	apiKey: string | null;
-	/** 向量检索配置（v0.53.0）：从 Worker 环境变量读取，不落库。 */
-	env?: { AI?: unknown; KB_VEC?: unknown; CF_DISABLE_VECTOR?: string };
+	/** 向量检索 / 网页抓取配置（v0.53.0）：从 Worker 环境变量读取，不落库。 */
+	env?: { AI?: unknown; KB_VEC?: unknown; CF_DISABLE_VECTOR?: string; DEEPSEEK_BASE_URL?: string };
 	/** 当前 DO 的稳定标识，用作 Vectorize 元数据过滤与向量 id 前缀。 */
 	scopeId?: string;
 	/** 本次请求的公开 Origin：分享工具据此拼绝对链接（alarm 触发时为空）。 */
@@ -1027,6 +1027,17 @@ async function kbVectorIndexDoc(docId: number): Promise<number> {
 	return rows.length;
 }
 
+/** 当前检索模式需要向量时增量建索引；失败只记日志，不影响 FTS 入库。 */
+async function kbVectorIndexIfEnabled(docId: number): Promise<number> {
+	if (kbRetrievalMode() === "fts" || !kbVectorAvailable()) return 0;
+	try {
+		return await kbVectorIndexDoc(docId);
+	} catch (err) {
+		console.warn("kb vector index failed", String(err).slice(0, 160));
+		return 0;
+	}
+}
+
 /** 重建待索引分块；返回本次处理数与剩余数。 */
 async function kbReindexPending(limit = KB_VECTOR_BATCH): Promise<{ indexed: number; remaining: number }> {
 	if (!kbVectorBindings()) throw new Error("向量检索未启用（缺少 AI / KB_VEC 绑定）");
@@ -1112,6 +1123,124 @@ async function kbSearchAsync(query: string, limit = 6, modeOverride?: KbRetrieva
 	}
 	if (mode === "vector") return vector.slice(0, capped);
 	return kbRrfMerge(keyword, vector, capped);
+}
+
+/* ---------------- 知识库导入（v0.56.0） ----------------
+ * 文件：MD / TXT 直接读文本；PDF / DOCX 走 Workers AI 的 toMarkdown，不引解析库。
+ * 链接：复用 web_fetch_page 的 DeepSeek Fetch API，标题取页面 title。
+ * 失败一律返回 { ok:false, code, message }，不静默。
+ */
+const KB_INGEST_MAX_BYTES = 25 * 1024 * 1024;
+const KB_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+type KbIngestErrorCode =
+	| "too_large"
+	| "unsupported_type"
+	| "empty_content"
+	| "ai_unavailable"
+	// 契约之外的扩展码：链接不合法 / 抓取服务失败 / 其它内部错误
+	| "invalid_url"
+	| "fetch_failed"
+	| "internal_error";
+
+class KbIngestFailure extends Error {
+	constructor(
+		readonly status: number,
+		readonly code: KbIngestErrorCode,
+		message: string,
+	) {
+		super(message);
+	}
+}
+
+function kbIngestError(status: number, code: KbIngestErrorCode, message: string): Response {
+	return Response.json({ ok: false, code, message }, { status });
+}
+
+type WebFetchResult = { ok: true; title: string; content: string } | { ok: false; kind: "empty" | "error"; message: string };
+
+/** web_fetch_page 与链接 ingest 共用：DeepSeek Fetch API 抓正文，不截断（调用方决定长度）。 */
+async function webFetchPageContent(url: string, apiKey: string | null): Promise<WebFetchResult> {
+	if (!/^https?:\/\//i.test(url)) return { ok: false, kind: "error", message: "URL 必须以 http(s):// 开头。" };
+	if (!apiKey) return { ok: false, kind: "error", message: "未配置 DEEPSEEK_API_KEY，无法抓取网页。" };
+	const base = (scope().env?.DEEPSEEK_BASE_URL ?? "").trim().replace(/\/+$/, "") || "https://api.deepseek.com";
+	try {
+		const resp = await fetch(`${base}/v1/tools/fetch`, {
+			method: "POST",
+			headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+			body: JSON.stringify({ url }),
+		});
+		const data = (await resp.json().catch(() => null)) as { title?: string; content?: string; error?: { message?: string } } | null;
+		if (!resp.ok) {
+			const msg = data?.error?.message ?? `HTTP ${resp.status}`;
+			return { ok: false, kind: "error", message: `抓取失败：${msg}` };
+		}
+		const title = String(data?.title ?? "").trim();
+		const content = String(data?.content ?? "").trim();
+		if (!content) return { ok: false, kind: "empty", message: "页面没有可提取的正文。" };
+		return { ok: true, title, content };
+	} catch (e) {
+		return { ok: false, kind: "error", message: "抓取失败：" + String(e).slice(0, 200) };
+	}
+}
+
+type KbIngestFileKind = "pdf" | "docx" | "text";
+
+function kbIngestFileKind(file: File): KbIngestFileKind | null {
+	const name = String(file.name ?? "").toLowerCase();
+	const mime = String(file.type ?? "").toLowerCase();
+	const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
+	if (mime === "application/pdf" || ext === "pdf") return "pdf";
+	if (mime === KB_DOCX_MIME || ext === "docx") return "docx";
+	if (mime === "text/markdown" || mime === "text/plain" || mime === "text/x-markdown" || ext === "md" || ext === "markdown" || ext === "txt") return "text";
+	return null;
+}
+
+function kbIngestTitle(name: string): string {
+	const base = String(name ?? "").split(/[\\/]/).pop() ?? "";
+	const dot = base.lastIndexOf(".");
+	const stem = (dot > 0 ? base.slice(0, dot) : base).trim();
+	return (stem || "未命名文档").slice(0, 120);
+}
+
+type KbMarkdownConversion = { format?: string; data?: string; error?: string };
+type KbMarkdownAi = { toMarkdown(input: { name: string; blob: Blob }): Promise<KbMarkdownConversion | KbMarkdownConversion[]> };
+
+function kbMarkdownAi(): KbMarkdownAi | null {
+	const ai = scope().env?.AI;
+	if (!ai || typeof ai !== "object" || !("toMarkdown" in ai) || typeof ai.toMarkdown !== "function") return null;
+	// AgentScope 里 AI 是 unknown（生产是 Workers AI 绑定，测试可注入同形对象）。
+	const markdownAi = ai as unknown as KbMarkdownAi;
+	return markdownAi;
+}
+
+async function kbFileToMarkdown(file: File, kind: "pdf" | "docx"): Promise<string> {
+	const ai = kbMarkdownAi();
+	if (!ai) {
+		throw new KbIngestFailure(501, "ai_unavailable", "当前环境不支持 PDF / DOCX 解析，请上传 Markdown / TXT 或直接粘贴正文。");
+	}
+	let result: KbMarkdownConversion | KbMarkdownConversion[];
+	try {
+		// File 不能跨 RPC / 部分绑定传输，转成等长 Blob（slice 不复制内容）。
+		result = await ai.toMarkdown({ name: file.name || `document.${kind}`, blob: file.slice(0, file.size, file.type) });
+	} catch (err) {
+		throw new KbIngestFailure(422, "empty_content", `文档解析失败：${String(err).slice(0, 200)}`);
+	}
+	const item = Array.isArray(result) ? result[0] : result;
+	if (item?.format === "error") {
+		throw new KbIngestFailure(422, "empty_content", `文档解析失败：${String(item.error || "").slice(0, 200) || "未知原因"}`);
+	}
+	const data = String(item?.data ?? "").trim();
+	if (!data) throw new KbIngestFailure(422, "empty_content", "文档里没有可提取的正文。");
+	return data;
+}
+
+/** 入库 + 可选向量索引；chars 是实际落库的字符数（kbAddDoc 会按上限截断）。 */
+async function kbIngestDoc(title: string, content: string, source: string) {
+	const stored = content.replace(/\r\n/g, "\n").trim().slice(0, KB_MAX_CONTENT);
+	const { id, chunks } = kbAddDoc(title, stored, source.slice(0, 300));
+	await kbVectorIndexIfEnabled(id);
+	return { ok: true as const, docId: String(id), title, chunks, chars: stored.length };
 }
 
 /* 预检索（v0.46.0）：每轮把用户消息当查询，命中时把前几段拼进 instructions。
@@ -1627,30 +1756,13 @@ const baseSpikeExtension = defineExtension({
 			parameters: Type.Object({ url: Type.String({ description: "完整的 http(s) URL" }) }),
 			execute: async (args) => {
 				const url = String((args as { url?: unknown }).url ?? "").trim();
-				if (!/^https?:\/\//.test(url)) return { output: [{ type: "text", text: "URL 必须以 http(s):// 开头。" }] };
+				if (!/^https?:\/\//i.test(url)) return { output: [{ type: "text", text: "URL 必须以 http(s):// 开头。" }] };
 				if (getSetting("web_search", "1") !== "1") {
 					return { output: [{ type: "text", text: "网页搜索当前未开启。请告诉用户：在 设置 → 网页搜索 中开启后即可抓取网页。" }] };
 				}
-				const apiKey = scope().apiKey;
-				if (!apiKey) return { output: [{ type: "text", text: "未配置 DEEPSEEK_API_KEY，无法抓取网页。" }] };
-				try {
-					const resp = await fetch("https://api.deepseek.com/v1/tools/fetch", {
-						method: "POST",
-						headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-						body: JSON.stringify({ url }),
-					});
-					const data = (await resp.json().catch(() => null)) as { title?: string; content?: string; error?: { message?: string } } | null;
-					if (!resp.ok) {
-						const msg = data?.error?.message ?? `HTTP ${resp.status}`;
-						return { output: [{ type: "text", text: `抓取失败：${msg}` }] };
-					}
-					const title = String(data?.title ?? "").trim();
-					const content = String(data?.content ?? "").trim();
-					if (!content) return { output: [{ type: "text", text: "页面没有可提取的正文。" }] };
-					return { output: [{ type: "text", text: (title ? `# ${title}\n\n` : "") + content.slice(0, 8000) }] };
-				} catch (e) {
-					return { output: [{ type: "text", text: "抓取失败：" + String(e).slice(0, 200) }] };
-				}
+				const page = await webFetchPageContent(url, scope().apiKey);
+				if (!page.ok) return { output: [{ type: "text", text: page.message }] };
+				return { output: [{ type: "text", text: (page.title ? `# ${page.title}\n\n` : "") + page.content.slice(0, 8000) }] };
 			},
 		}),
 		defineTool({
@@ -3927,15 +4039,61 @@ export class SpikeAgent extends DurableObject {
 				const content = String(body.content ?? "").trim();
 				if (!title || !content) return Response.json({ error: "标题和正文都不能为空" }, { status: 400 });
 				const result = kbAddDoc(title, content, String(body.source ?? "").trim().slice(0, 300), String(body.tags ?? "").trim().slice(0, 120));
-				let vectorized = 0;
-				if (kbRetrievalMode() !== "fts" && kbVectorAvailable()) {
-					try {
-						vectorized = await kbVectorIndexDoc(result.id);
-					} catch (err) {
-						console.warn("kb vector index failed", String(err).slice(0, 160));
-					}
-				}
+				const vectorized = await kbVectorIndexIfEnabled(result.id);
 				return Response.json({ ok: true, ...result, vectorized });
+			}
+			// 知识库导入（v0.56.0）：multipart 文件或 JSON {url}，复用 kbAddDoc 入库
+			if (url.pathname === "/kb/ingest" && request.method === "POST") {
+				ensureTables(sqlFacade!);
+				const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+				try {
+					if (contentType.includes("application/json")) {
+						const body = (await request.json().catch(() => null)) as { url?: unknown } | null;
+						const target = typeof body?.url === "string" ? body.url.trim() : "";
+						if (!target) throw new KbIngestFailure(400, "invalid_url", "缺少 url 字段，或 url 不是字符串。");
+						if (!/^https?:\/\//i.test(target)) throw new KbIngestFailure(400, "invalid_url", "链接必须以 http(s):// 开头。");
+						const page = await webFetchPageContent(target, scope().apiKey);
+						if (!page.ok) {
+							throw page.kind === "empty"
+								? new KbIngestFailure(422, "empty_content", page.message)
+								: new KbIngestFailure(502, "fetch_failed", page.message);
+						}
+						let fallbackTitle = "未命名文档";
+						try {
+							fallbackTitle = new URL(target).hostname || fallbackTitle;
+						} catch {
+							// 校验只保证协议前缀，保留兜底标题即可
+						}
+						const title = (page.title || fallbackTitle).slice(0, 120);
+						return Response.json(await kbIngestDoc(title, page.content, target));
+					}
+					if (!contentType.includes("multipart/form-data")) {
+						throw new KbIngestFailure(415, "unsupported_type", "请用 multipart/form-data 上传文件，或用 application/json 传 {url}。");
+					}
+					let form: FormData;
+					try {
+						form = await request.formData();
+					} catch {
+						throw new KbIngestFailure(415, "unsupported_type", "上传内容不是有效的 multipart/form-data。");
+					}
+					const file = form.get("file");
+					if (!(file instanceof File)) throw new KbIngestFailure(415, "unsupported_type", "缺少 file 字段。");
+					if (file.size > KB_INGEST_MAX_BYTES) throw new KbIngestFailure(413, "too_large", "文件超过 25MB，请压缩后再试。");
+					const kind = kbIngestFileKind(file);
+					if (!kind) throw new KbIngestFailure(415, "unsupported_type", "只支持 PDF / DOCX / Markdown / TXT 文件。");
+					let content: string;
+					if (kind === "text") {
+						content = (await file.text()).trim();
+						if (!content) throw new KbIngestFailure(422, "empty_content", "文件里没有可提取的正文。");
+					} else {
+						content = await kbFileToMarkdown(file, kind);
+					}
+					return Response.json(await kbIngestDoc(kbIngestTitle(file.name), content, String(file.name ?? "")));
+				} catch (err) {
+					if (err instanceof KbIngestFailure) return kbIngestError(err.status, err.code, err.message);
+					console.warn("kb ingest failed", String(err).slice(0, 200));
+					return kbIngestError(500, "internal_error", "导入失败，请稍后重试。");
+				}
 			}
 			if (url.pathname === "/kb/doc" && request.method === "GET") {
 				ensureTables(sqlFacade!);

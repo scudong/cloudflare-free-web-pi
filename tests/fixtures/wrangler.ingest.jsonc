@@ -1,0 +1,19 @@
+{
+  // 金标专用：主 Worker 配置，AI 绑定指向本地的 ai-mock（RPC service binding）。
+  // 生产用 wrangler.jsonc；这里的 AI 是测试替身，所以无需凭证也能跑 PDF 解析路径。
+  "name": "pi-harness-spike",
+  "vars": { "BUILD": "test" },
+  "main": "../../src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "services": [{ "binding": "AI", "service": "ai-mock", "entrypoint": "AiMock" }],
+  "durable_objects": { "bindings": [
+    { "name": "SpikeAgent", "class_name": "SpikeAgent" },
+    { "name": "UserRegistry", "class_name": "UserRegistry" }
+  ] },
+  "assets": { "directory": "../../dist-web", "not_found_handling": "single-page-application", "run_worker_first": ["/agent/*", "/api/*", "/s/*"] },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SpikeAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["UserRegistry"] }
+  ]
+}
