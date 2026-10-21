@@ -1,0 +1,51 @@
+marketing/03-launch-copy.md
+  47b8cb9ec39eee31 22
+marketing/01-selling-points.md
+  47b8cb9ec39eee31 81,107
+marketing/05-traffic-playbook.md
+  47b8cb9ec39eee31 33,38,60,65,91
+marketing/06-seven-day-posts.md
+  47b8cb9ec39eee31 45,189,199,204,379
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "72c3c1f985488ef416547b7f7bd06e985c44ce2a",
+  "prompts": {
+    "47b8cb9ec39eee31": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6344593-246c-4219-8063-6ee089304690",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 13,
+      "total_deletions": 13,
+      "accepted_lines": 13,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "marketing/05-traffic-playbook.md": {
+          "additions": 5,
+          "deletions": 5,
+          "accepted_lines": 5
+        },
+        "marketing/06-seven-day-posts.md": {
+          "additions": 5,
+          "deletions": 5,
+          "accepted_lines": 5
+        },
+        "marketing/03-launch-copy.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "marketing/01-selling-points.md": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        }
+      }
+    }
+  }
+}
