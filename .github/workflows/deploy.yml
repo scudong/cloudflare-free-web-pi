@@ -1,11 +1,17 @@
-# push main → 部署 Worker（静态资产 + API 同域）。secrets: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+# PR 跑构建和金标回归；push main 在通过后部署 Worker（静态资产 + API 同域）。
+# deploy secrets: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
 name: deploy
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
 jobs:
-  deploy:
-    if: ${{ github.repository == 'scudong/cloudflare-free-web-pi' }}
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,8 +21,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:web --if-present
-      # 金标回归：单元 + 接口用例，不通过就不部署
       - run: npm test
+
+  deploy:
+    needs: test
+    if: ${{ github.event_name == 'push' && github.repository == 'scudong/cloudflare-free-web-pi' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - run: npx wrangler deploy --var BUILD:${{ github.sha }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

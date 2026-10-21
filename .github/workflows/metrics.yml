@@ -1,0 +1,44 @@
+name: metrics snapshot
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    if: ${{ github.repository == 'scudong/cloudflare-free-web-pi' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Append today's repository metrics
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          day="$(date -u +%F)"
+          if grep -q "^${day}," data/metrics.csv; then
+            echo "${day} already recorded"
+            exit 0
+          fi
+
+          values="$(gh api "repos/${REPO}" --jq '[.stargazers_count, .forks_count, .subscribers_count, .open_issues_count] | @csv')"
+          printf '%s,%s\n' "$day" "$values" >> data/metrics.csv
+
+      - name: Commit snapshot
+        run: |
+          if git diff --quiet -- data/metrics.csv; then
+            echo "No metrics change to commit"
+            exit 0
+          fi
+          git config user.name "pi-harness-metrics[bot]"
+          git config user.email "pi-harness-metrics[bot]@users.noreply.github.com"
+          git add data/metrics.csv
+          git commit -m "chore: snapshot repository metrics"
+          git push origin HEAD:main
