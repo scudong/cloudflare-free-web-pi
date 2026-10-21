@@ -179,9 +179,29 @@ interface MessageListProps {
 	onOpenFile?: (name: string) => void;
 	/** 从某条用户消息分叉出新会话（v0.32.0）。 */
 	onBranch?: (entryId: number) => void;
+	/** 空会话起步卡：只把建议写入输入框，不发送请求。 */
+	onStartPrompt?: (prompt: string) => void;
 }
 
-export function MessageList({ messages, pending, elapsed, loading, loadError, onRetry, plan, files = [], onOpenFile, onBranch }: MessageListProps) {
+const STARTER_CARDS = [
+	{
+		title: "写一份周报并给我分享链接",
+		description: "先整理本周进展，再生成可转发的只读链接。",
+		prompt: "请根据我接下来提供的内容写一份本周周报，并生成一个可分享的链接。",
+	},
+	{
+		title: "把这篇文章存进知识库，再问我三个问题",
+		description: "粘贴文章后保存，随后基于它继续提问。",
+		prompt: "请把我接下来粘贴的文章存进知识库，然后基于文章内容向我提出三个值得继续思考的问题。",
+	},
+	{
+		title: "设一个每天 9 点生成摘要的定时任务",
+		description: "说明摘要来源后，创建一个可持续运行的提醒。",
+		prompt: "请帮我设一个每天上午 9 点生成摘要的定时任务；先询问摘要需要基于哪些内容。",
+	},
+];
+
+export function MessageList({ messages, pending, elapsed, loading, loadError, onRetry, plan, files = [], onOpenFile, onBranch, onStartPrompt }: MessageListProps) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const stickToBottomRef = useRef(true);
 
@@ -213,7 +233,7 @@ export function MessageList({ messages, pending, elapsed, loading, loadError, on
 				)}
 
 				{!loading && isEmpty && (
-					<div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+					<div className="flex flex-1 flex-col items-center justify-center gap-3 px-2 py-10 text-center sm:px-6">
 						<div
 							aria-hidden
 							className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/15 text-2xl font-semibold text-sky-400"
@@ -224,6 +244,19 @@ export function MessageList({ messages, pending, elapsed, loading, loadError, on
 						<p className="max-w-xs text-xs leading-relaxed text-slate-500">
 							回复由 Cloudflare Worker 生成，多步任务会先列计划、再逐步执行。
 						</p>
+						<div className="mt-3 grid w-full max-w-2xl grid-cols-1 gap-3 text-left sm:grid-cols-3">
+							{STARTER_CARDS.map((card) => (
+								<button
+									key={card.title}
+									type="button"
+									onClick={() => onStartPrompt?.(card.prompt)}
+									className="min-h-28 rounded-xl border border-slate-700 bg-slate-800/60 p-4 text-left transition-colors hover:border-sky-500/60 hover:bg-sky-500/10 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
+								>
+									<span className="block text-sm font-medium leading-snug text-slate-100">{card.title}</span>
+									<span className="mt-2 block text-xs leading-relaxed text-slate-400">{card.description}</span>
+								</button>
+							))}
+						</div>
 					</div>
 				)}
 

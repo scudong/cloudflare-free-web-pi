@@ -25,6 +25,8 @@ interface ComposerProps {
 	onThinkingLevelChange: (level: string) => void;
 	/** 每轮结束 +1，触发上下文占用刷新。 */
 	contextTick: number;
+	/** 由空会话起步卡预填的草稿；预填不触发发送。 */
+	draft?: string | null;
 }
 
 const MAX_IMAGES = 4;
@@ -117,6 +119,7 @@ export function Composer({
 	thinkingLevel,
 	onThinkingLevelChange,
 	contextTick,
+	draft,
 }: ComposerProps) {
 	const [text, setText] = useState("");
 	const [images, setImages] = useState<string[]>([]);
@@ -135,6 +138,14 @@ export function Composer({
 	const [context, setContext] = useState<{ usedTokens: number; contextWindow: number; percent: number } | null>(null);
 	const [contextReload, setContextReload] = useState(0);
 	const [compactBusy, setCompactBusy] = useState(false);
+
+	useEffect(() => {
+		if (!draft) return;
+		setText(draft);
+		setImages([]);
+		setNotice(null);
+		window.requestAnimationFrame(() => textareaRef.current?.focus());
+	}, [draft]);
 
 	useEffect(() => {
 		let alive = true;
