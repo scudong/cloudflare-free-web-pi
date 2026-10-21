@@ -43,7 +43,7 @@ beforeAll(async () => {
 	rmSync(STATE, { recursive: true, force: true });
 	proc = spawn(
 		"npx",
-		["wrangler", "dev", "--port", String(PORT), "--var", "ACCESS_PASSWORD:", "--persist-to", STATE],
+		["wrangler", "dev", "--port", String(PORT), "--var", "ACCESS_PASSWORD:", "--var", "CF_DISABLE_VECTOR:1", "--persist-to", STATE],
 		{ cwd: ROOT, env: { ...process.env, CI: "1", WRANGLER_SEND_METRICS: "false" }, stdio: "ignore", detached: true },
 	);
 	await waitForServer();
@@ -360,6 +360,28 @@ describe("知识库", () => {
 	it("标题与正文必填", async () => {
 		const res = await post("/api/kb", { title: "只有标题" });
 		expect(res.status).toBe(400);
+	});
+
+	it("未配置向量时状态可用但未启用", async () => {
+		const status = await api("/api/kb/status");
+		expect(status.json.mode).toBe("fts");
+		expect(status.json.available).toBe(false);
+		expect(status.json.total).toBeGreaterThan(0);
+		expect(status.json.index).toBe("pi-kb");
+	});
+
+	it("向量模式未配置时回退关键词，重建索引返回 400", async () => {
+		const set = await post("/api/settings", { kbRetrieval: "vector" });
+		expect(set.json.kbRetrieval).toBe("vector");
+		expect(set.json.kbVector.available).toBe(false);
+
+		const search = await api(`/api/kb/search?q=${encodeURIComponent("久期")}`);
+		expect(search.json.hits.length).toBeGreaterThan(0);
+
+		const reindex = await api("/api/kb/reindex", { method: "POST" });
+		expect(reindex.status).toBe(400);
+
+		await post("/api/settings", { kbRetrieval: "fts" });
 	});
 
 	it("删除后不再可检索", async () => {

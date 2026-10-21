@@ -2,8 +2,8 @@
 
 > 结论：
 > 1. **当前系统没有使用 Supabase**，也没有任何外部数据库或向量库。
-> 2. Supabase 可以作为**可选的知识库向量索引**接入，但不应替换 Durable Object 里的主存储。
-> 3. 如果只接一个，优先 Cloudflare Vectorize（同平台、无免费项目休眠）；Supabase 适合已经有 Supabase 的用户。
+> 2. **v0.53.0 已实现 Cloudflare Vectorize 向量检索**（AI 绑定 + `pi-kb` 索引，fts / vector / hybrid 三档）。
+> 3. Supabase 仍可作为第二个可选 provider 接入，但不应替换 Durable Object 里的主存储。
 
 ## 现在的检索是怎么做的
 
@@ -89,7 +89,7 @@ Supabase 只存向量，不生成向量。需要一个 embedding 模型：
 ### 密钥与隔离
 
 - 不要把 service role key 放到前端；分享页与浏览器只读不到它。
-- 一种做法是把 key 存在用户 DO 的设置里（会随 `/api/backup` 导出，需要提示）；更稳的是用 Supabase Edge Function 包一层，Worker 只拿一个受限 token。
+- 当前 Vectorize 走 Worker 绑定，不涉及 key；如果接 Supabase，service role key 不应放前端。可以存在用户 DO（会随备份导出，需要提示），或用 Edge Function 包一层。
 - 现有鉴权是自签 cookie，不是 Supabase Auth；如果要靠 RLS 做隔离，需要给每个用户签发 Supabase JWT，或者在服务端强制 `user_id` 过滤。无论哪种，隔离都从「物理隔离（独立 DO）」降级为「逻辑隔离（同一张表 + where）」。
 
 ## 免费额度与风险（2026）
@@ -114,7 +114,7 @@ Supabase 只存向量，不生成向量。需要一个 embedding 模型：
 | 备份 | pg_dump；索引可重建 | 索引可从 DO 正文重建 |
 | 适合 | 已有 Supabase、想要 SQL + 向量一体 | 想保持单平台、少一个供应商 |
 
-## 如果要做，落地顺序
+## Supabase provider 的落地顺序（未实现）
 
 1. 把检索抽成 provider 接口：`fts`（默认）/ `vector` / `hybrid`。
 2. `kb_add` 写入后异步生成向量；失败不回滚正文，只标记待重建。

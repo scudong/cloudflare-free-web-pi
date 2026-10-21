@@ -36,6 +36,9 @@ interface SettingsDialogProps {
 	/** 知识库预检索开关（v0.46.0，null = 尚未读取）。 */
 	kbPrefetch: boolean | null;
 	onToggleKbPrefetch: (next: boolean) => void;
+	/** 知识库检索模式（v0.53.0）：fts / vector / hybrid。 */
+	kbRetrieval: string;
+	onChangeKbRetrieval: (next: string) => void;
 	/** 思考档位（v0.22.0）：off / low / high。 */
 	thinkingLevel: string;
 	onChangeThinkingLevel: (next: string) => void;
@@ -126,6 +129,8 @@ export function SettingsDialog({
 	onToggleWebSearch,
 	kbPrefetch,
 	onToggleKbPrefetch,
+	kbRetrieval,
+	onChangeKbRetrieval,
 	thinkingLevel,
 	onChangeThinkingLevel,
 	compaction,
@@ -158,6 +163,10 @@ export function SettingsDialog({
 		upgrade?: { manual?: string; auto?: string };
 	} | null>(null);
 	const [kernelBusy, setKernelBusy] = useState(false);
+	/** 知识库向量索引状态（v0.53.0）。 */
+	const [kbStatus, setKbStatus] = useState<{ mode?: string; available?: boolean; index?: string; total?: number; indexed?: number } | null>(null);
+	const [kbReindexBusy, setKbReindexBusy] = useState(false);
+	const [kbReindexMessage, setKbReindexMessage] = useState("");
 
 	const loadKernel = async (refresh: boolean) => {
 		setKernelBusy(true);
@@ -209,6 +218,44 @@ export function SettingsDialog({
 			alive = false;
 		};
 	}, [open]);
+
+	// 知识库索引状态（v0.53.0）
+	useEffect(() => {
+		if (!open || tab !== "chat") return;
+		let alive = true;
+		void (async () => {
+			try {
+				const data = await api.kbStatus();
+				if (alive) setKbStatus(data);
+			} catch {
+				if (alive) setKbStatus(null);
+			}
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [open, tab]);
+
+	const reindexKb = () => {
+		if (kbReindexBusy) return;
+		setKbReindexBusy(true);
+		setKbReindexMessage("");
+		void (async () => {
+			try {
+				const data = await api.kbReindex();
+				if (data.error) throw new Error(data.error);
+				const remaining = Number(data.remaining ?? 0);
+				setKbReindexMessage(
+					`已索引 ${data.indexed ?? 0} 段${remaining > 0 ? `，剩余 ${remaining} 段，再点一次继续` : "，全部完成"}`,
+				);
+				setKbStatus(await api.kbStatus());
+			} catch (err) {
+				setKbReindexMessage(err instanceof Error ? err.message : String(err));
+			} finally {
+				setKbReindexBusy(false);
+			}
+		})();
+	};
 
 	// 工具清单（v0.33.0）
 	useEffect(() => {
@@ -627,6 +674,48 @@ export function SettingsDialog({
 									<Switch checked={kbPrefetch !== false} onChange={onToggleKbPrefetch} label="启用知识库预检索" />
 								</div>
 								{kbPrefetch === null && <p className="mt-2 text-xs text-slate-500">正在读取设置…</p>}
+							</Section>
+							<Section title="知识库检索">
+								<p className="mb-2 text-xs leading-relaxed text-slate-500">
+									关键词走 FTS5，零依赖；向量走 Cloudflare Vectorize + bge-m3；混合用 RRF 融合两路结果。未配置向量时自动回退关键词。
+								</p>
+								<div className="inline-flex rounded-lg border border-slate-700 p-0.5">
+									{[
+										{ value: "fts", label: "关键词" },
+										{ value: "vector", label: "向量" },
+										{ value: "hybrid", label: "混合" },
+									].map((option) => (
+										<button
+											key={option.value}
+											type="button"
+											onClick={() => onChangeKbRetrieval(option.value)}
+											aria-pressed={kbRetrieval === option.value}
+											className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+												kbRetrieval === option.value ? "bg-sky-600 text-white" : "text-slate-300 hover:text-white"
+											}`}
+										>
+											{option.label}
+										</button>
+									))}
+								</div>
+								<div className="mt-3 flex flex-wrap items-center gap-2">
+									<span className={`text-xs ${kbStatus?.available ? "text-slate-400" : "text-amber-300/90"}`}>
+										{kbStatus?.available
+											? `已索引 ${kbStatus.indexed ?? 0} / ${kbStatus.total ?? 0} 段 · ${kbStatus.index ?? "pi-kb"}`
+											: "未配置向量检索（需要 AI / KB_VEC 绑定）"}
+									</span>
+									{kbStatus?.available && (
+										<button
+											type="button"
+											onClick={reindexKb}
+											disabled={kbReindexBusy}
+											className="rounded-md border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-medium text-sky-300 transition-colors hover:bg-sky-500/20 disabled:opacity-50"
+										>
+											{kbReindexBusy ? "索引中…" : "重建向量索引"}
+										</button>
+									)}
+								</div>
+								{kbReindexMessage && <p className="mt-2 text-xs text-emerald-300">{kbReindexMessage}</p>}
 							</Section>
 							<Section title="网页搜索">
 								<div className="flex items-start justify-between gap-4">

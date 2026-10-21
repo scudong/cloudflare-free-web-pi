@@ -31,7 +31,15 @@ type SqlHandle = { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } };
  * 同一 isolate 可能同时承载多个 Durable Object（多用户后必然发生），
  * 模块级全局会串数据；SQL / Harness / API Key 一律按请求作用域取（v0.43.0）。
  */
-type AgentScope = { sql: SqlHandle; harness: unknown | null; apiKey: string | null };
+type AgentScope = {
+	sql: SqlHandle;
+	harness: unknown | null;
+	apiKey: string | null;
+	/** 向量检索配置（v0.53.0）：从 Worker 环境变量读取，不落库。 */
+	env?: { AI?: unknown; KB_VEC?: unknown; CF_DISABLE_VECTOR?: string };
+	/** 当前 DO 的稳定标识，用作 Vectorize 元数据过滤与向量 id 前缀。 */
+	scopeId?: string;
+};
 const agentScope = new AsyncLocalStorage<AgentScope>();
 
 function scope(): AgentScope {
@@ -114,6 +122,12 @@ const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unkn
 	// 用户知识库（v0.45.0）：每个用户一个独立 DO，文档、分块与 FTS5 索引都落在自己的库
 	sql.exec(`CREATE TABLE IF NOT EXISTS kb_docs (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, source TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 	sql.exec(`CREATE TABLE IF NOT EXISTS kb_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT, doc_id INTEGER NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL)`);
+	// 向量索引状态（v0.53.0）：1 = 已写入 Vectorize
+	try {
+		sql.exec(`ALTER TABLE kb_chunks ADD COLUMN vectorized INTEGER NOT NULL DEFAULT 0`);
+	} catch {
+		// 列已存在
+	}
 	sql.exec(`CREATE INDEX IF NOT EXISTS kb_chunks_doc ON kb_chunks(doc_id)`);
 	// rowid 复用 kb_chunks.id；标题与正文分列，bm25 可分别加权
 	sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(title_tokens, body_tokens)`);
@@ -827,11 +841,17 @@ function kbAddDoc(title: string, content: string, source = "", tags = ""): { id:
 	return { id, chunks: chunks.length };
 }
 
-function kbDeleteDoc(id: number): boolean {
+async function kbDeleteDoc(id: number): Promise<boolean> {
 	if (!sqlFacade!.exec("SELECT id FROM kb_docs WHERE id = ?", id).toArray().length) return false;
-	for (const row of sqlFacade!.exec("SELECT id FROM kb_chunks WHERE doc_id = ?", id).toArray() as { id: number }[]) {
-		sqlFacade!.exec("DELETE FROM kb_fts WHERE rowid = ?", row.id);
+	const chunkIds = (sqlFacade!.exec("SELECT id FROM kb_chunks WHERE doc_id = ?", id).toArray() as { id: number }[]).map((row) => row.id);
+	if (kbVectorBindings()) {
+		try {
+			await vectorDelete(chunkIds.map((chunkId) => `${kbScopeId()}:${chunkId}`));
+		} catch (err) {
+			console.warn("kb vector delete failed", String(err).slice(0, 160));
+		}
 	}
+	for (const chunkId of chunkIds) sqlFacade!.exec("DELETE FROM kb_fts WHERE rowid = ?", chunkId);
 	sqlFacade!.exec("DELETE FROM kb_chunks WHERE doc_id = ?", id);
 	sqlFacade!.exec("DELETE FROM kb_docs WHERE id = ?", id);
 	return true;
@@ -877,16 +897,200 @@ function kbSearch(query: string, limit = 6): KbHit[] {
 		.toArray() as KbHit[];
 }
 
+/* ---------------- 知识库向量检索（v0.53.0） ----------------
+ * Vectorize 走 REST（不引入静态 binding，避免本地开发/测试被迫访问真实账号）；
+ * embedding 走 Workers AI 的 bge-m3。没有配置时一律回退 FTS5。
+ */
+type KbRetrievalMode = "fts" | "vector" | "hybrid";
+type KbVectorMatch = { id: string; score: number; metadata?: { docId?: number; chunkSeq?: number; scope?: string } };
+type KbVectorBindings = {
+	ai: { run(model: string, input: unknown): Promise<{ data?: number[][] }> };
+	vec: {
+		upsert(vectors: { id: string; values: number[]; metadata?: Record<string, string | number> }[]): Promise<unknown>;
+		deleteByIds(ids: string[]): Promise<unknown>;
+		query(vector: number[], options: Record<string, unknown>): Promise<{ matches?: KbVectorMatch[] }>;
+	};
+};
+
+const KB_VECTOR_DEFAULT_INDEX = "pi-kb";
+const KB_EMBED_MODEL = "@cf/baai/bge-m3";
+const KB_EMBED_BATCH = 16;
+const KB_VECTOR_BATCH = 200;
+
+function kbRetrievalMode(): KbRetrievalMode {
+	const value = getSetting("kb_retrieval", "fts");
+	return value === "vector" || value === "hybrid" ? value : "fts";
+}
+
+/** 生产环境用 AI / KB_VEC 绑定；测试与本地可用 CF_DISABLE_VECTOR=1 强制关闭。 */
+function kbVectorBindings(): KbVectorBindings | null {
+	const env = scope().env as
+		| (Record<string, unknown> & { AI?: KbVectorBindings["ai"]; KB_VEC?: KbVectorBindings["vec"]; CF_DISABLE_VECTOR?: string })
+		| undefined;
+	if (env?.CF_DISABLE_VECTOR === "1") return null;
+	if (!env?.AI || !env?.KB_VEC) return null;
+	return { ai: env.AI, vec: env.KB_VEC };
+}
+
+const kbVectorAvailable = () => kbVectorBindings() !== null;
+const kbScopeId = () => scope().scopeId ?? "spike";
+
+async function embedTexts(texts: string[]): Promise<number[][]> {
+	const bindings = kbVectorBindings();
+	if (!bindings) throw new Error("未配置向量检索");
+	const out: number[][] = [];
+	for (let i = 0; i < texts.length; i += KB_EMBED_BATCH) {
+		const batch = texts.slice(i, i + KB_EMBED_BATCH);
+		const result = await bindings.ai.run(KB_EMBED_MODEL, { text: batch });
+		const vectors = result?.data;
+		if (!Array.isArray(vectors) || vectors.length !== batch.length) throw new Error("embedding 返回格式不正确");
+		out.push(...vectors);
+	}
+	return out;
+}
+
+async function vectorUpsert(rows: { id: string; values: number[]; metadata: Record<string, string | number> }[]): Promise<void> {
+	if (!rows.length) return;
+	const bindings = kbVectorBindings();
+	if (!bindings) throw new Error("未配置向量检索");
+	await bindings.vec.upsert(rows);
+}
+
+async function vectorDelete(ids: string[]): Promise<void> {
+	if (!ids.length) return;
+	const bindings = kbVectorBindings();
+	if (!bindings) throw new Error("未配置向量检索");
+	await bindings.vec.deleteByIds(ids);
+}
+
+async function vectorQuery(values: number[], topK: number): Promise<KbVectorMatch[]> {
+	const bindings = kbVectorBindings();
+	if (!bindings) throw new Error("未配置向量检索");
+	const data = await bindings.vec.query(values, {
+		topK,
+		returnMetadata: "all",
+		filter: { scope: { $eq: kbScopeId() } },
+	});
+	return data.matches ?? [];
+}
+
+/** 把未建向量的分块写入 Vectorize（单次最多 100 段，避免一次请求太久）。 */
+async function kbVectorIndexDoc(docId: number): Promise<number> {
+	if (!kbVectorBindings()) return 0;
+	const rows = sqlFacade!
+		.exec("SELECT id, seq, text FROM kb_chunks WHERE doc_id = ? AND vectorized = 0 ORDER BY seq LIMIT 100", docId)
+		.toArray() as { id: number; seq: number; text: string }[];
+	if (!rows.length) return 0;
+	const vectors = await embedTexts(rows.map((row) => row.text));
+	const scopeId = kbScopeId();
+	await vectorUpsert(
+		rows.map((row, index) => ({
+			id: `${scopeId}:${row.id}`,
+			values: vectors[index]!,
+			metadata: { scope: scopeId, docId, chunkSeq: row.seq },
+		})),
+	);
+	for (const row of rows) sqlFacade!.exec("UPDATE kb_chunks SET vectorized = 1 WHERE id = ?", row.id);
+	return rows.length;
+}
+
+/** 重建待索引分块；返回本次处理数与剩余数。 */
+async function kbReindexPending(limit = KB_VECTOR_BATCH): Promise<{ indexed: number; remaining: number }> {
+	if (!kbVectorBindings()) throw new Error("向量检索未启用（缺少 AI / KB_VEC 绑定）");
+	const capped = Math.max(1, Math.min(Number(limit) || KB_VECTOR_BATCH, 500));
+	const rows = sqlFacade!
+		.exec("SELECT id, doc_id, seq, text FROM kb_chunks WHERE vectorized = 0 ORDER BY id LIMIT ?", capped)
+		.toArray() as { id: number; doc_id: number; seq: number; text: string }[];
+	if (!rows.length) return { indexed: 0, remaining: 0 };
+	const vectors = await embedTexts(rows.map((row) => row.text));
+	const scopeId = kbScopeId();
+	await vectorUpsert(
+		rows.map((row, index) => ({
+			id: `${scopeId}:${row.id}`,
+			values: vectors[index]!,
+			metadata: { scope: scopeId, docId: row.doc_id, chunkSeq: row.seq },
+		})),
+	);
+	for (const row of rows) sqlFacade!.exec("UPDATE kb_chunks SET vectorized = 1 WHERE id = ?", row.id);
+	const remaining = Number(
+		(sqlFacade!.exec("SELECT COUNT(*) AS n FROM kb_chunks WHERE vectorized = 0").toArray() as { n: number }[])[0]?.n ?? 0,
+	);
+	return { indexed: rows.length, remaining };
+}
+
+function kbHitsFromMatches(matches: KbVectorMatch[]): KbHit[] {
+	const ids: number[] = [];
+	for (const match of matches) {
+		const chunkId = Number(String(match.id).split(":").pop());
+		if (Number.isFinite(chunkId) && chunkId > 0) ids.push(chunkId);
+	}
+	if (!ids.length) return [];
+	const rows = sqlFacade!
+		.exec(
+			`SELECT c.id AS chunkId, c.doc_id AS docId, c.seq AS chunkSeq, c.text AS text, d.title AS title, d.source AS source
+			 FROM kb_chunks c JOIN kb_docs d ON d.id = c.doc_id WHERE c.id IN (${ids.map(() => "?").join(",")})`,
+			...ids,
+		)
+		.toArray() as KbHit[];
+	const byChunk = new Map(rows.map((row) => [Number(row.chunkId), row]));
+	return matches
+		.map((match) => {
+			const row = byChunk.get(Number(String(match.id).split(":").pop()));
+			return row ? { ...row, score: match.score } : null;
+		})
+		.filter((hit): hit is KbHit => hit !== null);
+}
+
+/** Reciprocal Rank Fusion：关键词与向量两路各按名次计分，去重后取前 N。 */
+function kbRrfMerge(keyword: KbHit[], vector: KbHit[], limit: number): KbHit[] {
+	const merged = new Map<string, { hit: KbHit; score: number }>();
+	const add = (hits: KbHit[]) => {
+		hits.forEach((hit, index) => {
+			const key = hit.chunkId ? String(hit.chunkId) : `${hit.docId}:${hit.chunkSeq}`;
+			const value = 1 / (60 + index + 1);
+			const entry = merged.get(key);
+			if (entry) entry.score += value;
+			else merged.set(key, { hit, score: value });
+		});
+	};
+	add(keyword);
+	add(vector);
+	return [...merged.values()]
+		.sort((a, b) => b.score - a.score)
+		.slice(0, limit)
+		.map((entry) => ({ ...entry.hit, score: entry.score }));
+}
+
+/** 统一检索入口：fts / vector / hybrid；向量不可用或失败时回退 FTS。 */
+async function kbSearchAsync(query: string, limit = 6, modeOverride?: KbRetrievalMode): Promise<KbHit[]> {
+	const mode = modeOverride ?? kbRetrievalMode();
+	const capped = Math.max(1, Math.min(Number(limit) || 6, 20));
+	if (mode === "fts" || !kbVectorAvailable()) return kbSearch(query, capped);
+	const candidateLimit = Math.min(capped * 3, 30);
+	const keyword = kbSearch(query, candidateLimit);
+	let vector: KbHit[] = [];
+	try {
+		const [embedding] = await embedTexts([query]);
+		if (!embedding) return keyword.slice(0, capped);
+		vector = kbHitsFromMatches(await vectorQuery(embedding, candidateLimit));
+	} catch (err) {
+		console.warn("kb vector search failed", String(err).slice(0, 160));
+		return keyword.slice(0, capped);
+	}
+	if (mode === "vector") return vector.slice(0, capped);
+	return kbRrfMerge(keyword, vector, capped);
+}
+
 /* 预检索（v0.46.0）：每轮把用户消息当查询，命中时把前几段拼进 instructions。
  * 模型仍然可以继续调用 kb_search；这里只是提前把最可能相关的内容放到眼前。 */
 const KB_PREFETCH_TOP = 3;
 const KB_PREFETCH_CHARS = 600;
 
-function kbPrefetchBlock(message: string): string {
+async function kbPrefetchBlock(message: string): Promise<string> {
 	if (getSetting("kb_prefetch", "1") !== "1") return "";
 	const query = message.trim().slice(0, 200);
 	if (query.length < 2) return "";
-	const hits = kbSearch(query, KB_PREFETCH_TOP);
+	const hits = await kbSearchAsync(query, KB_PREFETCH_TOP);
 	if (!hits.length) return "";
 	const seen = new Set<number>();
 	const lines: string[] = [];
@@ -1464,7 +1668,7 @@ const baseSpikeExtension = defineExtension({
 				const a = args as { query?: unknown; limit?: unknown };
 				const query = String(a.query ?? "").trim();
 				if (!query) return { output: [{ type: "text", text: "检索词不能为空。" }] };
-				const hits = kbSearch(query, Number(a.limit) || 6);
+				const hits = await kbSearchAsync(query, Number(a.limit) || 6);
 				if (!hits.length) return { output: [{ type: "text", text: `知识库里没有匹配「${query}」的内容。可用 kb_list 查看已有哪些文档。` }] };
 				const lines = hits.map(
 					(hit, i) => `[${i + 1}] ${hit.title}${hit.source ? `（${hit.source}）` : ""} · 片段 ${hit.chunkSeq + 1}\n${String(hit.text).slice(0, 900)}`,
@@ -1493,7 +1697,22 @@ const baseSpikeExtension = defineExtension({
 					String(a.source ?? "").trim().slice(0, 300),
 					String(a.tags ?? "").trim().slice(0, 120),
 				);
-				return { output: [{ type: "text", text: `已存入知识库：${title}（id=${id}，${chunks} 个片段，${content.length} 字符）。` }] };
+				let vectorized = 0;
+				if (kbRetrievalMode() !== "fts" && kbVectorAvailable()) {
+					try {
+						vectorized = await kbVectorIndexDoc(id);
+					} catch (err) {
+						console.warn("kb vector index failed", String(err).slice(0, 160));
+					}
+				}
+				return {
+					output: [
+						{
+							type: "text",
+							text: `已存入知识库：${title}（id=${id}，${chunks} 个片段，${content.length} 字符${vectorized ? `，已建向量 ${vectorized} 段` : ""}）。`,
+						},
+					],
+				};
 			},
 		}),
 		defineTool({
@@ -1515,7 +1734,7 @@ const baseSpikeExtension = defineExtension({
 			execute: async (args) => {
 				const id = Number((args as { id?: unknown }).id ?? 0);
 				if (!id) return { output: [{ type: "text", text: "需要一个有效的文档 id。" }] };
-				return { output: [{ type: "text", text: kbDeleteDoc(id) ? `已删除文档 ${id}。` : `文档 ${id} 不存在。` }] };
+				return { output: [{ type: "text", text: (await kbDeleteDoc(id)) ? `已删除文档 ${id}。` : `文档 ${id} 不存在。` }] };
 			},
 		}),
 	],
@@ -2155,7 +2374,7 @@ export class SpikeAgent extends DurableObject {
 				// 思考档位（v0.22.0）：off 时不产生 thinking 事件，前端自然不显示思考块。
 				thinkingLevel: currentThinkingLevel(),
 				extensions: this.agentExtensions() as never,
-				instructions: this.buildInstructions(inv, sessionId, effectiveMessage),
+				instructions: await this.buildInstructions(inv, sessionId, effectiveMessage),
 			},
 			ctx,
 		);
@@ -2376,7 +2595,7 @@ export class SpikeAgent extends DurableObject {
 	}
 
 	/** 组装本轮 instructions：基础规则 + 技能索引 + 显式技能 + 进行中的目标 + 知识库预检索（v0.46.0）。 */
-	private buildInstructions(inv: { name: string; content: string } | null, sessionId?: string, message?: string): string {
+	private async buildInstructions(inv: { name: string; content: string } | null, sessionId?: string, message?: string): Promise<string> {
 		const base =
 			"你在 Cloudflare Free Web Pi（GitHub: scudong/cloudflare-free-web-pi，界面名 π Harness）里运行：一个部署在 Cloudflare Workers 上的 pi-durable harness，个人用量在 Cloudflare 免费额度内。被问到本项目时以上面的仓库为准。\n" +
 			"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。";
@@ -2386,7 +2605,7 @@ export class SpikeAgent extends DurableObject {
 			goal && goal.status === "active"
 				? `\n\n## 目标模式（进行中）\n目标：${goal.objective}\n进度：第 ${goal.turns + 1} 轮，已用 ${goal.tokens_used} / ${goal.token_budget} tokens。\n- 这一轮必须有实际进展，不要只回复「继续」。\n- 全部达成后调用 complete_goal，并附可核对的证据。\n- 确实无法推进时调用 report_goal 说明阻塞原因。`
 				: "";
-		const kbBlock = message ? kbPrefetchBlock(message) : "";
+		const kbBlock = message ? await kbPrefetchBlock(message) : "";
 		if (!inv) return withSkills + goalBlock + kbBlock;
 		return `${withSkills}${goalBlock}\n\n## 用户显式调用的技能：${inv.name}\n下面是该技能的完整说明，请严格按照它执行，不要声称找不到该技能：\n\n${inv.content}${kbBlock}`;
 	}
@@ -2448,6 +2667,8 @@ export class SpikeAgent extends DurableObject {
 				sql: this.ctx.storage.sql as unknown as SqlHandle,
 				harness: this.harness ?? null,
 				apiKey: (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null,
+				env: this.env as AgentScope["env"],
+				scopeId: (this.ctx.id as { name?: string }).name ?? this.ctx.id.toString(),
 			},
 			() => this.handleAlarm(),
 		);
@@ -3166,7 +3387,7 @@ export class SpikeAgent extends DurableObject {
 				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 				thinkingLevel: currentThinkingLevel(),
 				extensions: this.agentExtensions() as never,
-				instructions: this.buildInstructions(inv, sessionId, effectiveMessage),
+				instructions: await this.buildInstructions(inv, sessionId, effectiveMessage),
 			},
 			ctx,
 		);
@@ -3340,6 +3561,8 @@ export class SpikeAgent extends DurableObject {
 				sql: this.ctx.storage.sql as unknown as SqlHandle,
 				harness: this.harness ?? null,
 				apiKey: (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null,
+				env: this.env as AgentScope["env"],
+				scopeId: (this.ctx.id as { name?: string }).name ?? this.ctx.id.toString(),
 			},
 			() => this.handleFetch(request),
 		);
@@ -3393,7 +3616,7 @@ export class SpikeAgent extends DurableObject {
 					installed: this.registryRef?.snapshot().installed().map((e) => e.name) ?? null,
 					// 传 message 时返回本轮 instructions，用于确认技能 / 知识库预检索的注入（v0.46.0）
 					instructions: url.searchParams.get("message")
-						? this.buildInstructions(null, url.searchParams.get("sessionId") ?? "1", url.searchParams.get("message") ?? "")
+						? await this.buildInstructions(null, url.searchParams.get("sessionId") ?? "1", url.searchParams.get("message") ?? "")
 						: undefined,
 				});
 			}
@@ -3484,7 +3707,15 @@ export class SpikeAgent extends DurableObject {
 				const content = String(body.content ?? "").trim();
 				if (!title || !content) return Response.json({ error: "标题和正文都不能为空" }, { status: 400 });
 				const result = kbAddDoc(title, content, String(body.source ?? "").trim().slice(0, 300), String(body.tags ?? "").trim().slice(0, 120));
-				return Response.json({ ok: true, ...result });
+				let vectorized = 0;
+				if (kbRetrievalMode() !== "fts" && kbVectorAvailable()) {
+					try {
+						vectorized = await kbVectorIndexDoc(result.id);
+					} catch (err) {
+						console.warn("kb vector index failed", String(err).slice(0, 160));
+					}
+				}
+				return Response.json({ ok: true, ...result, vectorized });
 			}
 			if (url.pathname === "/kb/doc" && request.method === "GET") {
 				ensureTables(sqlFacade!);
@@ -3497,7 +3728,7 @@ export class SpikeAgent extends DurableObject {
 				ensureTables(sqlFacade!);
 				const q = url.searchParams.get("q") ?? "";
 				if (!q.trim()) return Response.json({ hits: [] });
-				return Response.json({ hits: kbSearch(q, Number(url.searchParams.get("limit") ?? 8)) });
+				return Response.json({ hits: await kbSearchAsync(q, Number(url.searchParams.get("limit") ?? 8)) });
 			}
 			// 预检索预览（v0.46.0）：返回本轮会注入 instructions 的原文，便于排查
 			if (url.pathname === "/kb/prefetch" && request.method === "GET") {
@@ -3505,15 +3736,41 @@ export class SpikeAgent extends DurableObject {
 				const q = url.searchParams.get("q") ?? "";
 				return Response.json({
 					enabled: getSetting("kb_prefetch", "1") === "1",
-					hits: q.trim() ? kbSearch(q, KB_PREFETCH_TOP) : [],
-					block: q.trim() ? kbPrefetchBlock(q) : "",
+					hits: q.trim() ? await kbSearchAsync(q, KB_PREFETCH_TOP) : [],
+					block: q.trim() ? await kbPrefetchBlock(q) : "",
 				});
 			}
 			if (url.pathname === "/kb" && request.method === "DELETE") {
 				ensureTables(sqlFacade!);
 				const id = Number(url.searchParams.get("id") ?? 0);
 				if (!id) return Response.json({ error: "缺少文档 id" }, { status: 400 });
-				return Response.json({ ok: kbDeleteDoc(id) });
+				return Response.json({ ok: await kbDeleteDoc(id) });
+			}
+			if (url.pathname === "/kb/status" && request.method === "GET") {
+				ensureTables(sqlFacade!);
+				const bindings = kbVectorBindings();
+				const total = Number((sqlFacade!.exec("SELECT COUNT(*) AS n FROM kb_chunks").toArray() as { n: number }[])[0]?.n ?? 0);
+				const indexed = Number((sqlFacade!.exec("SELECT COUNT(*) AS n FROM kb_chunks WHERE vectorized = 1").toArray() as { n: number }[])[0]?.n ?? 0);
+				return Response.json({
+					mode: kbRetrievalMode(),
+					available: !!bindings,
+					index: KB_VECTOR_DEFAULT_INDEX,
+					model: KB_EMBED_MODEL,
+					total,
+					indexed,
+				});
+			}
+			if (url.pathname === "/kb/reindex" && request.method === "POST") {
+				ensureTables(sqlFacade!);
+				if (!kbVectorAvailable()) {
+					return Response.json({ error: "向量检索未启用（缺少 AI / KB_VEC 绑定）" }, { status: 400 });
+				}
+				try {
+					const result = await kbReindexPending(Number(url.searchParams.get("limit") ?? KB_VECTOR_BATCH));
+					return Response.json({ ok: true, ...result });
+				} catch (err) {
+					return Response.json({ error: String(err).slice(0, 200) }, { status: 500 });
+				}
 			}
 			if (url.pathname === "/skills/community" && request.method === "GET") {
 				return Response.json({
@@ -4013,16 +4270,22 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({
 					webSearch: getSetting("web_search", "1") === "1",
 					kbPrefetch: getSetting("kb_prefetch", "1") === "1",
+					kbRetrieval: kbRetrievalMode(),
+					kbVector: { available: kbVectorAvailable(), index: KB_VECTOR_DEFAULT_INDEX },
 					thinkingLevel: currentThinkingLevel(),
 					compaction: compactionSettings(),
 					approval: approvalSettings(),
 				});
 			}
 			if (url.pathname === "/settings" && request.method === "POST") {
-				const body = (await request.json()) as { webSearch?: boolean; kbPrefetch?: boolean; thinkingLevel?: string };
+				const body = (await request.json()) as { webSearch?: boolean; kbPrefetch?: boolean; kbRetrieval?: string; thinkingLevel?: string };
 				if (typeof body.webSearch === "boolean") setSetting("web_search", body.webSearch ? "1" : "0");
 				// 知识库预检索开关（v0.46.0）
 				if (typeof body.kbPrefetch === "boolean") setSetting("kb_prefetch", body.kbPrefetch ? "1" : "0");
+				// 检索模式（v0.53.0）：fts / vector / hybrid
+				if (body.kbRetrieval === "fts" || body.kbRetrieval === "vector" || body.kbRetrieval === "hybrid") {
+					setSetting("kb_retrieval", body.kbRetrieval);
+				}
 				if (body.thinkingLevel === "off" || body.thinkingLevel === "low" || body.thinkingLevel === "high") {
 					setSetting("thinking_level", body.thinkingLevel);
 				}
@@ -4068,6 +4331,8 @@ export class SpikeAgent extends DurableObject {
 					ok: true,
 					webSearch: getSetting("web_search", "1") === "1",
 					kbPrefetch: getSetting("kb_prefetch", "1") === "1",
+					kbRetrieval: kbRetrievalMode(),
+					kbVector: { available: kbVectorAvailable(), index: KB_VECTOR_DEFAULT_INDEX },
 					thinkingLevel: currentThinkingLevel(),
 					compaction: compactionSettings(),
 					approval: approvalSettings(),

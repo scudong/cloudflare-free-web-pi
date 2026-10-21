@@ -187,6 +187,13 @@ export const api = {
 	kbDoc: (id: number) =>
 		requestJson<{ id?: number; title?: string; content?: string; error?: string }>(withQuery("/api/kb/doc", { id: String(id) })),
 	kbDelete: (id: number) => requestJson<{ ok?: boolean }>(withQuery("/api/kb", { id: String(id) }), { method: "DELETE" }),
+	kbStatus: () =>
+		requestJson<{ mode?: string; available?: boolean; index?: string; model?: string; total?: number; indexed?: number }>("/api/kb/status"),
+	kbReindex: (limit?: number) =>
+		requestJson<{ ok?: boolean; indexed?: number; remaining?: number; error?: string }>(
+			withQuery("/api/kb/reindex", { limit: limit ? String(limit) : "" }),
+			{ method: "POST" },
+		),
 
 	auth: () => requestJson<{ required?: boolean; authenticated?: boolean; owner?: boolean }>("/api/auth"),
 
@@ -293,6 +300,9 @@ export const api = {
 			webSearch?: boolean;
 			/** 知识库预检索（v0.46.0）：每轮自动把命中的资料注入系统提示。 */
 			kbPrefetch?: boolean;
+			/** 知识库检索模式（v0.53.0）：fts / vector / hybrid。 */
+			kbRetrieval?: string;
+			kbVector?: { available?: boolean; index?: string };
 			thinkingLevel?: string;
 			compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number };
 			approval?: { read: string; write: string; exec: string };
@@ -301,6 +311,7 @@ export const api = {
 	setSettings: (patch: {
 		webSearch?: boolean;
 		kbPrefetch?: boolean;
+		kbRetrieval?: string;
 		thinkingLevel?: string;
 		compaction?: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>;
 		approval?: Partial<{ read: string; write: string; exec: string }>;

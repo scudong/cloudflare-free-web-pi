@@ -82,6 +82,8 @@ export default function App() {
 	const [webSearch, setWebSearch] = useState<boolean | null>(null);
 	// 知识库预检索开关（v0.46.0）：null = 尚未读取
 	const [kbPrefetch, setKbPrefetch] = useState<boolean | null>(null);
+	// 知识库检索模式（v0.53.0）：fts / vector / hybrid
+	const [kbRetrieval, setKbRetrieval] = useState("fts");
 	// 思考档位（v0.22.0）：off / low / high
 	const [thinkingLevel, setThinkingLevel] = useState<string>("low");
 	// 上下文压缩策略（v0.30.0）
@@ -690,6 +692,7 @@ export default function App() {
 				if (alive) {
 					setWebSearch(data.webSearch !== false);
 					if (typeof data.kbPrefetch === "boolean") setKbPrefetch(data.kbPrefetch);
+					if (typeof data.kbRetrieval === "string") setKbRetrieval(data.kbRetrieval);
 					if (typeof data.thinkingLevel === "string") setThinkingLevel(data.thinkingLevel);
 					if (data.compaction) setCompaction(data.compaction);
 					if (data.approval) setApprovalSettings(data.approval);
@@ -1306,6 +1309,19 @@ export default function App() {
 		[nextId],
 	);
 
+	/** 知识库检索模式（v0.53.0）：乐观更新，失败回滚。 */
+	const handleChangeKbRetrieval = useCallback(
+		(next: string) => {
+			const previous = kbRetrieval;
+			setKbRetrieval(next);
+			void api.setSettings({ kbRetrieval: next }).catch(() => {
+				setKbRetrieval(previous);
+				setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: "知识库检索模式保存失败。" }]);
+			});
+		},
+		[kbRetrieval, nextId],
+	);
+
 	/** 思考档位（v0.22.0）：off/低/高，后端在下一次对话生效。 */
 	const handleChangeThinkingLevel = useCallback((next: string) => {
 		const prev = thinkingLevel;
@@ -1633,6 +1649,8 @@ export default function App() {
 				onToggleWebSearch={handleToggleWebSearch}
 				kbPrefetch={kbPrefetch}
 				onToggleKbPrefetch={handleToggleKbPrefetch}
+				kbRetrieval={kbRetrieval}
+				onChangeKbRetrieval={handleChangeKbRetrieval}
 				thinkingLevel={thinkingLevel}
 				onChangeThinkingLevel={handleChangeThinkingLevel}
 				compaction={compaction}

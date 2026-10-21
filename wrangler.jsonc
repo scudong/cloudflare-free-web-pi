@@ -4,6 +4,9 @@
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
+  // 知识库向量检索（v0.53.0）：Workers AI 生成 bge-m3 向量，Vectorize 存索引
+  "ai": { "binding": "AI" },
+  "vectorize": [{ "binding": "KB_VEC", "index_name": "pi-kb" }],
   "durable_objects": { "bindings": [
     { "name": "SpikeAgent", "class_name": "SpikeAgent" },
     // 用户注册表（v0.43.0）：邀请码 / 登录校验，只做 SQL，不加载 Harness
