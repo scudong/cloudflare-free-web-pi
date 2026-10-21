@@ -19,7 +19,7 @@ The stack is deliberately boring:
 • Durable Objects + SQLite
 • No VPS, no Postgres, no Redis
 
-Deploy = `wrangler deploy`. CI runs 126 golden tests and a live smoke test.
+Deploy = `wrangler deploy`. CI runs the full golden test suite and a live smoke test.
 
 **3/**
 It's durable, not a chat wrapper.
