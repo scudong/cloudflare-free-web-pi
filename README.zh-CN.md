@@ -25,7 +25,7 @@
 
 | 模块 | 能力 |
 |---|---|
-| 会话 | 多会话隔离、自动标题、重命名、删除、**按会话选择模型**（`deepseek-flash` / `deepseek-v4-pro`） |
+| 会话 | 多会话隔离、首条消息自动命名（前 24 字）、重命名、删除、**按会话选择模型**（`deepseek-flash` / `deepseek-v4-pro`） |
 | 对话 | SSE 流式逐字输出、**可折叠思考过程**、**吸顶计划清单**（`update_plan`）、工具调用实时 pill（含 codemode 内嵌调用）、**产出文件卡**、完整 Markdown（表格/任务列表/代码复制）、图片输入（粘贴或上传，自动压缩 ≤1568px） |
 | 执行 | `codemode`：模型写 JavaScript 在 QuickJS 沙箱里跑，脚本内可 `await tools.<name>()` 调用其它工具；`dispatch_tasks`：2–4 个独立子任务并行分派给子代理后汇总 |
 | 网页 | `web_search` 联网搜索 + `web_fetch_page` 抓取正文（DeepSeek 搜索 API，设置中可开关）；`http_fetch` 直接抓取；**Browserbase MCP** 云端浏览器（导航/点击/提取，无需本地 Chrome） |
