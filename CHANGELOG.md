@@ -2,6 +2,15 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-21（公开发布准备）
+
+### 推广素材与命名建议（v0.46.3）
+- 新增 `marketing/` 目录：一句话定位、8 个核心卖点、技术亮点、与常见方案的形态对比、目标人群、常见异议
+- 命名调研：推荐 `pi-station`（π 空间站），备选 `pi-harbor`（π 港湾）；附 GitHub/npm 撞名检索结果与改名清单
+- 渠道文案：X 英文 thread / 短版中英文、小红书 3 篇（个人网站 / 团队空间 / 文件分享）
+- 发布前清单：LICENSE、公开演示、README 英文摘要、社交预览图、GitHub Description / Topics
+- 代码无改动；`.gitignore` 补上 `tests/.tmp-state*/`
+
 ## 2026-10-20（多用户）
 
 ### README 截图更新（v0.46.2）
