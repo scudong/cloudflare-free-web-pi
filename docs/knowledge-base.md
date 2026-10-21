@@ -42,8 +42,33 @@ kb_fts    FTS5(title_tokens, body_tokens)   -- rowid = kb_chunks.id
 ## API 与界面
 
 - `GET /api/kb` · `POST /api/kb` · `DELETE /api/kb?id=` · `GET /api/kb/doc?id=` · `GET /api/kb/search?q=`
-- 左栏「知识库」：检索、粘贴正文入库、查看全文、删除。
+- `POST /api/kb/ingest`：`multipart/form-data` 传文件、`application/json` 传链接（见下节）
+- 左栏「知识库」：检索、粘贴正文入库、文件 / 链接导入、查看全文、删除。
 - 备份包含 `kbDocs`（只备份正文）；恢复时重新分块并重建索引。
+
+## 导入通道（v0.55.0）
+
+入口在左栏「知识库」→ `+` → 「或导入已有资料」：
+
+| 来源 | 服务端处理 | 标题 |
+|---|---|---|
+| PDF / DOCX | `env.AI.toMarkdown()`（Workers AI 文档转换）→ Markdown | 文件名去掉扩展名 |
+| MD / TXT | 直接按 UTF-8 读文本 | 同上 |
+| 网页链接 | `web_fetch_page` 同一条 DeepSeek Fetch 链路 | 页面 `<title>`，取不到时用域名 |
+
+三条路径最终都调用 `kbSaveDoc()`（`kbAddDoc()` + 索引 + 按需向量化），不引入解析库、不加新存储。一次最多 10 个文件，逐个返回成功 / 失败。
+
+失败一律带明确文案，不静默：
+
+| 情况 | 状态码 | 文案要点 |
+|---|---|---|
+| 单个文件 > 20MB，或请求体明显超限 | 413 | 超过 20MB 上限，请拆分后再导入 |
+| 扩展名不在 PDF / MD / TXT / DOCX | 415 | 列出支持的格式 |
+| 解析结果为空（含图片型 PDF） | 422 | 没有解析出正文；扫描件暂不支持 OCR |
+| 环境没有 `AI` 绑定 | 400 | 当前环境不支持 PDF 解析（未绑定 Workers AI） |
+| 链接不是 http(s)，或未配置 `DEEPSEEK_API_KEY` | 400 | 指出缺的是什么 |
+
+> 测试与本地开发没有 `AI` 绑定，用 `KB_AI_CONVERT_STUB`（见 `wrangler.test.jsonc`）冒充一次 `toMarkdown` 结果，金标用例才能覆盖「上传 → 入库 → 可检索」的完整链路。
 
 ## 每轮预检索（v0.46.0）
 
@@ -61,10 +86,11 @@ kb_fts    FTS5(title_tokens, body_tokens)   -- rowid = kb_chunks.id
 
 - 关键词检索，不做同义词 / 语义扩展；问法和原文用词差太远时可能不命中。
 - 少于 2 个汉字的查询（如单字）走 `LIKE` 兜底，结果不按相关度排序。
-- 尚无文件上传解析（PDF / DOCX）；当前入口是粘贴正文、或让模型抓取网页后 `kb_add`。
+- 扫描件（图片型 PDF）不做 OCR，导入时只会得到空正文和一句提示。
+- 不支持批量目录 / 云盘同步；单文件 20MB、单篇 20 万字符封顶。
 
 ## 后续可加
 
 - 混合检索：给每个分块存 `bge-m3` 向量，关键词 + 向量分数融合；索引放在同一 DO 的 SQLite 或按用户 namespace 的 Vectorize。Supabase pgvector 的可选方案见 [semantic-search-options.md](semantic-search-options.md)。
-- 文档导入：R2 上传 + PDF/DOCX 文本抽取。
+- 文档导入：R2 上传 + 扫描件 OCR（文本型 PDF / DOCX 已由 `toMarkdown` 覆盖）。
 - 引用回链：检索结果带分享页 / 原文件链接。

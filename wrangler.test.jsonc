@@ -3,7 +3,12 @@
   // 这两个绑定在无凭证的 CI 里会让 wrangler dev 启动失败；
   // 测试用 CF_DISABLE_VECTOR=1 关闭向量模式，只验证 FTS / 回退路径。
   "name": "pi-harness-spike",
-  "vars": { "BUILD": "test" },
+  // KB_AI_CONVERT_STUB：冒充 Workers AI 的 toMarkdown 结果，让 PDF / DOCX 导入路径
+  // 在无 AI 绑定的 CI 里也能跑通「上传 → 入库 → 可分块检索」。为空则不生效。
+  "vars": {
+    "BUILD": "test",
+    "KB_AI_CONVERT_STUB": "# 金标 PDF 报告\n\n本报告由测试替身返回，内容稳定可检索。\n\n核心指标：飞轮储能效率 92%，真空腔体压降小于 3 帕。\n\n## 第二段\n\n第二页讨论磁悬浮轴承与转速上限，转子线速度 210 米每秒。"
+  },
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],

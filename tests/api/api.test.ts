@@ -386,6 +386,75 @@ describe("知识库", () => {
 	});
 });
 
+describe("知识库导入", () => {
+	/** 走 multipart 上传；文件名决定服务端走哪条解析路径。 */
+	const ingest = (body: BlobPart, name: string, type: string) => {
+		const form = new FormData();
+		form.append("file", new Blob([body], { type }), name);
+		return api("/api/kb/ingest", { method: "POST", body: form });
+	};
+
+	it("PDF 走解析替身：入库后分块且能检索命中（金标）", async () => {
+		const res = await ingest(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]), "金标报告.pdf", "application/pdf");
+		expect(res.status).toBe(200);
+		expect(res.json.docs).toHaveLength(1);
+		expect(res.json.docs[0]).toMatchObject({ name: "金标报告.pdf", title: "金标报告" });
+		expect(res.json.docs[0].chunks).toBeGreaterThan(0);
+		expect(res.json.docs[0].chars).toBeGreaterThan(0);
+
+		const list = await api("/api/kb");
+		const doc = list.json.docs.find((d: { title: string }) => d.title === "金标报告");
+		expect(doc).toBeTruthy();
+		expect(doc.chunks).toBeGreaterThan(0);
+
+		const search = await api(`/api/kb/search?q=${encodeURIComponent("飞轮储能")}`);
+		expect(search.json.hits.length).toBeGreaterThan(0);
+		expect(search.json.hits[0].text).toContain("飞轮储能");
+
+		await api(`/api/kb?id=${doc.id}`, { method: "DELETE" });
+	});
+
+	it("MD / TXT 不经过 AI，直接读文本", async () => {
+		const res = await ingest("# 手写笔记\n\n久期缺口 2.1 年，组合凸性 0.34。", "手写笔记.md", "text/markdown");
+		expect(res.status).toBe(200);
+		expect(res.json.docs[0]).toMatchObject({ title: "手写笔记" });
+
+		const search = await api(`/api/kb/search?q=${encodeURIComponent("久期缺口")}`);
+		expect(search.json.hits.some((hit: { title: string }) => hit.title === "手写笔记")).toBe(true);
+
+		await api(`/api/kb?id=${res.json.docs[0].id}`, { method: "DELETE" });
+	});
+
+	it("超过 20MB 返回 413 和明确文案，不静默失败", async () => {
+		const res = await ingest(new Uint8Array(25 * 1024 * 1024), "超大文件.pdf", "application/pdf");
+		expect(res.status).toBe(413);
+		expect(res.json.error).toContain("20MB");
+	});
+
+	it("不支持的格式返回 415 并列出支持范围", async () => {
+		const res = await ingest("PK\u0003\u0004", "归档.zip", "application/zip");
+		expect(res.status).toBe(415);
+		expect(res.json.error).toContain("PDF / MD / TXT / DOCX");
+	});
+
+	it("解析出空正文返回 422，不静默", async () => {
+		const res = await ingest("   \n\n  ", "空白.txt", "text/plain");
+		expect(res.status).toBe(422);
+		expect(res.json.error).toContain("没有解析出正文");
+	});
+
+	it("链接导入失败路径：非法协议与未配置抓取密钥（金标）", async () => {
+		const bad = await post("/api/kb/ingest", { url: "ftp://example.com/a" });
+		expect(bad.status).toBe(400);
+		expect(bad.json.error).toContain("http(s)://");
+
+		// 测试环境没有 DEEPSEEK_API_KEY：必须给出可执行的提示，而不是空正文入库
+		const noKey = await post("/api/kb/ingest", { url: "https://example.com/article" });
+		expect(noKey.status).toBe(400);
+		expect(noKey.json.error).toContain("DEEPSEEK_API_KEY");
+	});
+});
+
 describe("全部文件", () => {
 	let childSession = "";
 	let childTitle = "";

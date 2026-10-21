@@ -4,6 +4,15 @@
 
 ## 2026-10-21（公开发布准备）
 
+### 知识库导入通道：PDF / MD / TXT / DOCX + 链接导入（v0.55.0 · NERE-12）
+- 左栏「知识库」→ `+` 新增「导入已有资料」：拖入或点选 PDF / MD / TXT / DOCX，也可以粘贴网页链接导入；原有粘贴正文入口一字未改
+- 新增 `POST /api/kb/ingest`：`multipart/form-data` 收文件、`application/json` 收链接
+- PDF / DOCX 用已绑定的 Workers AI `toMarkdown()` 转 Markdown，MD / TXT 直接读文本，链接复用 `web_fetch_page` 的 DeepSeek Fetch 链路（本次把该逻辑抽成 `fetchPageMarkdown()` 供工具与接口共用）
+- 三条路径最终都走 `kbSaveDoc()`：`kbAddDoc()` 建索引 + 按需向量化，不引入解析库、不加新存储
+- 失败不静默：>20MB → 413、格式不支持 → 415、解析出空正文 / 扫描件 → 422、无 `AI` 绑定 → 400「当前环境不支持 PDF 解析」、未配 `DEEPSEEK_API_KEY` → 400
+- 截图：`docs/kb-import.png`（导入成功）、`docs/kb-import-error.png`（链接失败文案）
+- 金标 128 → 134：PDF 解析替身路径、MD 直读、20MB 上限、格式校验、空正文、链接导入失败路径
+
 ### 上手通道：空会话起步卡 + 设置内「部署自检」（`1d7524c`）
 - 空会话页新增 3 张起步卡（写周报并分享 / 存知识库再提问 / 每日摘要定时任务），点击只把提示词写入输入框，不直接发送
 - 设置 → 通用新增「部署自检」：检查模型密钥、模型供应商、知识库检索、分享域名、线上构建号，失败项给出修复命令

@@ -30,6 +30,30 @@ export interface ShareLinkInfo {
 	createdAt: string;
 }
 
+/** 知识库导入结果（v0.55.0）：文件路径返回 docs[]，链接路径返回单条。 */
+export interface KbIngestDocInfo {
+	name?: string;
+	title?: string;
+	id?: number;
+	chunks?: number;
+	chars?: number;
+	truncated?: boolean;
+	vectorized?: number;
+	error?: string;
+}
+
+export interface KbIngestResult {
+	ok?: boolean;
+	docs?: KbIngestDocInfo[];
+	failed?: KbIngestDocInfo[];
+	error?: string;
+	id?: number;
+	title?: string;
+	chunks?: number;
+	chars?: number;
+	truncated?: boolean;
+}
+
 /** 邀请用户（v0.43.0）。 */
 export interface UserInfo {
 	id: string;
@@ -184,6 +208,14 @@ export const api = {
 			jsonPost({ title, content, source: source ?? "", tags: tags ?? "" }),
 		),
 	kbSearch: (q: string) => requestJson<{ hits?: unknown[] }>(withQuery("/api/kb/search", { q })),
+	/** 导入通道（v0.55.0）：文件走 multipart，链接走 JSON，服务端统一转 Markdown 后入库。 */
+	kbIngestFiles: (files: File[], tags?: string) => {
+		const form = new FormData();
+		for (const file of files) form.append("file", file, file.name);
+		if (tags) form.append("tags", tags);
+		return requestJson<KbIngestResult>("/api/kb/ingest", { method: "POST", body: form });
+	},
+	kbIngestUrl: (url: string, tags?: string) => requestJson<KbIngestResult>("/api/kb/ingest", jsonPost({ url, tags: tags ?? "" })),
 	kbDoc: (id: number) =>
 		requestJson<{ id?: number; title?: string; content?: string; error?: string }>(withQuery("/api/kb/doc", { id: String(id) })),
 	kbDelete: (id: number) => requestJson<{ ok?: boolean }>(withQuery("/api/kb", { id: String(id) }), { method: "DELETE" }),

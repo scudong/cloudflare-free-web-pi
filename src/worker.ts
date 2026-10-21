@@ -841,6 +841,120 @@ function kbAddDoc(title: string, content: string, source = "", tags = ""): { id:
 	return { id, chunks: chunks.length };
 }
 
+/** 入库 + 建索引：POST /kb、kb_add 工具与导入通道共用，向量索引失败不影响入库结果。 */
+async function kbSaveDoc(title: string, content: string, source: string, tags: string): Promise<{ id: number; chunks: number; vectorized: number }> {
+	const { id, chunks } = kbAddDoc(title, content, source, tags);
+	let vectorized = 0;
+	if (kbRetrievalMode() !== "fts" && kbVectorAvailable()) {
+		try {
+			vectorized = await kbVectorIndexDoc(id);
+		} catch (err) {
+			console.warn("kb vector index failed", String(err).slice(0, 160));
+		}
+	}
+	return { id, chunks, vectorized };
+}
+
+/* ---------------- 知识库导入通道（v0.55.0）：文件 + 链接 ----------------
+ * 不引入解析库、不加新存储：PDF / DOCX 交给 Workers AI 的 toMarkdown，
+ * MD / TXT 直接读文本，链接复用 web_fetch_page 的抓取逻辑，最后都走 kbSaveDoc。
+ */
+const KB_INGEST_MAX_BYTES = 20 * 1024 * 1024;
+const KB_INGEST_MAX_FILES = 10;
+const KB_INGEST_TEXT_EXTENSIONS = new Set(["md", "markdown", "txt"]);
+const KB_INGEST_AI_EXTENSIONS = new Set(["pdf", "docx"]);
+
+type KbIngestOk = { ok: true; name: string; title: string; id: number; chunks: number; chars: number; truncated: boolean; vectorized: number };
+type KbIngestErr = { ok: false; name: string; status: number; error: string };
+
+/** 取扩展名：`/a/b/报告.PDF` → `pdf`。没有扩展名时返回空串。 */
+function kbFileExtension(name: string): string {
+	return (/\.([a-z0-9]{1,8})$/i.exec(name.trim())?.[1] ?? "").toLowerCase();
+}
+
+/** 仅测试用：用固定 Markdown 冒充 AI 解析结果，让 PDF / DOCX 路径在无 AI 绑定的 CI 里可跑（见 wrangler.test.jsonc）。 */
+function kbConvertStub(): string {
+	const env = scope().env as { KB_AI_CONVERT_STUB?: string } | undefined;
+	return typeof env?.KB_AI_CONVERT_STUB === "string" ? env.KB_AI_CONVERT_STUB.trim() : "";
+}
+
+/** PDF / DOCX → Markdown。没有 AI 绑定（或本地/CI）时给出明确提示，而不是静默失败。 */
+async function kbFileToMarkdown(name: string, file: File, ext: string): Promise<{ ok: true; markdown: string } | { ok: false; status: number; error: string }> {
+	const stub = kbConvertStub();
+	if (stub) return { ok: true, markdown: stub };
+	const ai = (scope().env as { AI?: { toMarkdown?: (files: { name: string; blob: Blob }[]) => Promise<unknown> } } | undefined)?.AI;
+	if (typeof ai?.toMarkdown !== "function") {
+		const kind = ext === "pdf" ? "PDF" : "DOCX";
+		return { ok: false, status: 400, error: `当前环境不支持 ${kind} 解析（未绑定 Workers AI），可改用粘贴正文或导入 MD / TXT。` };
+	}
+	try {
+		const converted = await ai.toMarkdown([{ name, blob: file }]);
+		const first = (Array.isArray(converted) ? converted[0] : converted) as { format?: string; data?: string; error?: string } | undefined;
+		if (first?.format === "error" || typeof first?.data !== "string") {
+			return { ok: false, status: 422, error: `「${name}」解析失败：${String(first?.error ?? "转换服务没有返回正文").slice(0, 120)}` };
+		}
+		return { ok: true, markdown: first.data };
+	} catch (err) {
+		return { ok: false, status: 502, error: `「${name}」解析失败：${String(err).slice(0, 160)}` };
+	}
+}
+
+/** 单个文件 → 知识库。超限 / 格式 / 空正文各自一句明确文案。 */
+async function kbIngestFile(file: File, tags: string): Promise<KbIngestOk | KbIngestErr> {
+	const name = (file.name || "未命名文件").trim().slice(0, 120);
+	const ext = kbFileExtension(name);
+	if (file.size > KB_INGEST_MAX_BYTES) {
+		return { ok: false, name, status: 413, error: `「${name}」超过 20MB 上限，请拆分后再导入。` };
+	}
+	if (!file.size) return { ok: false, name, status: 422, error: `「${name}」是空文件。` };
+	if (!KB_INGEST_TEXT_EXTENSIONS.has(ext) && !KB_INGEST_AI_EXTENSIONS.has(ext)) {
+		return { ok: false, name, status: 415, error: `不支持「${name}」的格式；支持 PDF / MD / TXT / DOCX。` };
+	}
+	let markdown = "";
+	if (KB_INGEST_TEXT_EXTENSIONS.has(ext)) {
+		try {
+			markdown = await file.text();
+		} catch (err) {
+			return { ok: false, name, status: 422, error: `「${name}」读取失败：${String(err).slice(0, 120)}` };
+		}
+	} else {
+		const converted = await kbFileToMarkdown(name, file, ext);
+		if (!converted.ok) return { ok: false, name, status: converted.status, error: converted.error };
+		markdown = converted.markdown;
+	}
+	const content = markdown.replace(/\r\n/g, "\n").trim();
+	if (!content) {
+		return { ok: false, name, status: 422, error: `「${name}」没有解析出正文；若是扫描件（图片型 PDF）暂不支持 OCR，可改用粘贴正文。` };
+	}
+	const base = ext ? name.slice(0, name.length - ext.length - 1) : name;
+	const title = base.trim().slice(0, 120) || name;
+	const saved = await kbSaveDoc(title, content, name, tags);
+	return { ok: true, name, title, ...saved, chars: content.length, truncated: content.length > KB_MAX_CONTENT };
+}
+
+/** 抓取网页正文（DeepSeek Fetch API）。web_fetch_page 工具与链接导入共用同一段逻辑。 */
+async function fetchPageMarkdown(target: string): Promise<{ ok: true; title: string; content: string } | { ok: false; status: number; error: string }> {
+	const apiKey = scope().apiKey;
+	if (!apiKey) return { ok: false, status: 400, error: "未配置 DEEPSEEK_API_KEY，无法抓取网页。" };
+	try {
+		const resp = await fetch("https://api.deepseek.com/v1/tools/fetch", {
+			method: "POST",
+			headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+			body: JSON.stringify({ url: target }),
+		});
+		const data = (await resp.json().catch(() => null)) as { title?: string; content?: string; error?: { message?: string } } | null;
+		if (!resp.ok) {
+			const msg = data?.error?.message ?? `HTTP ${resp.status}`;
+			return { ok: false, status: 502, error: `抓取失败：${msg}` };
+		}
+		const content = String(data?.content ?? "").trim();
+		if (!content) return { ok: false, status: 422, error: "页面没有可提取的正文。" };
+		return { ok: true, title: String(data?.title ?? "").trim(), content };
+	} catch (err) {
+		return { ok: false, status: 502, error: "抓取失败：" + String(err).slice(0, 200) };
+	}
+}
+
 async function kbDeleteDoc(id: number): Promise<boolean> {
 	if (!sqlFacade!.exec("SELECT id FROM kb_docs WHERE id = ?", id).toArray().length) return false;
 	const chunkIds = (sqlFacade!.exec("SELECT id FROM kb_chunks WHERE doc_id = ?", id).toArray() as { id: number }[]).map((row) => row.id);
@@ -1602,26 +1716,11 @@ const baseSpikeExtension = defineExtension({
 				if (getSetting("web_search", "1") !== "1") {
 					return { output: [{ type: "text", text: "网页搜索当前未开启。请告诉用户：在 设置 → 网页搜索 中开启后即可抓取网页。" }] };
 				}
-				const apiKey = scope().apiKey;
-				if (!apiKey) return { output: [{ type: "text", text: "未配置 DEEPSEEK_API_KEY，无法抓取网页。" }] };
-				try {
-					const resp = await fetch("https://api.deepseek.com/v1/tools/fetch", {
-						method: "POST",
-						headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-						body: JSON.stringify({ url }),
-					});
-					const data = (await resp.json().catch(() => null)) as { title?: string; content?: string; error?: { message?: string } } | null;
-					if (!resp.ok) {
-						const msg = data?.error?.message ?? `HTTP ${resp.status}`;
-						return { output: [{ type: "text", text: `抓取失败：${msg}` }] };
-					}
-					const title = String(data?.title ?? "").trim();
-					const content = String(data?.content ?? "").trim();
-					if (!content) return { output: [{ type: "text", text: "页面没有可提取的正文。" }] };
-					return { output: [{ type: "text", text: (title ? `# ${title}\n\n` : "") + content.slice(0, 8000) }] };
-				} catch (e) {
-					return { output: [{ type: "text", text: "抓取失败：" + String(e).slice(0, 200) }] };
-				}
+				const fetched = await fetchPageMarkdown(url);
+				if (!fetched.ok) return { output: [{ type: "text", text: fetched.error }] };
+				const title = fetched.title;
+				const content = fetched.content;
+				return { output: [{ type: "text", text: (title ? `# ${title}\n\n` : "") + content.slice(0, 8000) }] };
 			},
 		}),
 		defineTool({
@@ -1695,20 +1794,12 @@ const baseSpikeExtension = defineExtension({
 				const title = String(a.title ?? "").trim().slice(0, 120);
 				const content = String(a.content ?? "").trim();
 				if (!title || !content) return { output: [{ type: "text", text: "标题和正文都不能为空。" }] };
-				const { id, chunks } = kbAddDoc(
+				const { id, chunks, vectorized } = await kbSaveDoc(
 					title,
 					content,
 					String(a.source ?? "").trim().slice(0, 300),
 					String(a.tags ?? "").trim().slice(0, 120),
 				);
-				let vectorized = 0;
-				if (kbRetrievalMode() !== "fts" && kbVectorAvailable()) {
-					try {
-						vectorized = await kbVectorIndexDoc(id);
-					} catch (err) {
-						console.warn("kb vector index failed", String(err).slice(0, 160));
-					}
-				}
 				return {
 					output: [
 						{
@@ -3710,16 +3801,62 @@ export class SpikeAgent extends DurableObject {
 				const title = String(body.title ?? "").trim().slice(0, 120);
 				const content = String(body.content ?? "").trim();
 				if (!title || !content) return Response.json({ error: "标题和正文都不能为空" }, { status: 400 });
-				const result = kbAddDoc(title, content, String(body.source ?? "").trim().slice(0, 300), String(body.tags ?? "").trim().slice(0, 120));
-				let vectorized = 0;
-				if (kbRetrievalMode() !== "fts" && kbVectorAvailable()) {
-					try {
-						vectorized = await kbVectorIndexDoc(result.id);
-					} catch (err) {
-						console.warn("kb vector index failed", String(err).slice(0, 160));
+				const result = await kbSaveDoc(title, content, String(body.source ?? "").trim().slice(0, 300), String(body.tags ?? "").trim().slice(0, 120));
+				return Response.json({ ok: true, ...result });
+			}
+			// 知识库导入（v0.55.0）：multipart 传文件，JSON 传链接。两条路径最终都走 kbSaveDoc。
+			if (url.pathname === "/kb/ingest" && request.method === "POST") {
+				ensureTables(sqlFacade!);
+				const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+				if (contentType.includes("multipart/form-data")) {
+					const declared = Number(request.headers.get("content-length") ?? 0);
+					if (declared > KB_INGEST_MAX_BYTES + 1024 * 1024) {
+						return Response.json({ error: "上传内容超过 20MB 上限，请拆分后再导入。" }, { status: 413 });
 					}
+					let form: FormData;
+					try {
+						form = await request.formData();
+					} catch {
+						return Response.json({ error: "无法读取上传内容，请重试。" }, { status: 400 });
+					}
+					const files = form.getAll("file").filter((value): value is File => typeof value === "object" && value !== null && "name" in value);
+					if (!files.length) return Response.json({ error: "没有收到文件。" }, { status: 400 });
+					if (files.length > KB_INGEST_MAX_FILES) {
+						return Response.json({ error: `一次最多导入 ${KB_INGEST_MAX_FILES} 个文件。` }, { status: 413 });
+					}
+					const tags = String(form.get("tags") ?? "").trim().slice(0, 120);
+					const docs: KbIngestOk[] = [];
+					const failed: KbIngestErr[] = [];
+					for (const file of files) {
+						const result = await kbIngestFile(file, tags);
+						if (result.ok) docs.push(result);
+						else failed.push(result);
+					}
+					if (!docs.length) {
+						return Response.json({ error: failed[0]!.error, failed: failed.map((item) => ({ name: item.name, error: item.error })) }, { status: failed[0]!.status });
+					}
+					return Response.json({ ok: true, docs, failed: failed.map((item) => ({ name: item.name, error: item.error })) });
 				}
-				return Response.json({ ok: true, ...result, vectorized });
+				if (contentType.includes("application/json")) {
+					const body = (await request.json().catch(() => ({}))) as { url?: string; tags?: string };
+					const target = String(body.url ?? "").trim().slice(0, 1000);
+					if (!/^https?:\/\//i.test(target)) return Response.json({ error: "链接必须以 http(s):// 开头" }, { status: 400 });
+					if (getSetting("web_search", "1") !== "1") {
+						return Response.json({ error: "网页抓取当前未开启；在 设置 → 网页搜索 中开启后重试。" }, { status: 400 });
+					}
+					const fetched = await fetchPageMarkdown(target);
+					if (!fetched.ok) return Response.json({ error: fetched.error }, { status: fetched.status });
+					let fallbackTitle = target;
+					try {
+						fallbackTitle = new URL(target).hostname;
+					} catch {
+						// target 已通过 http(s) 前缀校验，走到这里只可能是极端输入，用原链接当标题。
+					}
+					const title = (fetched.title || fallbackTitle).slice(0, 120);
+					const saved = await kbSaveDoc(title, fetched.content, target, String(body.tags ?? "").trim().slice(0, 120));
+					return Response.json({ ok: true, ...saved, title, chars: fetched.content.length, truncated: fetched.content.length > KB_MAX_CONTENT, source: target });
+				}
+				return Response.json({ error: "需要 multipart/form-data（文件）或 application/json（链接）" }, { status: 415 });
 			}
 			if (url.pathname === "/kb/doc" && request.method === "GET") {
 				ensureTables(sqlFacade!);

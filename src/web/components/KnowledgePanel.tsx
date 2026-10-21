@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { parseKbDocs, parseKbHits } from "../lib/collections";
 import { formatSize, formatTime } from "../lib/format";
@@ -8,7 +8,8 @@ import { Icon } from "./Icon";
 
 /**
  * 左栏「知识库」（v0.45.0）：每个用户一个独立库（后端按用户 DO 隔离）。
- * 支持检索、粘贴资料入库、查看与删除；模型侧对应 kb_search / kb_add。
+ * 支持检索、粘贴资料入库、查看与删除；v0.55.0 起支持文件与链接导入。
+ * 模型侧对应 kb_search / kb_add。
  */
 export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 	const [docs, setDocs] = useState<KbDocInfo[]>([]);
@@ -23,9 +24,13 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 	const [tags, setTags] = useState("");
 	const [content, setContent] = useState("");
 	const [busy, setBusy] = useState(false);
+	const [ingesting, setIngesting] = useState(false);
+	const [dragOver, setDragOver] = useState(false);
+	const [link, setLink] = useState("");
 	const [note, setNote] = useState("");
 	const [viewing, setViewing] = useState<{ title: string; content: string } | null>(null);
 	const [viewingBusy, setViewingBusy] = useState(false);
+	const fileInput = useRef<HTMLInputElement | null>(null);
 
 	const load = useCallback(() => {
 		setLoading(true);
@@ -87,6 +92,58 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 				setError(err instanceof Error ? err.message : String(err));
 			} finally {
 				setBusy(false);
+			}
+		})();
+	};
+
+	/** 导入成功后统一收尾：清空检索、刷新列表、报一句结果。 */
+	const finishIngest = (summary: string) => {
+		setNote(summary);
+		setHits(null);
+		setQuery("");
+		load();
+	};
+
+	/** 文件导入（v0.55.0）：服务端按扩展名转 Markdown 后入库，这里只负责把结果说清楚。 */
+	const ingestFiles = (picked: File[]) => {
+		if (!picked.length || ingesting) return;
+		setIngesting(true);
+		setNote("");
+		setError(null);
+		void (async () => {
+			try {
+				const data = await api.kbIngestFiles(picked, tags.trim());
+				const docs = data.docs ?? [];
+				const failed = data.failed ?? [];
+				if (docs.length) {
+					finishIngest(`已导入 ${docs.length} 个文件：${docs.map((doc) => `${doc.title ?? doc.name ?? "文档"}（${doc.chunks ?? 0} 段）`).join("、")}`);
+				}
+				if (failed.length) setError(failed.map((doc) => doc.error ?? `${doc.name ?? "文件"} 导入失败`).join("；"));
+			} catch (err) {
+				setError(err instanceof Error ? err.message : String(err));
+			} finally {
+				setIngesting(false);
+			}
+		})();
+	};
+
+	/** 链接导入（v0.55.0）：标题由服务端取页面 title，正文由 DeepSeek Fetch 抓取。 */
+	const ingestLink = () => {
+		const url = link.trim();
+		if (!url || ingesting) return;
+		setIngesting(true);
+		setNote("");
+		setError(null);
+		void (async () => {
+			try {
+				const data = await api.kbIngestUrl(url, tags.trim());
+				if (!data.ok || !data.id) throw new Error(data.error || "链接导入失败");
+				setLink("");
+				finishIngest(`已从链接导入「${data.title ?? url}」：${data.chunks ?? 0} 个片段${data.truncated ? "（正文超长，已截断）" : ""}`);
+			} catch (err) {
+				setError(err instanceof Error ? err.message : String(err));
+			} finally {
+				setIngesting(false);
 			}
 		})();
 	};
@@ -226,6 +283,84 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 						{busy ? "写入并索引中…" : "保存到知识库"}
 					</button>
 					<p className="text-[11px] leading-relaxed text-slate-500">自动按段切块并建立中文全文索引，保存后即可用自然语言检索。</p>
+
+					<div className="flex items-center gap-1.5 pt-1 text-[10.5px] text-slate-600">
+						<span className="h-px flex-1 bg-slate-800" />
+						或导入已有资料
+						<span className="h-px flex-1 bg-slate-800" />
+					</div>
+
+					<div
+						role="button"
+						tabIndex={0}
+						onClick={() => fileInput.current?.click()}
+						onKeyDown={(event) => {
+							if (event.key === "Enter" || event.key === " ") {
+								event.preventDefault();
+								fileInput.current?.click();
+							}
+						}}
+						onDragOver={(event) => {
+							event.preventDefault();
+							setDragOver(true);
+						}}
+						onDragLeave={() => setDragOver(false)}
+						onDrop={(event) => {
+							event.preventDefault();
+							setDragOver(false);
+							ingestFiles(Array.from(event.dataTransfer.files));
+						}}
+						aria-label="选择或拖入文件导入知识库"
+						className={`cursor-pointer rounded-lg border border-dashed px-2 py-3 text-center text-[11px] leading-relaxed transition-colors ${
+							dragOver
+								? "border-sky-400 bg-sky-950/40 text-sky-200"
+								: "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+						}`}
+					>
+						<Icon name="upload" className="mx-auto mb-1 h-4 w-4" />
+						{ingesting ? "导入中…" : "拖入或点击选择文件"}
+						<br />
+						PDF / MD / TXT / DOCX，单个 ≤ 20MB
+					</div>
+					<input
+						ref={fileInput}
+						type="file"
+						multiple
+						accept=".pdf,.md,.markdown,.txt,.docx"
+						className="hidden"
+						aria-label="选择要导入知识库的文件"
+						onChange={(event) => {
+							ingestFiles(Array.from(event.target.files ?? []));
+							event.target.value = "";
+						}}
+					/>
+
+					<div className="flex gap-1.5">
+						<input
+							value={link}
+							onChange={(event) => setLink(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Enter") {
+									event.preventDefault();
+									ingestLink();
+								}
+							}}
+							placeholder="粘贴网页链接导入…"
+							aria-label="网页链接"
+							className={inputClass}
+						/>
+						<button
+							type="button"
+							onClick={ingestLink}
+							disabled={ingesting || !link.trim()}
+							aria-label="从链接导入"
+							title="从链接导入"
+							className="inline-flex shrink-0 items-center gap-1 rounded-md bg-sky-700 px-2 py-1.5 text-xs font-medium text-white transition-colors hover:bg-sky-600 disabled:opacity-40"
+						>
+							<Icon name="link" className="h-3.5 w-3.5" />
+							导入
+						</button>
+					</div>
 				</div>
 			)}
 
@@ -258,7 +393,7 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 							<p className="px-1.5 py-6 text-center text-xs leading-relaxed text-slate-500">
 								知识库还是空的。
 								<br />
-								点右上角 + 粘贴资料，或让 π 把链接/文档用 kb_add 存进来。
+								点右上角 + 粘贴正文、拖入 PDF / MD 文件，或粘贴网页链接导入。
 							</p>
 						)}
 						<ul className="space-y-1">
