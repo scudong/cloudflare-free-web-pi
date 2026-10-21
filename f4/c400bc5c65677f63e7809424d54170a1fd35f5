@@ -1,0 +1,63 @@
+src/web/components/KnowledgePanel.tsx
+  65a98388a9d3101c 1-2,9,13,31-34,128-170,176-181,204-210,219-220,266-277,332-334,365-372
+src/web/lib/api.ts
+  65a98388a9d3101c 13,100-163,251-257
+src/web/components/Icon.tsx
+  65a98388a9d3101c 53,101
+tests/unit/ingest.test.ts
+  65a98388a9d3101c 1-164
+src/web/lib/ingest.ts
+  65a98388a9d3101c 1-236
+src/web/components/KbImport.tsx
+  65a98388a9d3101c 1-379
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "f4c400bc5c65677f63e7809424d54170a1fd35f5",
+  "prompts": {
+    "65a98388a9d3101c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "409a88fa-569f-4901-a375-c989e1077e38",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 953,
+      "total_deletions": 19,
+      "accepted_lines": 942,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/Icon.tsx": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/lib/ingest.ts": {
+          "additions": 237,
+          "deletions": 1,
+          "accepted_lines": 236
+        },
+        "tests/unit/ingest.test.ts": {
+          "additions": 164,
+          "accepted_lines": 164
+        },
+        "src/web/lib/api.ts": {
+          "additions": 73,
+          "deletions": 1,
+          "accepted_lines": 72
+        },
+        "src/web/components/KnowledgePanel.tsx": {
+          "additions": 95,
+          "deletions": 14,
+          "accepted_lines": 89
+        },
+        "src/web/components/KbImport.tsx": {
+          "additions": 382,
+          "deletions": 3,
+          "accepted_lines": 379
+        }
+      }
+    }
+  }
+}

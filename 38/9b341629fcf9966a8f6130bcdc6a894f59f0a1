@@ -1,0 +1,82 @@
+tests/api/api.test.ts
+  707bfb6c392ecc4e 389-457
+CHANGELOG.md
+  707bfb6c392ecc4e 7-15
+src/web/components/Icon.tsx
+  707bfb6c392ecc4e 53,100-101
+src/web/components/KnowledgePanel.tsx
+  707bfb6c392ecc4e 1,11-12,27-29,33,99-150,286-363,396
+src/worker.ts
+  707bfb6c392ecc4e 844-957,1719-1723,1797,3804-3816,3818-3849,3851-3853,3855-3857,3859
+docs/knowledge-base.md
+  707bfb6c392ecc4e 45-46,49-71,89-90,95
+src/web/lib/api.ts
+  707bfb6c392ecc4e 33-56,211-218
+tests/README.md
+  707bfb6c392ecc4e 66
+wrangler.test.jsonc
+  707bfb6c392ecc4e 6-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "389b341629fcf9966a8f6130bcdc6a894f59f0a1",
+  "prompts": {
+    "707bfb6c392ecc4e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4b1bc39-af51-46e4-aded-c8242839f881",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 469,
+      "total_deletions": 52,
+      "accepted_lines": 464,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/api.ts": {
+          "additions": 38,
+          "deletions": 6,
+          "accepted_lines": 36
+        },
+        "tests/api/api.test.ts": {
+          "additions": 69,
+          "accepted_lines": 69
+        },
+        "src/worker.ts": {
+          "additions": 176,
+          "deletions": 39,
+          "accepted_lines": 173
+        },
+        "docs/knowledge-base.md": {
+          "additions": 29,
+          "deletions": 3,
+          "accepted_lines": 29
+        },
+        "tests/README.md": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "wrangler.test.jsonc": {
+          "additions": 6,
+          "deletions": 1,
+          "accepted_lines": 6
+        },
+        "CHANGELOG.md": {
+          "additions": 9,
+          "accepted_lines": 9
+        },
+        "src/web/components/Icon.tsx": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "src/web/components/KnowledgePanel.tsx": {
+          "additions": 138,
+          "deletions": 3,
+          "accepted_lines": 138
+        }
+      }
+    }
+  }
+}

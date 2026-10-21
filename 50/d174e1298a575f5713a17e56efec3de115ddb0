@@ -1,0 +1,94 @@
+src/web/components/MessageList.tsx
+  8df9e27cb803c3f4 8,78-84
+src/web/App.tsx
+  8df9e27cb803c3f4 20,25,278-279,297,311,410-415,433
+tests/api/api.test.ts
+  8df9e27cb803c3f4 107-123,493-509,690-693,877-879
+src/web/components/ShareCard.tsx
+  8df9e27cb803c3f4 1-80
+CHANGELOG.md
+  8df9e27cb803c3f4 7-15
+src/web/components/SettingsDialog.tsx
+  8df9e27cb803c3f4 211-303,943
+src/web/lib/entries.ts
+  8df9e27cb803c3f4 1,88-109,157-158,179-180,198-199,207,242-244
+src/worker.ts
+  8df9e27cb803c3f4 42-45,318-319,486,1750-1803,1832-1850,2356-2363,2368-2375,2380,2395-2512,2881-2882,2889-2890,2983-2985,3206,3214,3217,3276,3304-3307,3624-3625,3627-3628,3633,3755-3757,3767-3776,4236,4480-4481,4485-4492,4503-4507,4556-4557
+src/web/types.ts
+  8df9e27cb803c3f4 29-37,51-52
+tests/unit/entries.test.ts
+  8df9e27cb803c3f4 2,84-146
+src/web/lib/api.ts
+  8df9e27cb803c3f4 311-314,325-326
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "50d174e1298a575f5713a17e56efec3de115ddb0",
+  "prompts": {
+    "8df9e27cb803c3f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d3f209d8-7cfe-4b3c-9af3-8389de26129c",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 636,
+      "total_deletions": 68,
+      "accepted_lines": 628,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/api.ts": {
+          "additions": 6,
+          "accepted_lines": 6
+        },
+        "src/web/components/MessageList.tsx": {
+          "additions": 8,
+          "accepted_lines": 8
+        },
+        "src/web/components/ShareCard.tsx": {
+          "additions": 80,
+          "accepted_lines": 80
+        },
+        "src/web/lib/entries.ts": {
+          "additions": 33,
+          "deletions": 1,
+          "accepted_lines": 33
+        },
+        "src/web/types.ts": {
+          "additions": 11,
+          "accepted_lines": 11
+        },
+        "tests/api/api.test.ts": {
+          "additions": 44,
+          "deletions": 3,
+          "accepted_lines": 43
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 94,
+          "accepted_lines": 94
+        },
+        "src/web/App.tsx": {
+          "additions": 13,
+          "deletions": 2,
+          "accepted_lines": 13
+        },
+        "CHANGELOG.md": {
+          "additions": 9,
+          "accepted_lines": 9
+        },
+        "src/worker.ts": {
+          "additions": 274,
+          "deletions": 59,
+          "accepted_lines": 267
+        },
+        "tests/unit/entries.test.ts": {
+          "additions": 64,
+          "deletions": 3,
+          "accepted_lines": 64
+        }
+      }
+    }
+  }
+}
