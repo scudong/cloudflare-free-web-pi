@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #e9e7e1; }
+  .cover {
+    width: 1080px; height: 1440px; position: relative; overflow: hidden;
+    background: #f7f6f2;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+    color: #14181f;
+    padding: 78px 80px;
+  }
+  .cover::before {
+    content: ""; position: absolute; right: -180px; top: -160px; width: 620px; height: 620px;
+    border-radius: 999px; background: var(--glow); filter: blur(90px); opacity: .5;
+  }
+  .top { display: flex; align-items: center; gap: 18px; position: relative; z-index: 2; }
+  .pi {
+    width: 62px; height: 62px; border-radius: 18px; background: #0b1220;
+    display: flex; align-items: center; justify-content: center;
+    color: #7dd3fc; font-size: 36px; font-weight: 700;
+  }
+  .brand { font-size: 24px; font-weight: 600; color: #3a4350; letter-spacing: -.2px; }
+  h1 {
+    position: relative; z-index: 2;
+    margin: 74px 0 0; font-size: 84px; line-height: 1.16; letter-spacing: -3px; font-weight: 800;
+  }
+  h1 em { font-style: normal; color: var(--accent); }
+  .sub {
+    position: relative; z-index: 2;
+    margin: 30px 0 0; font-size: 31px; line-height: 1.55; color: #5b6472; font-weight: 500;
+    max-width: 880px;
+  }
+  .shot {
+    position: relative; z-index: 2;
+    margin-top: 62px; width: 960px; height: 520px; border-radius: 26px; overflow: hidden;
+    border: 1px solid #d9d6ce; background: #fff;
+    box-shadow: 0 28px 60px rgba(20, 24, 31, .16), 0 2px 0 rgba(255,255,255,.8) inset;
+    transform: rotate(-1.6deg);
+  }
+  .shot img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: var(--pos, center top); }
+  .tag {
+    position: absolute; left: 80px; bottom: 116px; z-index: 2;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .pill {
+    font-size: 23px; padding: 12px 22px; border-radius: 999px;
+    background: #fff; border: 1px solid #dcd9d1; color: #3a4350; font-weight: 600;
+  }
+  .pill.hot { background: var(--accentSoft); border-color: var(--accentBorder); color: var(--accentDeep); }
+  .url {
+    position: absolute; left: 80px; bottom: 56px; z-index: 2;
+    font-size: 20px; color: #8a909a;
+  }
+  .v1 { --accent: #0284c7; --accentDeep: #075985; --accentSoft: #e0f2fe; --accentBorder: #bae6fd; --glow: #7dd3fc; }
+  .v2 { --accent: #059669; --accentDeep: #065f46; --accentSoft: #d1fae5; --accentBorder: #a7f3d0; --glow: #6ee7b7; }
+  .v3 { --accent: #7c3aed; --accentDeep: #5b21b6; --accentSoft: #ede9fe; --accentBorder: #ddd6fe; --glow: #c4b5fd; }
+</style>
+</head>
+<body>
+  <section class="cover v1">
+    <div class="top"><div class="pi">π</div><div class="brand">Cloudflare Free Web Pi</div></div>
+    <h1>我把 AI 助手<br>做成了<em>自己的网站</em></h1>
+    <p class="sub">关掉网页也不丢，资料、文件、知识库都在自己的云里。</p>
+    <div class="shot" style="--pos: left top"><img src="/docs/screenshot.png" alt="" /></div>
+    <div class="tag"><span class="pill hot">开源</span><span class="pill">1 个 Worker</span><span class="pill">0 台服务器</span></div>
+    <div class="url">github.com/scudong/cloudflare-free-web-pi</div>
+  </section>
+
+  <section class="cover v2">
+    <div class="top"><div class="pi">π</div><div class="brand">Cloudflare Free Web Pi</div></div>
+    <h1>AI 写完的报告<br><em>一键变成</em>分享链接</h1>
+    <p class="sub">带有效期、带目录，对方不用登录就能打开。</p>
+    <div class="shot" style="--pos: right top"><img src="/docs/screenshot.png" alt="" /></div>
+    <div class="tag"><span class="pill hot">Markdown / HTML</span><span class="pill">1 小时到永久</span><span class="pill">四套配色</span></div>
+    <div class="url">github.com/scudong/cloudflare-free-web-pi</div>
+  </section>
+
+  <section class="cover v3">
+    <div class="top"><div class="pi">π</div><div class="brand">Cloudflare Free Web Pi</div></div>
+    <h1>给同事发个邀请码<br>每人一个<em>AI 空间</em></h1>
+    <p class="sub">会话、文件、记忆、知识库全部隔离，谁也不用看谁的历史。</p>
+    <div class="shot" style="--pos: center top"><img src="/docs/screenshot.png" alt="" /></div>
+    <div class="tag"><span class="pill hot">独立空间</span><span class="pill">邀请码</span><span class="pill">随时收回</span></div>
+    <div class="url">github.com/scudong/cloudflare-free-web-pi</div>
+  </section>
+</body>
+</html>
