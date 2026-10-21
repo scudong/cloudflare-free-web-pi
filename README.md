@@ -58,7 +58,7 @@ npx wrangler dev     # Worker + Durable Objects: http://localhost:8787
 
 Open `http://localhost:5173`, enter the password, and start a conversation. The full Chinese setup guide, feature table, and HTTP API reference are in [README.zh-CN.md](README.zh-CN.md).
 
-Run the golden tests with `npm test` — 128 unit, API, and multi-user isolation tests, including real `wrangler dev` instances (about 40 seconds).
+Run the golden tests with `npm test` — unit, API, and multi-user isolation cases, including real `wrangler dev` instances (about 40 seconds). The deploy badge above is the source of truth for pass/fail; this README does not track a test count.
 
 ## How it works
 
@@ -78,7 +78,7 @@ npx wrangler secret put ACCESS_PASSWORD
 npx wrangler deploy
 ```
 
-Or push to `main` and let GitHub Actions deploy. Add `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `SMOKE_PASSWORD` to the repository secrets; CI runs the 128 tests, deploys, and smoke-tests the live Worker.
+Or push to `main` and let GitHub Actions deploy. Add `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `SMOKE_PASSWORD` to the repository secrets; CI runs the test suite, deploys, and smoke-tests the live Worker.
 
 ## Is it for you?
 

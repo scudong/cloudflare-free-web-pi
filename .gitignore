@@ -4,3 +4,4 @@ dist-web/
 .dev.vars
 *.log
 tests/.tmp-state*/
+.vitest/

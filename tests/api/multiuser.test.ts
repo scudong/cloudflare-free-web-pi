@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stopServer } from "./teardown";
 
 /**
  * 多用户隔离（v0.45.0）：知识库与文件都落在各自 DO，
@@ -71,15 +72,8 @@ beforeAll(async () => {
 	expect(userCookie).toMatch(/^pi_access=u_/);
 });
 
-afterAll(() => {
-	if (proc?.pid) {
-		try {
-			process.kill(-proc.pid, "SIGTERM");
-		} catch {
-			proc.kill("SIGTERM");
-		}
-	}
-	rmSync(STATE, { recursive: true, force: true });
+afterAll(async () => {
+	await stopServer(proc, STATE);
 });
 
 describe("多用户隔离", () => {
