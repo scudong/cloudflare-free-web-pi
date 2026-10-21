@@ -34,6 +34,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # deploy job 是独立 runner：必须重新构建静态资产，否则 wrangler 找不到 dist-web
+      - run: npm run build:web --if-present
       - run: npx wrangler deploy --var BUILD:${{ github.sha }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

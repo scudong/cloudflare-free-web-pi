@@ -4,6 +4,11 @@
 
 ## 2026-10-21（公开发布准备）
 
+### 修复 deploy job 缺少前端构建（v0.54.2）
+- PR #3 把 workflow 拆成 test / deploy 两个 job 后，deploy job 只跑了 `npm ci`，没有重新构建 `dist-web`
+- wrangler 因 `assets.directory` 不存在而失败；deploy job 补上 `npm run build:web`
+- 测试 job 不受影响
+
 ### 向量检索过滤回退（v0.54.1）
 - Vectorize 查询先按 `scope` 过滤；元数据索引尚未生效时退化为无过滤查询，再在 Worker 侧按 scope 过滤
 - 保证多用户共享同一索引时不串数据，同时避免元数据索引创建延迟导致向量检索为空
