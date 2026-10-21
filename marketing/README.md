@@ -7,6 +7,7 @@
 | [01-selling-points.md](01-selling-points.md) | 一句话定位、目标人群、核心卖点、技术亮点、与常见方案的差异、可验证证据 |
 | [02-repo-name.md](02-repo-name.md) | 仓库改名候选、推荐名、改名清单 |
 | [03-launch-copy.md](03-launch-copy.md) | X 与小红书的现成文案（含英文 thread） |
+| [04-demo-plan.md](04-demo-plan.md) | 公开演示的三种方案、45 秒录屏分镜、发布节奏 |
 
 ## 一句话
 
