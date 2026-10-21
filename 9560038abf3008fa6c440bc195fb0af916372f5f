@@ -1,0 +1,37 @@
+marketing/assets/xhs-covers.html
+  00512495ff504ece 1-90
+marketing/05-traffic-playbook.md
+  00512495ff504ece 1-87,91-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "9560038abf3008fa6c440bc195fb0af916372f5f",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 210,
+      "total_deletions": 2,
+      "accepted_lines": 205,
+      "overriden_lines": 3,
+      "per_file_stats": {
+        "marketing/05-traffic-playbook.md": {
+          "additions": 118,
+          "accepted_lines": 115,
+          "overriden_lines": 3
+        },
+        "marketing/assets/xhs-covers.html": {
+          "additions": 92,
+          "deletions": 2,
+          "accepted_lines": 90
+        }
+      }
+    }
+  }
+}
