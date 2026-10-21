@@ -966,12 +966,16 @@ async function vectorDelete(ids: string[]): Promise<void> {
 async function vectorQuery(values: number[], topK: number): Promise<KbVectorMatch[]> {
 	const bindings = kbVectorBindings();
 	if (!bindings) throw new Error("未配置向量检索");
-	const data = await bindings.vec.query(values, {
+	const scopeId = kbScopeId();
+	// 先按 scope 过滤；元数据索引尚未生效时退化为无过滤查询，再在 Worker 侧按 scope 过滤。
+	const filtered = await bindings.vec.query(values, {
 		topK,
 		returnMetadata: "all",
-		filter: { scope: { $eq: kbScopeId() } },
+		filter: { scope: { $eq: scopeId } },
 	});
-	return data.matches ?? [];
+	if ((filtered.matches ?? []).length) return filtered.matches ?? [];
+	const loose = await bindings.vec.query(values, { topK: Math.min(topK * 5, 50), returnMetadata: "all" });
+	return (loose.matches ?? []).filter((match) => match.metadata?.scope === scopeId);
 }
 
 /** 把未建向量的分块写入 Vectorize（单次最多 100 段，避免一次请求太久）。 */

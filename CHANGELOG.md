@@ -4,6 +4,12 @@
 
 ## 2026-10-21（公开发布准备）
 
+### 向量检索过滤回退（v0.54.1）
+- Vectorize 查询先按 `scope` 过滤；元数据索引尚未生效时退化为无过滤查询，再在 Worker 侧按 scope 过滤
+- 保证多用户共享同一索引时不串数据，同时避免元数据索引创建延迟导致向量检索为空
+- 生产实测：临时文档「量子纠缠…」向量命中 score 0.797；临时文档、向量与模式已清理
+- 128 条金标全过
+
 ### 测试收尾竞态 + 门户面清理（v0.54.0）
 - 修掉 `npm test` 本地跑不出一份全绿的根因：两个 API 测试的 `afterAll` 先 `kill` 再立刻 `rmSync` persist 目录，workerd 还在落盘 → `ENOTEMPTY`，vitest 记成「整个文件失败」，即使 128 条用例全部通过
 - 新增 `tests/api/teardown.ts`：等 detached 进程组退出（SIGTERM → 5s → SIGKILL）后再删目录，删不掉就重试；连续 3 次 `npm test` 均 exit 0 / 128 passed
