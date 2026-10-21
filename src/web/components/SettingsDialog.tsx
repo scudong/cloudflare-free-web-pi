@@ -14,6 +14,15 @@ type ProviderInfo = {
 	active?: boolean;
 };
 
+type CheckState = "loading" | "ok" | "warning" | "error";
+
+type DeploymentCheckRow = {
+	label: string;
+	state: CheckState;
+	detail: string;
+	fix?: string;
+};
+
 type SettingsTab = "general" | "chat" | "model" | "memory" | "data";
 
 interface SettingsDialogProps {
@@ -89,6 +98,113 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 			<h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{title}</h2>
 			{children}
 		</section>
+	);
+}
+
+function DeploymentCheck() {
+	const [rows, setRows] = useState<DeploymentCheckRow[]>([]);
+	const [checking, setChecking] = useState(false);
+
+	const check = async () => {
+		setChecking(true);
+		setRows([
+			{ label: "模型密钥", state: "loading", detail: "正在检查…" },
+			{ label: "模型供应商", state: "loading", detail: "正在检查…" },
+			{ label: "知识库检索", state: "loading", detail: "正在检查…" },
+			{ label: "分享域名", state: "loading", detail: "正在检查…" },
+			{ label: "线上构建号", state: "loading", detail: "正在检查…" },
+		]);
+
+		const [providers, models, kb, settings, version] = await Promise.allSettled([
+			api.providers(),
+			api.models(),
+			api.kbStatus(),
+			api.settings(),
+			api.version(),
+		]);
+		const providerData = providers.status === "fulfilled" ? providers.value : null;
+		const modelData = models.status === "fulfilled" ? models.value : null;
+		const kbData = kb.status === "fulfilled" ? kb.value : null;
+		const settingsData = settings.status === "fulfilled" ? settings.value : null;
+		const versionData = version.status === "fulfilled" ? version.value : null;
+		const activeId = providerData?.active || modelData?.provider || providerData?.default?.id || "";
+		const customProvider = providerData?.providers?.find((provider) => provider.id === activeId);
+		const defaultProvider = !customProvider && providerData?.default?.id === activeId ? providerData.default : null;
+		// `hasKey` 是已有 providers 响应在可提供时的非敏感布尔值；绝不读取或展示密钥本身。
+		const hasKey = customProvider?.hasKey ?? defaultProvider?.hasKey;
+		const providerReachable = Boolean(providerData && modelData && activeId);
+		const kbMode = settingsData?.kbRetrieval ?? kbData?.mode;
+		const kbReady = Boolean(kbData && (kbMode === "fts" || kbData.available));
+		const origin = typeof window === "undefined" ? "" : window.location.origin;
+		const build = versionData?.build?.trim() ?? "";
+
+		setRows([
+			{
+				label: "模型密钥",
+				state: hasKey === false ? "warning" : hasKey === true ? "ok" : providerData ? "warning" : "error",
+				detail:
+					hasKey === false
+						? "未配置 DeepSeek API Key。"
+						: hasKey === true
+							? "已配置，密钥不会在浏览器中显示。"
+							: providerData
+								? "默认供应商未返回密钥状态，请在本地或部署配置中确认。"
+								: "无法读取模型配置。",
+				fix: hasKey === false || hasKey === undefined ? "npx wrangler secret put DEEPSEEK_API_KEY" : undefined,
+			},
+			{
+				label: "模型供应商",
+				state: providerReachable ? "ok" : "error",
+				detail: providerReachable ? `当前使用 ${activeId}。` : "模型供应商接口不可用。",
+				fix: providerReachable ? undefined : "在设置 → 模型中配置供应商后重试。",
+			},
+			{
+				label: "知识库检索",
+				state: kbReady ? "ok" : kbData ? "warning" : "error",
+				detail: kbReady ? `检索模式：${kbMode ?? "fts"}。` : kbData ? "向量检索绑定未启用。" : "无法读取知识库状态。",
+				fix: kbReady ? undefined : "检查 AI / KB_VEC 绑定，或在设置中切换为 FTS。",
+			},
+			{
+				label: "分享域名",
+				state: origin ? "ok" : "error",
+				detail: origin ? `公开链接将使用 ${origin}。` : "无法识别当前站点域名。",
+			},
+			{
+				label: "线上构建号",
+				state: build && build !== "dev" ? "ok" : build ? "warning" : "error",
+				detail: build ? (build === "dev" ? "当前为本地开发构建。" : `SHA：${build.slice(0, 7)}。`) : "无法读取构建号。",
+				fix: build && build !== "dev" ? undefined : "重新部署后确认 BUILD 注入了当前提交 SHA。",
+			},
+		]);
+		setChecking(false);
+	};
+
+	useEffect(() => {
+		void check();
+	}, []);
+
+	const icon = (state: CheckState) => (state === "ok" ? "✅" : state === "loading" ? "…" : "⚠️");
+	return (
+		<Section title="部署自检">
+			<p className="mb-3 text-xs leading-relaxed text-slate-500">检查当前浏览器可访问的既有接口；不会发送聊天请求，也不会暴露密钥。</p>
+			<ul className="space-y-2" aria-live="polite">
+				{rows.map((row) => (
+					<li key={row.label} className="rounded-lg border border-slate-700/80 bg-slate-800/40 px-3 py-2 text-xs">
+						<div className="flex items-start gap-2">
+							<span aria-hidden>{icon(row.state)}</span>
+							<div className="min-w-0">
+								<p className="font-medium text-slate-200">{row.label}</p>
+								<p className="mt-0.5 leading-relaxed text-slate-400">{row.detail}</p>
+								{row.fix && <code className="mt-1 block break-all rounded bg-slate-950/60 px-1.5 py-1 text-[11px] text-sky-300">{row.fix}</code>}
+							</div>
+						</div>
+					</li>
+				))}
+			</ul>
+			<button type="button" onClick={() => void check()} disabled={checking} className="mt-3 rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-300 transition-colors hover:bg-sky-500/20 disabled:opacity-50">
+				{checking ? "检查中…" : "重新检查"}
+			</button>
+		</Section>
 	);
 }
 
@@ -462,6 +578,8 @@ export function SettingsDialog({
 									</div>
 								</div>
 							</Section>
+
+							<DeploymentCheck />
 
 							{authRequired && (
 								<Section title="账号">

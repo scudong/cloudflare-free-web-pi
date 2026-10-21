@@ -138,6 +138,8 @@ export default function App() {
 
 	// Chat state
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
+	/** 空会话起步卡写入 Composer 的草稿。 */
+	const [starterDraft, setStarterDraft] = useState<string | null>(null);
 	const [pending, setPending] = useState(false);
 	const [elapsed, setElapsed] = useState(0);
 	const [online, setOnline] = useState(true);
@@ -1566,6 +1568,7 @@ export default function App() {
 							files={files}
 							onOpenFile={handleOpenFileFromChat}
 							onBranch={handleBranch}
+							onStartPrompt={setStarterDraft}
 						/>
 						{goal && <GoalBar goal={goal} onStop={() => void handleStopGoal()} onNew={() => setGoalDialogOpen(true)} />}
 						<ApprovalBar approvals={approvals} busy={approvalBusy || pending} onDecide={handleDecideApproval} />
@@ -1586,6 +1589,7 @@ export default function App() {
 							thinkingLevel={thinkingLevel}
 							onThinkingLevelChange={handleChangeThinkingLevel}
 							contextTick={contextTick}
+							draft={starterDraft}
 						/>
 					</section>
 				)}

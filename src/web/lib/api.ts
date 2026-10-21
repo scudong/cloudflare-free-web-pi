@@ -194,6 +194,8 @@ export const api = {
 			withQuery("/api/kb/reindex", { limit: limit ? String(limit) : "" }),
 			{ method: "POST" },
 		),
+	/** 当前部署构建号（/api/version 转发到既有 DO 路由）。 */
+	version: () => requestJson<{ build?: string; images?: boolean; search?: boolean }>("/api/version"),
 
 	auth: () => requestJson<{ required?: boolean; authenticated?: boolean; owner?: boolean }>("/api/auth"),
 
@@ -275,8 +277,8 @@ export const api = {
 	providers: () =>
 		requestJson<{
 			active?: string;
-			default?: { id: string; name: string; models: string[] };
-			providers?: { id: string; name: string; baseUrl: string; models: string[]; keyHint?: string; active?: boolean }[];
+			default?: { id: string; name: string; models: string[]; hasKey?: boolean };
+			providers?: { id: string; name: string; baseUrl: string; models: string[]; hasKey?: boolean; keyHint?: string; active?: boolean }[];
 		}>("/api/providers"),
 
 	saveProvider: (body: { id?: string; name: string; baseUrl: string; apiKey?: string; models: string }) =>
