@@ -1,0 +1,103 @@
+src/web/App.tsx
+  00512495ff504ece 13,17,72-78,85-87,434,482-499,552-600,968-983,1093-1099,1151,1209-1210
+src/web/lib/collections.ts
+  00512495ff504ece 1,114-131
+tests/api/api.test.ts
+  00512495ff504ece 173-235,258
+src/web/lib/template.ts
+  00512495ff504ece 1-22
+tests/unit/template.test.ts
+  00512495ff504ece 1-29
+src/web/lib/api.ts
+  00512495ff504ece 156-183,228-233,235-239
+src/web/components/Composer.tsx
+  00512495ff504ece 3-4,13-14,69,80-84,86-87,90,96-97,101-102,107,167,186,201-202,247-248,250-251,253,260,267,270-272,328
+src/web/types.ts
+  00512495ff504ece 90-103
+src/web/components/Rail.tsx
+  00512495ff504ece 52
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 38-40,111-112,358-394
+src/worker.ts
+  00512495ff504ece 64-66,123-169,771,1091-1095,1128-1129,1204-1221,1530-1533,1854-1932,1936-1940,1948-1965,1967-1968,1973,1976-1983
+src/web/components/LeftPanels.tsx
+  00512495ff504ece 4,287-293,301-308,488-562,567-653
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "05dfe2e31efc0e23009b17aeaa12bc83f177e686",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 752,
+      "total_deletions": 37,
+      "accepted_lines": 752,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/worker.ts": {
+          "additions": 196,
+          "deletions": 2,
+          "accepted_lines": 196
+        },
+        "src/web/components/Rail.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/App.tsx": {
+          "additions": 107,
+          "deletions": 3,
+          "accepted_lines": 107
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 21,
+          "deletions": 1,
+          "accepted_lines": 21
+        },
+        "tests/unit/template.test.ts": {
+          "additions": 29,
+          "accepted_lines": 29
+        },
+        "src/web/lib/template.ts": {
+          "additions": 22,
+          "accepted_lines": 22
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 181,
+          "deletions": 1,
+          "accepted_lines": 181
+        },
+        "tests/api/api.test.ts": {
+          "additions": 64,
+          "deletions": 1,
+          "accepted_lines": 64
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 45,
+          "accepted_lines": 45
+        },
+        "src/web/components/Composer.tsx": {
+          "additions": 33,
+          "deletions": 25,
+          "accepted_lines": 33
+        },
+        "src/web/lib/api.ts": {
+          "additions": 39,
+          "deletions": 3,
+          "accepted_lines": 39
+        },
+        "src/web/types.ts": {
+          "additions": 14,
+          "accepted_lines": 14
+        }
+      }
+    }
+  }
+}

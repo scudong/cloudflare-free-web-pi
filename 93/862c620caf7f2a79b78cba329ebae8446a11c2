@@ -1,0 +1,127 @@
+README.md
+  00512495ff504ece 21-22,26,98-100,121,129
+CHANGELOG.md
+  00512495ff504ece 7-30
+src/web/lib/collections.ts
+  00512495ff504ece 1,149-188
+tests/api/api.test.ts
+  00512495ff504ece 259,282-385,600-603
+src/web/components/Icon.tsx
+  00512495ff504ece 3,75
+src/web/App.tsx
+  00512495ff504ece 15-16,126-127,219,1080-1093,1430-1438,1586
+src/web/components/FilesPanel.tsx
+  00512495ff504ece 1-149
+src/web/components/Rail.tsx
+  00512495ff504ece 3,50-51
+src/web/components/KnowledgePanel.tsx
+  00512495ff504ece 1-294
+src/worker.ts
+  00512495ff504ece 114-119,287-290,464,720-858,1406-1471,2469-2471,2537,2591-2599,3388-3436
+tests/api/multiuser.test.ts
+  00512495ff504ece 1-141
+docs/knowledge-base.md
+  00512495ff504ece 1-58
+scripts/smoke.mjs
+  00512495ff504ece 111
+src/web/lib/api.ts
+  00512495ff504ece 176-189
+src/web/components/Workbench.tsx
+  00512495ff504ece 12-13,256,281-282,288
+src/web/types.ts
+  00512495ff504ece 165-194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "93862c620caf7f2a79b78cba329ebae8446a11c2",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 1190,
+      "total_deletions": 11,
+      "accepted_lines": 1188,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/Workbench.tsx": {
+          "additions": 6,
+          "deletions": 1,
+          "accepted_lines": 6
+        },
+        "README.md": {
+          "additions": 8,
+          "deletions": 4,
+          "accepted_lines": 8
+        },
+        "src/web/App.tsx": {
+          "additions": 30,
+          "deletions": 1,
+          "accepted_lines": 29
+        },
+        "src/web/components/KnowledgePanel.tsx": {
+          "additions": 294,
+          "accepted_lines": 294
+        },
+        "src/web/components/FilesPanel.tsx": {
+          "additions": 150,
+          "deletions": 1,
+          "accepted_lines": 149
+        },
+        "src/web/components/Icon.tsx": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "src/worker.ts": {
+          "additions": 278,
+          "accepted_lines": 278
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 41,
+          "deletions": 1,
+          "accepted_lines": 41
+        },
+        "tests/api/api.test.ts": {
+          "additions": 109,
+          "deletions": 1,
+          "accepted_lines": 109
+        },
+        "docs/knowledge-base.md": {
+          "additions": 58,
+          "accepted_lines": 58
+        },
+        "scripts/smoke.mjs": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "CHANGELOG.md": {
+          "additions": 24,
+          "accepted_lines": 24
+        },
+        "tests/api/multiuser.test.ts": {
+          "additions": 141,
+          "accepted_lines": 141
+        },
+        "src/web/lib/api.ts": {
+          "additions": 15,
+          "accepted_lines": 15
+        },
+        "src/web/types.ts": {
+          "additions": 30,
+          "accepted_lines": 30
+        },
+        "src/web/components/Rail.tsx": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 3
+        }
+      }
+    }
+  }
+}

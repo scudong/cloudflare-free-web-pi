@@ -1,0 +1,131 @@
+src/web/components/Composer.tsx
+  00512495ff504ece 1-74
+src/web/components/TopBar.tsx
+  00512495ff504ece 1-40
+src/web/styles/index.css
+  00512495ff504ece 1-40
+src/web/main.tsx
+  00512495ff504ece 1-13
+src/web/index.html
+  00512495ff504ece 1-15
+src/web/lib/entries.ts
+  00512495ff504ece 1-84
+src/web/types.ts
+  00512495ff504ece 1-12
+src/web/lib/api.ts
+  00512495ff504ece 1-70
+wrangler.jsonc
+  00512495ff504ece 7-8
+src/web/tsconfig.json
+  00512495ff504ece 1-20
+src/web/App.tsx
+  00512495ff504ece 1-172
+src/web/lib/rich.tsx
+  00512495ff504ece 1-25
+src/web/components/MessageList.tsx
+  00512495ff504ece 1-138
+package.json
+  00512495ff504ece 7-9,17-19,23-27,29
+src/web/vite.config.mts
+  00512495ff504ece 1-22
+src/web/components/ToolBar.tsx
+  00512495ff504ece 1-20
+src/worker.ts
+  00512495ff504ece 165-167,184,187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "413f8fb33c9aa959f1cc39c333a71c150f5b9fe9",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 769,
+      "total_deletions": 9,
+      "accepted_lines": 764,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/tsconfig.json": {
+          "additions": 20,
+          "accepted_lines": 20
+        },
+        "wrangler.jsonc": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "src/web/components/TopBar.tsx": {
+          "additions": 40,
+          "accepted_lines": 40
+        },
+        "src/web/styles/index.css": {
+          "additions": 40,
+          "accepted_lines": 40
+        },
+        "src/web/components/ToolBar.tsx": {
+          "additions": 20,
+          "accepted_lines": 20
+        },
+        "src/web/components/MessageList.tsx": {
+          "additions": 138,
+          "accepted_lines": 138
+        },
+        "src/web/components/Composer.tsx": {
+          "additions": 74,
+          "accepted_lines": 74
+        },
+        "src/worker.ts": {
+          "additions": 5,
+          "deletions": 2,
+          "accepted_lines": 5
+        },
+        "src/web/main.tsx": {
+          "additions": 13,
+          "accepted_lines": 13
+        },
+        "src/web/App.tsx": {
+          "additions": 172,
+          "accepted_lines": 172
+        },
+        "src/web/lib/api.ts": {
+          "additions": 70,
+          "accepted_lines": 70
+        },
+        "src/web/vite.config.mts": {
+          "additions": 23,
+          "deletions": 1,
+          "accepted_lines": 22
+        },
+        "src/web/types.ts": {
+          "additions": 13,
+          "deletions": 1,
+          "accepted_lines": 12
+        },
+        "src/web/index.html": {
+          "additions": 15,
+          "accepted_lines": 15
+        },
+        "src/web/lib/entries.ts": {
+          "additions": 85,
+          "deletions": 1,
+          "accepted_lines": 84
+        },
+        "src/web/lib/rich.tsx": {
+          "additions": 25,
+          "accepted_lines": 25
+        },
+        "package.json": {
+          "additions": 13,
+          "deletions": 3,
+          "accepted_lines": 12
+        }
+      }
+    }
+  }
+}

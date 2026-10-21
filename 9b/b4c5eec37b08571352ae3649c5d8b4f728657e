@@ -1,0 +1,114 @@
+src/web/lib/localStore.ts
+  00512495ff504ece 1-23
+src/web/lib/rich.tsx
+  00512495ff504ece 26-93
+src/web/components/Sidebar.tsx
+  00512495ff504ece 1-119
+src/web/components/Workbench.tsx
+  00512495ff504ece 1-333
+src/web/types.ts
+  00512495ff504ece 1,5,8,14-34
+src/worker.ts
+  00512495ff504ece 198-199
+src/web/lib/api.ts
+  00512495ff504ece 2-4,41,57-74,78-92,94,96,98
+src/web/lib/entries.ts
+  00512495ff504ece 77,79-80
+src/web/components/TopBar.tsx
+  00512495ff504ece 3-8,11-12,14-47,49-56,63,71-93
+src/web/lib/collections.ts
+  00512495ff504ece 1-72
+src/web/App.tsx
+  00512495ff504ece 3,6-8,11-14,17-21,23,28-35,39-63,74,76,81,88-89,94,112-133,135-161,165,167,181,197,211-212,217,220,225,235,243,248-265,273-278,280-329,331-350,352-360,362-446
+src/web/lib/useMediaQuery.ts
+  00512495ff504ece 1-21
+src/web/components/ChatHeader.tsx
+  00512495ff504ece 1-24
+src/web/components/ToolBar.tsx
+  00512495ff504ece 1,4-46,52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "9bb4c5eec37b08571352ae3649c5d8b4f728657e",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 1169,
+      "total_deletions": 84,
+      "accepted_lines": 1156,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/ChatHeader.tsx": {
+          "additions": 24,
+          "accepted_lines": 24
+        },
+        "src/web/lib/rich.tsx": {
+          "additions": 68,
+          "accepted_lines": 68
+        },
+        "src/web/components/ToolBar.tsx": {
+          "additions": 45,
+          "deletions": 9,
+          "accepted_lines": 45
+        },
+        "src/web/lib/localStore.ts": {
+          "additions": 23,
+          "accepted_lines": 23
+        },
+        "src/web/lib/api.ts": {
+          "additions": 42,
+          "deletions": 13,
+          "accepted_lines": 41
+        },
+        "src/web/lib/useMediaQuery.ts": {
+          "additions": 21,
+          "accepted_lines": 21
+        },
+        "src/worker.ts": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/components/Sidebar.tsx": {
+          "additions": 119,
+          "accepted_lines": 119
+        },
+        "src/web/components/Workbench.tsx": {
+          "additions": 333,
+          "accepted_lines": 333
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 82,
+          "deletions": 10,
+          "accepted_lines": 72
+        },
+        "src/web/types.ts": {
+          "additions": 24,
+          "deletions": 2,
+          "accepted_lines": 24
+        },
+        "src/web/components/TopBar.tsx": {
+          "additions": 74,
+          "deletions": 17,
+          "accepted_lines": 74
+        },
+        "src/web/App.tsx": {
+          "additions": 309,
+          "deletions": 32,
+          "accepted_lines": 307
+        },
+        "src/web/lib/entries.ts": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 3
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,123 @@
+src/web/lib/entries.ts
+  00512495ff504ece 57-87,97-119,128-130,156,159-166,188-195
+src/web/components/PlanCard.tsx
+  00512495ff504ece 1-55
+src/web/lib/rich.tsx
+  00512495ff504ece 1,4-7,9-13,16-17,32,34,38-63,65,67,70,80-154,158-159,164-169,195-196,198,203-207,215,217-221,233,239,242,248,252,268,292,302,308-326,330
+src/web/components/ArtifactCard.tsx
+  00512495ff504ece 1-28
+src/web/types.ts
+  00512495ff504ece 6-13,16-26,32-42
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 22-24,81-82,159-185
+src/web/components/ToolBar.tsx
+  00512495ff504ece 4-9,11-12,14,17-19,23-27,38-40,43-47,55-71,81-83,86-87
+CHANGELOG.md
+  00512495ff504ece 5-16
+src/web/components/ThinkingBlock.tsx
+  00512495ff504ece 1-56
+src/web/components/MessageList.tsx
+  00512495ff504ece 2-3,5-7,35-44,46-47,49-56,58,64,75,84,91-136,147-152,155,163,172-177,196,214-215,220-232,244
+src/web/App.tsx
+  00512495ff504ece 16,71-76,221-223,233-239,244-256,265-271,276-290,293-305,309,312-320,422-425,435-456,698-706,864-873,1030-1032,1068,1090-1091
+README.md
+  00512495ff504ece 17,100-101,112,144
+src/web/components/Workbench.tsx
+  00512495ff504ece 20-21,224,228,230-239,243
+src/web/lib/api.ts
+  00512495ff504ece 84-87,115-116,120-121,179-180,182-187
+src/worker.ts
+  00512495ff504ece 55-56,82-108,199-234,551-552,794-796,824,899-907,1161,1193-1196,1199-1205,1207-1218,1520,1523,1525-1537
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "f0dcd177a5ca41ab2568052ccb800657e9ebeb26",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 948,
+      "total_deletions": 202,
+      "accepted_lines": 901,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/api.ts": {
+          "additions": 17,
+          "deletions": 8,
+          "accepted_lines": 17
+        },
+        "src/web/lib/rich.tsx": {
+          "additions": 188,
+          "deletions": 95,
+          "accepted_lines": 169
+        },
+        "src/web/components/Workbench.tsx": {
+          "additions": 15,
+          "deletions": 2,
+          "accepted_lines": 15
+        },
+        "CHANGELOG.md": {
+          "additions": 12,
+          "accepted_lines": 12
+        },
+        "src/web/components/ThinkingBlock.tsx": {
+          "additions": 56,
+          "accepted_lines": 56
+        },
+        "README.md": {
+          "additions": 5,
+          "deletions": 4,
+          "accepted_lines": 5
+        },
+        "src/web/App.tsx": {
+          "additions": 129,
+          "deletions": 26,
+          "accepted_lines": 129
+        },
+        "src/worker.ts": {
+          "additions": 121,
+          "deletions": 9,
+          "accepted_lines": 120
+        },
+        "src/web/types.ts": {
+          "additions": 32,
+          "deletions": 1,
+          "accepted_lines": 32
+        },
+        "src/web/components/ArtifactCard.tsx": {
+          "additions": 28,
+          "accepted_lines": 28
+        },
+        "src/web/lib/entries.ts": {
+          "additions": 75,
+          "deletions": 3,
+          "accepted_lines": 75
+        },
+        "src/web/components/MessageList.tsx": {
+          "additions": 136,
+          "deletions": 42,
+          "accepted_lines": 109
+        },
+        "src/web/components/ToolBar.tsx": {
+          "additions": 47,
+          "deletions": 12,
+          "accepted_lines": 47
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 32,
+          "accepted_lines": 32
+        },
+        "src/web/components/PlanCard.tsx": {
+          "additions": 55,
+          "accepted_lines": 55
+        }
+      }
+    }
+  }
+}

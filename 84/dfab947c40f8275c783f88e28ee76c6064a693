@@ -1,0 +1,85 @@
+src/web/components/Workbench.tsx
+  00512495ff504ece 202
+src/web/lib/rich.tsx
+  00512495ff504ece 95,99,104,131,143-148,151,178,180,196,198-199,203,211,213,256,264,266-268,313
+src/web/components/LeftPanels.tsx
+  00512495ff504ece 465
+src/web/components/ArtifactCard.tsx
+  00512495ff504ece 3,10,12,17,22
+src/web/components/ToolBar.tsx
+  00512495ff504ece 23,85
+src/web/components/MessageList.tsx
+  00512495ff504ece 58,116-122,131
+src/web/components/PlanCard.tsx
+  00512495ff504ece 10
+src/web/styles/index.css
+  00512495ff504ece 92-97,189-193,266-386
+src/web/components/ThinkingBlock.tsx
+  00512495ff504ece 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "84dfab947c40f8275c783f88e28ee76c6064a693",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 177,
+      "total_deletions": 65,
+      "accepted_lines": 177,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/ArtifactCard.tsx": {
+          "additions": 5,
+          "deletions": 5,
+          "accepted_lines": 5
+        },
+        "src/web/components/MessageList.tsx": {
+          "additions": 9,
+          "deletions": 7,
+          "accepted_lines": 9
+        },
+        "src/web/components/PlanCard.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/styles/index.css": {
+          "additions": 132,
+          "accepted_lines": 132
+        },
+        "src/web/components/ToolBar.tsx": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/components/ThinkingBlock.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/components/Workbench.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/lib/rich.tsx": {
+          "additions": 25,
+          "deletions": 47,
+          "accepted_lines": 25
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}

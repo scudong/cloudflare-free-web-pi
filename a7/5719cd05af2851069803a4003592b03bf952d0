@@ -1,0 +1,92 @@
+.github/workflows/smoke.yml
+  00512495ff504ece 12
+package.json
+  00512495ff504ece 2
+src/web/index.html
+  00512495ff504ece 8-9
+CHANGELOG.md
+  00512495ff504ece 7-12
+README.md
+  00512495ff504ece 1
+.github/workflows/deploy.yml
+  00512495ff504ece 8
+marketing/02-repo-name.md
+  00512495ff504ece 3-5,13,21-22,24,32-34,38,42,49-51,53,56,59
+src/worker.ts
+  00512495ff504ece 2381
+marketing/README.md
+  00512495ff504ece 26
+src/web/components/TopBar.tsx
+  00512495ff504ece 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "a75719cd05af2851069803a4003592b03bf952d0",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 33,
+      "total_deletions": 27,
+      "accepted_lines": 33,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "marketing/02-repo-name.md": {
+          "additions": 18,
+          "deletions": 18,
+          "accepted_lines": 18
+        },
+        ".github/workflows/smoke.yml": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        ".github/workflows/deploy.yml": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/index.html": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "marketing/README.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/components/TopBar.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "package.json": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/worker.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "CHANGELOG.md": {
+          "additions": 6,
+          "accepted_lines": 6
+        },
+        "README.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,101 @@
+tests/api/api.test.ts
+  00512495ff504ece 288-291,310-352
+src/web/lib/entries.ts
+  00512495ff504ece 172-175
+CHANGELOG.md
+  00512495ff504ece 5-30
+src/web/components/ChatHeader.tsx
+  00512495ff504ece 9-12,16,35-48
+src/web/lib/api.ts
+  00512495ff504ece 12-15,186,249-257
+src/web/components/GoalBar.tsx
+  00512495ff504ece 1-194
+src/worker.ts
+  00512495ff504ece 14,68-69,126-215,456-534,989,1148-1149,1153-1159,1172,1175-1183,1245-1265,1338,1431-1444,1472-1473,1697-1760,1788,1848-1887,2013-2018,2235,2311-2342
+tests/README.md
+  00512495ff504ece 70-71
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 41-42,115,128-148,420-434
+src/web/types.ts
+  00512495ff504ece 90-105
+tests/unit/entries.test.ts
+  00512495ff504ece 84-97
+src/web/App.tsx
+  00512495ff504ece 11,18,82-84,231,237-238,259-268,300-328,415-441,540-555,1227-1228,1241,1282-1284,1305
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "97be66a369300cc33378d960970884c52c1a55b1",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 865,
+      "total_deletions": 46,
+      "accepted_lines": 849,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "CHANGELOG.md": {
+          "additions": 26,
+          "accepted_lines": 26
+        },
+        "src/web/components/GoalBar.tsx": {
+          "additions": 196,
+          "deletions": 2,
+          "accepted_lines": 194
+        },
+        "src/web/App.tsx": {
+          "additions": 97,
+          "deletions": 2,
+          "accepted_lines": 97
+        },
+        "src/web/lib/api.ts": {
+          "additions": 18,
+          "deletions": 5,
+          "accepted_lines": 14
+        },
+        "tests/README.md": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/components/ChatHeader.tsx": {
+          "additions": 19,
+          "deletions": 1,
+          "accepted_lines": 19
+        },
+        "tests/api/api.test.ts": {
+          "additions": 47,
+          "accepted_lines": 47
+        },
+        "tests/unit/entries.test.ts": {
+          "additions": 14,
+          "accepted_lines": 14
+        },
+        "src/web/lib/entries.ts": {
+          "additions": 4,
+          "accepted_lines": 4
+        },
+        "src/worker.ts": {
+          "additions": 387,
+          "deletions": 34,
+          "accepted_lines": 377
+        },
+        "src/web/types.ts": {
+          "additions": 16,
+          "deletions": 2,
+          "accepted_lines": 16
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 39,
+          "accepted_lines": 39
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+tests/unit/format.test.ts
+  00512495ff504ece 2,26-36
+src/web/lib/format.ts
+  00512495ff504ece 17-29
+src/web/App.tsx
+  00512495ff504ece 15,1163-1164
+CHANGELOG.md
+  00512495ff504ece 7-12
+src/web/components/ShareDialog.tsx
+  00512495ff504ece 3,46-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "7e5d9b60940a3639f1830b43105dbb999922b404",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 37,
+      "total_deletions": 5,
+      "accepted_lines": 37,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/format.ts": {
+          "additions": 13,
+          "accepted_lines": 13
+        },
+        "src/web/components/ShareDialog.tsx": {
+          "additions": 3,
+          "deletions": 2,
+          "accepted_lines": 3
+        },
+        "CHANGELOG.md": {
+          "additions": 6,
+          "accepted_lines": 6
+        },
+        "src/web/App.tsx": {
+          "additions": 3,
+          "deletions": 2,
+          "accepted_lines": 3
+        },
+        "tests/unit/format.test.ts": {
+          "additions": 12,
+          "deletions": 1,
+          "accepted_lines": 12
+        }
+      }
+    }
+  }
+}

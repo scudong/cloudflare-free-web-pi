@@ -1,0 +1,48 @@
+src/web/App.tsx
+  00512495ff504ece 871-886,1109
+src/web/lib/api.ts
+  00512495ff504ece 217-219
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 1,6-7,33-34,60,70-77,99,104-105,116-119,121-127,129,137,139-140,154-156,158,160-167,169-170,172-205,207-218,220-232,234-259,261-267,269-274,276-325,327-359
+src/worker.ts
+  00512495ff504ece 1634-1640
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "a3a42bdd13324c968fabbd42101ca74949dc5c30",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 262,
+      "total_deletions": 158,
+      "accepted_lines": 262,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/api.ts": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "src/worker.ts": {
+          "additions": 7,
+          "accepted_lines": 7
+        },
+        "src/web/App.tsx": {
+          "additions": 17,
+          "accepted_lines": 17
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 235,
+          "deletions": 158,
+          "accepted_lines": 235
+        }
+      }
+    }
+  }
+}

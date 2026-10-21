@@ -1,0 +1,190 @@
+package.json
+  00512495ff504ece 21,24,26
+src/web/components/Rail.tsx
+  00512495ff504ece 1-2,18,28,44,47-50,53
+src/web/components/Sidebar.tsx
+  00512495ff504ece 1,55,57,96-98,101,122,134
+src/web/components/ChatHeader.tsx
+  00512495ff504ece 1-2,46,48,71,77-78,94,96
+src/web/components/MessageList.tsx
+  00512495ff504ece 8,119-122,125-128,145
+src/web/components/LeftPanels.tsx
+  00512495ff504ece 4,21,23,121-122,137,281,489,491-495,506,522-524,548,556-558,582,591-593,605,609,624
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 5,90,92-97,100-106,344,363,393,646,677,841-842,845-846,849-850,853-854
+src/web/components/Composer.tsx
+  00512495ff504ece 4,213,280-281,298,300,308,310
+src/web/lib/theme.ts
+  00512495ff504ece 20-23
+src/web/components/AskUserCard.tsx
+  00512495ff504ece 2,37
+src/web/components/ArtifactCard.tsx
+  00512495ff504ece 1,13
+src/web/components/TopBar.tsx
+  00512495ff504ece 1-2,21,47
+src/web/components/ApprovalBar.tsx
+  00512495ff504ece 1,32
+src/web/components/GoalBar.tsx
+  00512495ff504ece 2,37,134-137
+src/web/App.tsx
+  00512495ff504ece 14,347,1610-1611,1623-1624,1634-1635
+src/web/components/Workbench.tsx
+  00512495ff504ece 6,67-68,83,85,160,186,197,207,217,330,332
+src/web/components/ToolBar.tsx
+  00512495ff504ece 3,46,62,73,93-98
+src/web/components/ThinkingBlock.tsx
+  00512495ff504ece 2,38,42
+src/web/components/Icon.tsx
+  00512495ff504ece 1-137
+tests/unit/rich.test.tsx
+  00512495ff504ece 43-48
+CHANGELOG.md
+  00512495ff504ece 7-17
+src/web/components/PlanCard.tsx
+  00512495ff504ece 1,13-16,30,41,45,49-52
+src/web/components/ShareDialog.tsx
+  00512495ff504ece 4,100,160-161
+src/web/lib/rich.tsx
+  00512495ff504ece 2,125-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "00a6938f2294b928fd979f5cd5cf017421c4e7e3",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 342,
+      "total_deletions": 169,
+      "accepted_lines": 332,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 28,
+          "deletions": 20,
+          "accepted_lines": 28
+        },
+        "src/web/components/ChatHeader.tsx": {
+          "additions": 9,
+          "deletions": 6,
+          "accepted_lines": 9
+        },
+        "src/web/components/ToolBar.tsx": {
+          "additions": 10,
+          "deletions": 4,
+          "accepted_lines": 10
+        },
+        "src/web/components/ShareDialog.tsx": {
+          "additions": 4,
+          "deletions": 2,
+          "accepted_lines": 4
+        },
+        "src/web/components/ApprovalBar.tsx": {
+          "additions": 2,
+          "deletions": 3,
+          "accepted_lines": 2
+        },
+        "src/web/App.tsx": {
+          "additions": 8,
+          "deletions": 7,
+          "accepted_lines": 8
+        },
+        "src/web/components/ThinkingBlock.tsx": {
+          "additions": 3,
+          "deletions": 4,
+          "accepted_lines": 3
+        },
+        "src/web/components/AskUserCard.tsx": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "src/web/components/PlanCard.tsx": {
+          "additions": 12,
+          "deletions": 6,
+          "accepted_lines": 12
+        },
+        "src/web/lib/rich.tsx": {
+          "additions": 3,
+          "deletions": 2,
+          "accepted_lines": 3
+        },
+        "tests/unit/rich.test.tsx": {
+          "additions": 6,
+          "deletions": 4,
+          "accepted_lines": 6
+        },
+        "src/web/components/ArtifactCard.tsx": {
+          "additions": 2,
+          "deletions": 3,
+          "accepted_lines": 2
+        },
+        "src/web/components/GoalBar.tsx": {
+          "additions": 6,
+          "deletions": 4,
+          "accepted_lines": 6
+        },
+        "package.json": {
+          "additions": 3,
+          "deletions": 2,
+          "accepted_lines": 3
+        },
+        "CHANGELOG.md": {
+          "additions": 11,
+          "accepted_lines": 11
+        },
+        "src/web/components/MessageList.tsx": {
+          "additions": 10,
+          "deletions": 5,
+          "accepted_lines": 10
+        },
+        "src/web/components/Icon.tsx": {
+          "additions": 146,
+          "deletions": 9,
+          "accepted_lines": 137
+        },
+        "src/web/lib/theme.ts": {
+          "additions": 4,
+          "deletions": 5,
+          "accepted_lines": 4
+        },
+        "src/web/components/Rail.tsx": {
+          "additions": 10,
+          "deletions": 14,
+          "accepted_lines": 10
+        },
+        "src/web/components/Sidebar.tsx": {
+          "additions": 9,
+          "deletions": 6,
+          "accepted_lines": 9
+        },
+        "src/web/components/Composer.tsx": {
+          "additions": 8,
+          "deletions": 7,
+          "accepted_lines": 8
+        },
+        "src/web/components/TopBar.tsx": {
+          "additions": 4,
+          "deletions": 25,
+          "accepted_lines": 4
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 29,
+          "deletions": 18,
+          "accepted_lines": 29
+        },
+        "src/web/components/Workbench.tsx": {
+          "additions": 13,
+          "deletions": 12,
+          "accepted_lines": 12
+        }
+      }
+    }
+  }
+}

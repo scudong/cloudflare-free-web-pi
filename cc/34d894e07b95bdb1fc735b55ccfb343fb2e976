@@ -1,0 +1,60 @@
+src/web/index.html
+  00512495ff504ece 9-20
+LICENSE
+  00512495ff504ece 1-21
+CHANGELOG.md
+  00512495ff504ece 7-13
+README.md
+  00512495ff504ece 10-11
+marketing/README.md
+  00512495ff504ece 26-27,29-31
+marketing/social-preview.html
+  00512495ff504ece 1-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "cc34d894e07b95bdb1fc735b55ccfb343fb2e976",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 130,
+      "total_deletions": 5,
+      "accepted_lines": 130,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "LICENSE": {
+          "additions": 21,
+          "accepted_lines": 21
+        },
+        "marketing/README.md": {
+          "additions": 5,
+          "deletions": 5,
+          "accepted_lines": 5
+        },
+        "src/web/index.html": {
+          "additions": 12,
+          "accepted_lines": 12
+        },
+        "marketing/social-preview.html": {
+          "additions": 83,
+          "accepted_lines": 83
+        },
+        "CHANGELOG.md": {
+          "additions": 7,
+          "accepted_lines": 7
+        },
+        "README.md": {
+          "additions": 2,
+          "accepted_lines": 2
+        }
+      }
+    }
+  }
+}

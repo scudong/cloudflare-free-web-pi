@@ -1,0 +1,109 @@
+tests/README.md
+  00512495ff504ece 1-64
+src/web/lib/entries.ts
+  00512495ff504ece 133-134,162-163,170,193-194
+tests/unit/rich.test.tsx
+  00512495ff504ece 1-112
+.gitignore
+  00512495ff504ece 6
+tests/unit/entries.test.ts
+  00512495ff504ece 1-79
+tests/unit/theme.test.ts
+  00512495ff504ece 1-33
+src/web/lib/theme.ts
+  00512495ff504ece 48-56
+vitest.config.mts
+  00512495ff504ece 1-13
+package.json
+  00512495ff504ece 7,9-11,33
+tests/helpers/reactText.ts
+  00512495ff504ece 1-40
+tests/unit/format.test.ts
+  00512495ff504ece 1-25
+tests/api/api.test.ts
+  00512495ff504ece 1-236
+.github/workflows/deploy.yml
+  00512495ff504ece 18-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "e0cdc2777b2cd33978413de45d76a7ac655ec195",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 647,
+      "total_deletions": 23,
+      "accepted_lines": 626,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/theme.ts": {
+          "additions": 9,
+          "deletions": 5,
+          "accepted_lines": 9
+        },
+        "tests/README.md": {
+          "additions": 64,
+          "accepted_lines": 64
+        },
+        "tests/helpers/reactText.ts": {
+          "additions": 41,
+          "deletions": 1,
+          "accepted_lines": 40
+        },
+        "tests/unit/format.test.ts": {
+          "additions": 25,
+          "accepted_lines": 25
+        },
+        "tests/unit/theme.test.ts": {
+          "additions": 33,
+          "accepted_lines": 33
+        },
+        ".github/workflows/deploy.yml": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        ".gitignore": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/lib/entries.ts": {
+          "additions": 7,
+          "deletions": 8,
+          "accepted_lines": 7
+        },
+        "vitest.config.mts": {
+          "additions": 13,
+          "accepted_lines": 13
+        },
+        "package.json": {
+          "additions": 5,
+          "deletions": 2,
+          "accepted_lines": 5
+        },
+        "tests/api/api.test.ts": {
+          "additions": 236,
+          "accepted_lines": 236
+        },
+        "vitest.config.ts": {
+          "additions": 13
+        },
+        "tests/unit/rich.test.tsx": {
+          "additions": 119,
+          "deletions": 7,
+          "accepted_lines": 112
+        },
+        "tests/unit/entries.test.ts": {
+          "additions": 79,
+          "accepted_lines": 79
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,69 @@
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 39-41,132-133,166-169,222-259,678-718
+wrangler.jsonc
+  00512495ff504ece 7-9
+tests/api/api.test.ts
+  00512495ff504ece 46,365-386
+tests/api/multiuser.test.ts
+  00512495ff504ece 57
+src/web/lib/api.ts
+  00512495ff504ece 190-196,303-305,314
+src/worker.ts
+  00512495ff504ece 34-42,125-130,844,846-852,854,900-1083,1089,1093,1671,1700-1715,1737,2377,2598,2608,2670-2671,3390,3564-3565,3619,3710-3718,3731,3739-3740,3747-3773,4273-4274,4281,4285-4288,4334-4335
+src/web/App.tsx
+  00512495ff504ece 85-86,695,1312-1324,1652-1653
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "939e6d7831eaaf07f66da1846d1b8c446b9c6339",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 493,
+      "total_deletions": 85,
+      "accepted_lines": 430,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/api.ts": {
+          "additions": 11,
+          "accepted_lines": 11
+        },
+        "tests/api/multiuser.test.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/App.tsx": {
+          "additions": 18,
+          "accepted_lines": 18
+        },
+        "src/worker.ts": {
+          "additions": 347,
+          "deletions": 82,
+          "accepted_lines": 285
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 90,
+          "deletions": 1,
+          "accepted_lines": 89
+        },
+        "tests/api/api.test.ts": {
+          "additions": 23,
+          "deletions": 1,
+          "accepted_lines": 23
+        },
+        "wrangler.jsonc": {
+          "additions": 3,
+          "accepted_lines": 3
+        }
+      }
+    }
+  }
+}

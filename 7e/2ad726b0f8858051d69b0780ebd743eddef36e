@@ -1,0 +1,72 @@
+CHANGELOG.md
+  00512495ff504ece 5-17
+scripts/upgrade-pi.mjs
+  00512495ff504ece 1-88
+.github/workflows/pi-upgrade.yml
+  00512495ff504ece 1-49
+src/web/lib/api.ts
+  00512495ff504ece 255-265
+src/web/components/SettingsDialog.tsx
+  00512495ff504ece 137-159,182-197,421-466
+package.json
+  00512495ff504ece 11-12,23-24
+tests/unit/kernel.test.ts
+  00512495ff504ece 1-39
+tests/README.md
+  00512495ff504ece 75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "7e2ad726b0f8858051d69b0780ebd743eddef36e",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 293,
+      "total_deletions": 2,
+      "accepted_lines": 293,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        ".github/workflows/pi-upgrade.yml": {
+          "additions": 49,
+          "accepted_lines": 49
+        },
+        "src/web/lib/api.ts": {
+          "additions": 11,
+          "accepted_lines": 11
+        },
+        "tests/README.md": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "scripts/upgrade-pi.mjs": {
+          "additions": 88,
+          "accepted_lines": 88
+        },
+        "tests/unit/kernel.test.ts": {
+          "additions": 39,
+          "accepted_lines": 39
+        },
+        "CHANGELOG.md": {
+          "additions": 13,
+          "accepted_lines": 13
+        },
+        "package.json": {
+          "additions": 4,
+          "deletions": 2,
+          "accepted_lines": 4
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 88,
+          "accepted_lines": 88
+        }
+      }
+    }
+  }
+}

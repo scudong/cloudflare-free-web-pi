@@ -1,0 +1,49 @@
+tests/api/multiuser.test.ts
+  00512495ff504ece 57
+wrangler.test.jsonc
+  00512495ff504ece 1-19
+.vitest/json/output.json
+  00512495ff504ece 1
+tests/api/api.test.ts
+  00512495ff504ece 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "1a72358cd0f941080343eeed99b17c4b804041d1",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 22,
+      "total_deletions": 2,
+      "accepted_lines": 22,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        ".vitest/json/output.json": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "wrangler.test.jsonc": {
+          "additions": 19,
+          "accepted_lines": 19
+        },
+        "tests/api/api.test.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "tests/api/multiuser.test.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}

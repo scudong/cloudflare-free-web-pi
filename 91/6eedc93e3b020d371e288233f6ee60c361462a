@@ -1,0 +1,43 @@
+src/web/components/Composer.tsx
+  00512495ff504ece 582
+CHANGELOG.md
+  00512495ff504ece 7-11
+src/worker.ts
+  00512495ff504ece 2249-2259,2261-2264,2282-2289,2335,3371
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "916eedc93e3b020d371e288233f6ee60c361462a",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 31,
+      "total_deletions": 9,
+      "accepted_lines": 31,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/worker.ts": {
+          "additions": 25,
+          "deletions": 8,
+          "accepted_lines": 25
+        },
+        "CHANGELOG.md": {
+          "additions": 5,
+          "accepted_lines": 5
+        },
+        "src/web/components/Composer.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
