@@ -9,7 +9,7 @@ on:
 
 jobs:
   smoke:
-    if: ${{ github.repository == 'scudong/pi-harness' }}
+    if: ${{ github.repository == 'scudong/cloudflare-free-pi-agent' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

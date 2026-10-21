@@ -1,9 +1,11 @@
-# π Harness — Cloudflare 上的中文 AI 助手
+# Cloudflare Free Pi Agent（π Harness）
 
 把 [pi](https://github.com/earendil-works/pi) 的 **durable harness 内核**跑在 Cloudflare Worker 上：会话、工具调用、记忆、文件全部持久化在 Durable Object 的 SQLite 里，不依赖任何外部数据库。
 
 - **在线地址**：https://pi-harness-gw.pages.dev （pages.dev 反代，中国大陆可达）
 - **运行成本**：Cloudflare 免费额度内；模型走 DeepSeek（按量计费，个人用量每月几元）
+
+> 本项目是社区项目，与 Cloudflare, Inc. 无隶属关系；Cloudflare、Workers、Durable Objects 是其商标。
 
 ![界面](docs/screenshot.png)
 

@@ -4,6 +4,13 @@
 
 ## 2026-10-21（公开发布准备）
 
+### 仓库改名 Cloudflare Free Pi Agent（v0.47.0）
+- GitHub 仓库：`scudong/pi-harness` → `scudong/cloudflare-free-pi-agent`（GitHub 会自动 301 旧链接）
+- README 标题、页面 `<title>` / description、顶栏品牌同步改为 **Cloudflare Free Pi Agent / Free Pi Agent**
+- CI 的仓库守卫、worker 指令里的仓库引用同步更新
+- README 增加 Cloudflare 商标声明（非官方项目）
+- 保持不变：Worker 名 `pi-harness-spike`、pages.dev 域名、DO 数据、cookie 签名与 localStorage 键
+
 ### 推广素材与命名建议（v0.46.3）
 - 新增 `marketing/` 目录：一句话定位、8 个核心卖点、技术亮点、与常见方案的形态对比、目标人群、常见异议
 - 命名调研：推荐 `pi-station`（π 空间站），备选 `pi-harbor`（π 港湾）；附 GitHub/npm 撞名检索结果与改名清单

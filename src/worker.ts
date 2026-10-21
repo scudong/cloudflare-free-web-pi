@@ -2378,7 +2378,7 @@ export class SpikeAgent extends DurableObject {
 	/** 组装本轮 instructions：基础规则 + 技能索引 + 显式技能 + 进行中的目标 + 知识库预检索（v0.46.0）。 */
 	private buildInstructions(inv: { name: string; content: string } | null, sessionId?: string, message?: string): string {
 		const base =
-			"你在 pi-harness（GitHub: scudong/pi-harness）里运行：一个部署在 Cloudflare Workers 上的 pi-durable harness。GitHub 上另有同名项目（如 wangmiaozero/pi-harness），被问到本项目时以 scudong/pi-harness 为准，不要混为一谈。\n" +
+			"你在 Cloudflare Free Pi Agent（GitHub: scudong/cloudflare-free-pi-agent，界面名 π Harness）里运行：一个部署在 Cloudflare Workers 上的 pi-durable harness，个人用量在 Cloudflare 免费额度内。被问到本项目时以上面的仓库为准。\n" +
 			"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。";
 		const withSkills = this.instructionsWithSkills(base);
 		const goal = sessionId ? readGoalRow(sessionId) : null;
