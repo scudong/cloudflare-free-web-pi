@@ -7,6 +7,8 @@
 
 > 本项目是社区项目，与 Cloudflare, Inc. 无隶属关系；Cloudflare、Workers、Durable Objects 是其商标。
 
+**English** — Cloudflare Free Web Pi is a self-hosted, multi-user AI workspace on Cloudflare Workers + Durable Objects. It ships a durable pi agent runtime, per-user isolated spaces (invite codes), a Chinese-first knowledge base with FTS5 retrieval, a file workbench, and shareable Markdown/HTML pages with expiry. No server, no external database. 126 golden tests; deploy with a single `wrangler deploy`.
+
 ![界面](docs/screenshot.png)
 
 ---

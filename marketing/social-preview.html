@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    width: 1200px; height: 630px; overflow: hidden;
+    background: #0b1220;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    color: #e2e8f0;
+    position: relative;
+  }
+  .glow { position: absolute; border-radius: 999px; filter: blur(70px); opacity: .55; }
+  .g1 { width: 520px; height: 520px; left: -160px; top: -220px; background: #0ea5e9; }
+  .g2 { width: 420px; height: 420px; right: -120px; bottom: -180px; background: #7c3aed; opacity: .35; }
+  .grid {
+    position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(148,163,184,.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148,163,184,.08) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,.9), transparent 85%);
+  }
+  main { position: relative; z-index: 2; display: flex; height: 100%; padding: 54px 56px; gap: 34px; }
+  .left { width: 500px; display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .pi {
+    width: 54px; height: 54px; border-radius: 15px;
+    background: rgba(56,189,248,.15); border: 1px solid rgba(56,189,248,.35);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 30px; font-weight: 700; color: #7dd3fc;
+  }
+  .brand-name { font-size: 27px; font-weight: 700; letter-spacing: -.5px; }
+  .brand-name span { color: #7dd3fc; }
+  h1 { margin: 40px 0 0; font-size: 52px; line-height: 1.08; letter-spacing: -1.8px; font-weight: 700; }
+  h1 em { font-style: normal; color: #7dd3fc; }
+  p.sub { margin: 20px 0 0; font-size: 19px; line-height: 1.5; color: #94a3b8; max-width: 470px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: auto; }
+  .chip {
+    font-size: 14px; padding: 7px 12px; border-radius: 999px;
+    border: 1px solid rgba(148,163,184,.28); color: #cbd5e1; background: rgba(15,23,42,.6);
+  }
+  .chip.hot { border-color: rgba(52,211,153,.45); color: #6ee7b7; background: rgba(6,78,59,.25); }
+  .right { flex: 1; position: relative; display: flex; align-items: center; }
+  .shot-wrap {
+    width: 100%; border-radius: 18px; overflow: hidden;
+    border: 1px solid rgba(148,163,184,.28);
+    box-shadow: 0 30px 80px rgba(2,6,23,.75), 0 0 0 6px rgba(15,23,42,.6);
+    transform: perspective(1600px) rotateY(-5deg) rotateX(2deg);
+    background: #0f172a;
+  }
+  .shot-wrap img { display: block; width: 100%; }
+  .foot { position: absolute; z-index: 3; left: 56px; bottom: 26px; font-size: 13px; color: #64748b; }
+</style>
+</head>
+<body>
+  <div class="glow g1"></div>
+  <div class="glow g2"></div>
+  <div class="grid"></div>
+  <main>
+    <section class="left">
+      <div class="brand">
+        <div class="pi">π</div>
+        <div class="brand-name">Cloudflare <span>Free Web Pi</span></div>
+      </div>
+      <h1>Your own AI workspace,<br>on Cloudflare's <em>free tier</em>.</h1>
+      <p class="sub">Durable agent runtime · per-user spaces · Chinese knowledge base · shareable files. No server, no external database.</p>
+      <div class="chips">
+        <span class="chip hot">126 golden tests</span>
+        <span class="chip">Durable Objects</span>
+        <span class="chip">Invite-code spaces</span>
+        <span class="chip">FTS5 knowledge base</span>
+        <span class="chip">Share links with expiry</span>
+      </div>
+    </section>
+    <section class="right">
+      <div class="shot-wrap"><img src="/docs/screenshot.png" alt="UI" /></div>
+    </section>
+  </main>
+  <div class="foot">github.com/scudong/cloudflare-free-web-pi</div>
+</body>
+</html>

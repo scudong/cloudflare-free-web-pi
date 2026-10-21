@@ -23,9 +23,9 @@
 
 ## 发布前待办
 
-- [ ] 仓库名改为 `cloudflare-free-web-pi`（见 02；短名备选 `cf-free-web-pi`）
-- [ ] 加 LICENSE（建议 MIT）
+- [x] 仓库名改为 `cloudflare-free-web-pi`（见 02；短名备选 `cf-free-web-pi`）
+- [x] 加 LICENSE（MIT）
 - [ ] 准备公开演示：演示邀请码或只读演示空间（当前线上需要访问密码）
-- [ ] README 补一段英文摘要（X 受众）
-- [ ] GitHub Description / Topics 更新，配 1200×630 社交预览图
-- [ ] 确认 `.dev.vars`、备份文件、真实用户数据没有进仓库
+- [x] README 补一段英文摘要（X 受众）
+- [x] GitHub Description / Topics 更新；1200×630 社交预览图已生成（`docs/social-preview.png`），GitHub 设置里手动上传
+- [x] 确认 `.dev.vars`、备份文件、真实用户数据没有进仓库（历史里只有占位符 `sk-...`）

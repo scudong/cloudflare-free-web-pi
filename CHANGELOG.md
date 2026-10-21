@@ -4,6 +4,13 @@
 
 ## 2026-10-21（公开发布准备）
 
+### LICENSE、英文摘要、社交预览（v0.48.0）
+- 新增 MIT LICENSE（版权人 scudong）
+- README 增加英文摘要，方便 X / GitHub 英文读者快速理解
+- 新增 `docs/social-preview.png`（1200×630）与 OG / Twitter Card 元数据；站点 `/social-preview.png` 可直接访问
+- 核对仓库与历史记录，没有真实密钥（只有文档占位符 `sk-...` 与测试假密钥）
+- 剩余：公开演示邀请码、仓库转 public、在 GitHub 设置里上传社交预览
+
 ### 命名调整：Cloudflare Free Web Pi（v0.47.1）
 - 仓库名改为 `cloudflare-free-web-pi`（v0.47.0 的 `cloudflare-free-pi-agent` 已被替换，GitHub 旧链接 301）
 - README / 页面 title / 顶栏 / worker 指令 / CI 仓库守卫同步改为 Web Pi
