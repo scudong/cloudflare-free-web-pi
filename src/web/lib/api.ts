@@ -10,6 +10,7 @@ export interface SessionInfo {
 }
 
 import type { GoalInfo } from "../types";
+import { ingestNetworkFailure, parseIngestResponse, type IngestResult } from "./ingest";
 
 export type { GoalInfo };
 
@@ -94,6 +95,70 @@ function jsonPost(body: unknown): RequestInit {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(body),
 	};
+}
+
+/* ---------------- 知识库导入（v0.54.3） ---------------- */
+
+/**
+ * 文件导入走 XHR 而不是 fetch：只有 XHR 能区分「上传中」与「服务端解析中」，
+ * 也才能在 25MB 文件上传时给出真实进度。响应统一交给 parseIngestResponse 归一化。
+ */
+function ingestFileRequest(
+	file: File,
+	handlers?: { onProgress?: (percent: number) => void; onUploaded?: () => void },
+): Promise<IngestResult> {
+	if (typeof XMLHttpRequest === "undefined") {
+		return Promise.resolve(ingestNetworkFailure());
+	}
+	return new Promise((resolve) => {
+		const form = new FormData();
+		form.append("file", file, file.name);
+		const xhr = new XMLHttpRequest();
+		let settled = false;
+		const settle = (result: IngestResult) => {
+			if (settled) return;
+			settled = true;
+			resolve(result);
+		};
+		xhr.open("POST", "/api/kb/ingest");
+		// 25MB PDF 的解析可能超过一分钟；超时也要落到可读错误，不能一直卡在「上传中」。
+		xhr.timeout = 180_000;
+		xhr.upload.onprogress = (event) => {
+			if (!event.lengthComputable || event.total <= 0) return;
+			handlers?.onProgress?.(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+		};
+		xhr.upload.onload = () => handlers?.onUploaded?.();
+		xhr.onload = () => {
+			let data: unknown = null;
+			try {
+				data = JSON.parse(xhr.responseText) as unknown;
+			} catch {
+				// 非 JSON（网关错误页等）：按 HTTP 状态码判定
+			}
+			settle(parseIngestResponse(data, xhr.status));
+		};
+		xhr.onerror = () => settle(ingestNetworkFailure());
+		xhr.ontimeout = () =>
+			settle({ ok: false, code: "network", message: "解析超时（180 秒），请换小一点的文件或稍后重试。" });
+		xhr.onabort = () => settle({ ok: false, code: "network", message: "导入已取消。" });
+		xhr.send(form);
+	});
+}
+
+async function ingestUrlRequest(url: string): Promise<IngestResult> {
+	let res: Response;
+	try {
+		res = await fetch("/api/kb/ingest", jsonPost({ url }));
+	} catch {
+		return ingestNetworkFailure();
+	}
+	let data: unknown = null;
+	try {
+		data = await res.json();
+	} catch {
+		// 非 JSON 响应体由状态码兜底
+	}
+	return parseIngestResponse(data, res.status);
 }
 
 export const api = {
@@ -183,6 +248,13 @@ export const api = {
 			"/api/kb",
 			jsonPost({ title, content, source: source ?? "", tags: tags ?? "" }),
 		),
+	/**
+	 * 知识库导入（v0.54.3）：multipart 文件，或 JSON `{url}`。
+	 * 不走 requestJson —— 失败响应里的 `code` 是 UI 文案的分支依据，不能被 HTTP 状态吞掉。
+	 */
+	kbIngestFile: (file: File, handlers?: { onProgress?: (percent: number) => void; onUploaded?: () => void }) =>
+		ingestFileRequest(file, handlers),
+	kbIngestUrl: (url: string) => ingestUrlRequest(url),
 	kbSearch: (q: string) => requestJson<{ hits?: unknown[] }>(withQuery("/api/kb/search", { q })),
 	kbDoc: (id: number) =>
 		requestJson<{ id?: number; title?: string; content?: string; error?: string }>(withQuery("/api/kb/doc", { id: String(id) })),

@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import { api } from "../lib/api";
 import { parseKbDocs, parseKbHits } from "../lib/collections";
 import { formatSize, formatTime } from "../lib/format";
 import { renderMarkdown } from "../lib/rich";
 import type { KbDocInfo, KbHit } from "../types";
 import { Icon } from "./Icon";
+import { KbImport, type IncomingDrop } from "./KbImport";
 
 /**
  * 左栏「知识库」（v0.45.0）：每个用户一个独立库（后端按用户 DO 隔离）。
- * 支持检索、粘贴资料入库、查看与删除；模型侧对应 kb_search / kb_add。
+ * 支持检索、导入文件 / 链接、粘贴资料入库、查看与删除；模型侧对应 kb_search / kb_add。
  */
 export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 	const [docs, setDocs] = useState<KbDocInfo[]>([]);
@@ -26,6 +28,10 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 	const [note, setNote] = useState("");
 	const [viewing, setViewing] = useState<{ title: string; content: string } | null>(null);
 	const [viewingBusy, setViewingBusy] = useState(false);
+	/** 拖拽悬停与待导入文件：面板任意位置都能投放，导入区在「新增」里。 */
+	const [dropActive, setDropActive] = useState(false);
+	const [incomingDrop, setIncomingDrop] = useState<IncomingDrop | null>(null);
+	const dragDepth = useRef(0);
 
 	const load = useCallback(() => {
 		setLoading(true);
@@ -119,12 +125,60 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 		})();
 	};
 
+	/** 导入成功后回到完整列表：检索结果里不会有刚入库的文档。 */
+	const handleImported = useCallback(() => {
+		setHits(null);
+		setQuery("");
+		load();
+	}, [load]);
+
+	const handleIncomingConsumed = useCallback(() => setIncomingDrop(null), []);
+
+	const hasFileDrag = (event: DragEvent<HTMLDivElement>) => Array.from(event.dataTransfer.types).includes("Files");
+
+	const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+		if (!hasFileDrag(event)) return;
+		event.preventDefault();
+		dragDepth.current += 1;
+		setDropActive(true);
+	};
+
+	const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+		if (!hasFileDrag(event)) return;
+		// 不 preventDefault 浏览器会直接打开文件，覆盖整个页面。
+		event.preventDefault();
+		event.dataTransfer.dropEffect = "copy";
+		if (!adding) setAdding(true);
+	};
+
+	const handleDragLeave = () => {
+		// 不按 types 过滤：部分浏览器在 dragleave 时已清空 types，过滤会让高亮卡住。
+		dragDepth.current = Math.max(0, dragDepth.current - 1);
+		if (dragDepth.current === 0) setDropActive(false);
+	};
+
+	const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+		if (!hasFileDrag(event)) return;
+		event.preventDefault();
+		dragDepth.current = 0;
+		setDropActive(false);
+		const file = event.dataTransfer.files.item(0);
+		if (!file) return;
+		setAdding(true);
+		setIncomingDrop({ file });
+	};
+
 	const inputClass =
 		"w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500";
 
 	if (viewing) {
 		return (
-			<div className="flex h-full w-full flex-col bg-slate-900/60">
+			<div
+				className="flex h-full w-full flex-col bg-slate-900/60"
+				// 阅读文档时不接收导入，但也不能让浏览器把拖进来的文件当导航打开。
+				onDragOver={(event) => event.preventDefault()}
+				onDrop={(event) => event.preventDefault()}
+			>
 				<div className="flex shrink-0 items-center gap-1.5 border-b border-slate-800/70 px-2.5 py-2">
 					<button
 						type="button"
@@ -147,7 +201,13 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 	}
 
 	return (
-		<div className="flex h-full w-full flex-col bg-slate-900/60">
+		<div
+			className="relative flex h-full w-full flex-col bg-slate-900/60"
+			onDragEnter={handleDragEnter}
+			onDragOver={handleDragOver}
+			onDragLeave={handleDragLeave}
+			onDrop={handleDrop}
+		>
 			<div className="flex shrink-0 items-center justify-between border-b border-slate-800/70 px-3 py-2">
 				<span className="text-[12.5px] font-medium text-slate-300">知识库 · 仅你可见</span>
 				<span className="flex items-center gap-1.5">
@@ -156,8 +216,8 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 						type="button"
 						onClick={() => setAdding((value) => !value)}
 						aria-pressed={adding}
-						title={adding ? "收起新增" : "新增文档"}
-						aria-label={adding ? "收起新增" : "新增文档"}
+						title={adding ? "收起新增" : "新增 / 导入文档"}
+						aria-label={adding ? "收起新增" : "新增 / 导入文档"}
 						className="inline-flex items-center justify-center rounded p-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
 					>
 						<Icon name={adding ? "close" : "plus"} className="h-4 w-4" />
@@ -203,7 +263,18 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 			</form>
 
 			{adding && (
-				<div className="shrink-0 space-y-1.5 border-b border-slate-800/70 p-2.5">
+				<div className="max-h-[62vh] shrink-0 space-y-1.5 overflow-y-auto border-b border-slate-800/70 p-2.5">
+					<KbImport
+						incoming={incomingDrop}
+						onIncomingConsumed={handleIncomingConsumed}
+						onImported={handleImported}
+						dropActive={dropActive}
+					/>
+					<p className="flex items-center gap-1.5 pt-0.5 text-[10.5px] text-slate-500">
+						<span aria-hidden className="h-px flex-1 bg-slate-800" />
+						或手动粘贴正文
+						<span aria-hidden className="h-px flex-1 bg-slate-800" />
+					</p>
 					<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="标题（必填）" aria-label="文档标题" className={inputClass} />
 					<div className="flex gap-1.5">
 						<input value={source} onChange={(event) => setSource(event.target.value)} placeholder="来源（可选）" aria-label="来源" className={inputClass} />
@@ -258,7 +329,9 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 							<p className="px-1.5 py-6 text-center text-xs leading-relaxed text-slate-500">
 								知识库还是空的。
 								<br />
-								点右上角 + 粘贴资料，或让 π 把链接/文档用 kb_add 存进来。
+								拖入 PDF / MD / TXT / DOCX，或粘贴网页链接；
+								<br />
+								也可以让 π 用 kb_add 存进来。
 							</p>
 						)}
 						<ul className="space-y-1">
@@ -289,6 +362,14 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 					</>
 				)}
 			</div>
+
+			{dropActive && (
+				<div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-sky-500/10 ring-2 ring-inset ring-sky-400">
+					<span className="rounded-lg bg-slate-900/90 px-3 py-2 text-xs text-sky-300 ring-1 ring-sky-400/40">
+						松手导入到知识库
+					</span>
+				</div>
+			)}
 		</div>
 	);
 }
