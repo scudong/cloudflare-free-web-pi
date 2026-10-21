@@ -57,14 +57,35 @@ kb_fts    FTS5(title_tokens, body_tokens)   -- rowid = kb_chunks.id
 
 一次本地 FTS 查询；命中时约 600–1800 字（≈300–900 token）进入本轮提示。模型仍可继续调用 `kb_search` 取更多内容。设置 → 对话 → 「知识库预检索」可关闭；`GET /api/kb/prefetch?q=` 返回本轮实际会注入的原文。
 
+## 文件与链接导入（v0.56.0）
+
+`POST /api/kb/ingest` 两种入口，二选一：
+
+- 文件：`multipart/form-data`，字段名 `file`。支持 PDF / DOCX / MD / TXT，单文件 ≤ 25MB。
+  MD / TXT 直接读文本；PDF / DOCX 走 Workers AI 的 `toMarkdown()`（不需要额外解析库，也不需要 R2）。
+- 链接：`application/json`，`{"url":"https://..."}`。复用 DeepSeek Fetch API 抓正文，标题取页面 `<title>`，失败时回落到域名。
+
+成功返回 `{ ok: true, docId, title, chunks, chars }`。失败统一返回 `{ ok: false, code, message }`：
+
+| HTTP | code | 含义 |
+|---|---|---|
+| 413 | `too_large` | 文件超过 25MB |
+| 415 | `unsupported_type` | 格式不支持（扫描件 OCR 不在范围内） |
+| 422 | `empty_content` | 解析出空正文 / 解析器报错 |
+| 501 | `ai_unavailable` | 环境没有 `AI` 绑定，PDF / DOCX 不可用；MD / TXT 与粘贴入口不受影响 |
+| 400 | `invalid_url` | 链接不是 http(s) |
+| 502 | `fetch_failed` | 抓取服务不可用或页面抓取失败 |
+
+粘贴正文的 `POST /api/kb` 保持原样，仍然是最低依赖的入口。
+
 ## 限制
 
 - 关键词检索，不做同义词 / 语义扩展；问法和原文用词差太远时可能不命中。
 - 少于 2 个汉字的查询（如单字）走 `LIKE` 兜底，结果不按相关度排序。
-- 尚无文件上传解析（PDF / DOCX）；当前入口是粘贴正文、或让模型抓取网页后 `kb_add`。
+- 文件导入上限 25MB、正文 20 万字符；扫描件 OCR、批量目录上传、云盘同步不做。
 
 ## 后续可加
 
 - 混合检索：给每个分块存 `bge-m3` 向量，关键词 + 向量分数融合；索引放在同一 DO 的 SQLite 或按用户 namespace 的 Vectorize。Supabase pgvector 的可选方案见 [semantic-search-options.md](semantic-search-options.md)。
-- 文档导入：R2 上传 + PDF/DOCX 文本抽取。
+- 扫描件 OCR 与表格结构化抽取。
 - 引用回链：检索结果带分享页 / 原文件链接。
