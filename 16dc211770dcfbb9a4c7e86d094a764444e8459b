@@ -1,0 +1,60 @@
+marketing/02-repo-name.md
+  00512495ff504ece 1-69
+CHANGELOG.md
+  00512495ff504ece 5-13
+marketing/01-selling-points.md
+  00512495ff504ece 1-133
+marketing/03-launch-copy.md
+  00512495ff504ece 1-114
+marketing/README.md
+  00512495ff504ece 1-31
+.gitignore
+  00512495ff504ece 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "16dc211770dcfbb9a4c7e86d094a764444e8459b",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 357,
+      "total_deletions": 1,
+      "accepted_lines": 357,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        ".gitignore": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "marketing/README.md": {
+          "additions": 31,
+          "accepted_lines": 31
+        },
+        "marketing/02-repo-name.md": {
+          "additions": 69,
+          "accepted_lines": 69
+        },
+        "marketing/01-selling-points.md": {
+          "additions": 133,
+          "accepted_lines": 133
+        },
+        "CHANGELOG.md": {
+          "additions": 9,
+          "accepted_lines": 9
+        },
+        "marketing/03-launch-copy.md": {
+          "additions": 114,
+          "accepted_lines": 114
+        }
+      }
+    }
+  }
+}
