@@ -1,6 +1,6 @@
 # ADR-0001：后端分层规范（Route → Service → Repository → DO）
 
-- 状态：提案（Proposed）
+- 状态：已接受（Accepted，2026-10-21 起按阶段执行，跟踪 NERE-21）
 - 日期：2026-10-21
 - 决策人：后端架构-hou（NERE-18）
 - 范围：`src/worker.ts` 及后续拆出的后端模块
@@ -8,7 +8,7 @@
 
 ## 背景
 
-后端目前是一个 4856 行的 `src/worker.ts`：78 个 HTTP 端点、41 个 DO 方法、21 张表的 DDL 与 131 处 SQL 调用混在同一文件。路由 handler 内联了 43 处 SQL（`worker.ts:3575-4553`），模块级 helper 通过 `sqlFacade` 这个 AsyncLocalStorage 代理隐式取库（`worker.ts:52-57`），导致：
+后端目前是一个 5249 行的 `src/worker.ts`（基线 `ce75bce`）：81 个 method+path 分支、21 张表的 DDL 与 210 处 `sqlFacade` 调用混在同一文件。`SpikeAgent.handleFetch`（`worker.ts:3903-4948`，1046 行）内含 **105 处 `sqlFacade`**、**52 次 `ensureTables`**；模块级 helper 通过 `sqlFacade` 这个 AsyncLocalStorage 代理隐式取库（`worker.ts:46-61`），导致：
 
 - 业务逻辑无法在 DO 之外单测，任何查询都要构造完整请求作用域。
 - 依赖方向不可见：路由既能直接 SQL，也能调 DO 方法，还能调工具 helper；同一件事有三种写法。
@@ -148,7 +148,8 @@ CI 用 grep 检查即可（无需引入新框架）：
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| 0 | 建 `routes/` + `RequestContext` + `AppError` + 迁移器骨架；原逻辑原样搬入 | 端点行为不变；空库首启通过 |
+| 0a | `db/migrations.ts` 版本化迁移器；删除请求路径的 52 次 `ensureTables` | 空库首启一次得到完整 schema；`migrations.test.ts` 通过 |
+| 0b | `routes/` 路由表 + `RequestContext` + `AppError` + `scripts/check-layering.sh`；未迁移端点走 legacy 委托 | 端点行为不变；CI 边界检查上线且为绿 |
 | 1 | `session-service` + `file-service` + 对应 repo | 路由层不再有 `sessions_meta`/`vfs_v2` SQL |
 | 2 | `kb-service` + `kb-repo`（含向量补齐） | `/kb*` 路由零 SQL |
 | 3 | `share-service` + 渲染纯函数 | `/s/` 文件分享不启动 Harness |
@@ -161,6 +162,133 @@ CI 用 grep 检查即可（无需引入新框架）：
 - 不与功能 PR 混做；每个 PR 限定一个域，避免与 NERE-17（KB ingest）、NERE-8（分享工具）等并行改动冲突。
 - 不做全文件格式化；评审用 `git diff -w` 看语义变更。
 - 每阶段保留原端点与响应结构，前端无需同步改动。
+
+## 9. 阶段 0 实施契约（2026-10-21 锁定）
+
+后续阶段依赖以下签名，改动需新开 ADR。基线 `ce75bce`。
+
+### 9.1 目录
+
+```text
+src/worker/
+  db/migrations.ts        迁移清单与 migrate(sql)
+  http/context.ts         RequestContext 构造
+  http/errors.ts          AppError / toResponse
+  http/router.ts          Route 类型与 matchRoute
+  routes/index.ts         路由表（按域分文件后在此汇总）
+  routes/<domain>.ts      session / file / kb / share / settings / ...
+  services/<domain>.ts
+  repo/<domain>.ts
+  lib/*.ts                纯函数（markdown、token、RRF、分块）
+src/worker.ts             DO 组合根 + 未迁移端点的 legacy handler
+```
+
+`src/worker/bootstrap.ts`（NERE-23 引入）是只读聚合 helper，不属于 route/service/repo 任一层，阶段 0b 不改它。
+
+### 9.2 RequestContext
+
+```ts
+export type AppEnv = {
+  DEEPSEEK_API_KEY?: string;
+  ACCESS_PASSWORD?: string;
+  AI?: unknown;
+  KB_VEC?: unknown;
+  CF_DISABLE_VECTOR?: string;
+  DEEPSEEK_BASE_URL?: string;
+  BUILD?: string;
+  SpikeAgent: DurableObjectNamespace;
+  UserRegistry: DurableObjectNamespace;
+};
+
+export type RequestContext = {
+  readonly req: Request;
+  readonly url: URL;
+  readonly env: AppEnv;
+  readonly scopeId: string;
+  readonly userKey: string;
+  readonly origin: string;
+  sql(): SqlHandle;                 // 已执行迁移的句柄
+  harness(): Promise<Harness>;      // 惰性 open；只有需要的端点调用
+  legacy(): Promise<Response>;      // 阶段 0/1-4 的过渡委托，阶段 6 删除
+};
+```
+
+- Route：`{ method, path, needsHarness: boolean, handle(ctx): Promise<Response> }`；`matchRoute` 先于 DO 初始化执行，`sql()`/`harness()` 各自惰性触发。
+- 阶段 0b 所有现存端点 `needsHarness: true`（与现状"每个请求先 `open()`"等价）；阶段 3 起 `/s/*` 与只读端点按实测改为 `false`，这是 NERE-22 的落地方式，不另写实现。
+- `agentScope`/`scope()` 保留为兼容层，供尚未迁移的模块级 helper 使用；**新代码不得调用 `scope()`**，阶段 6 删除。
+
+### 9.3 AppError
+
+```ts
+export class AppError extends Error {
+  constructor(readonly code: string, readonly status: number, message: string, readonly retryable = false);
+}
+export function toResponse(err: unknown): Response;
+```
+
+| 情形 | status | body |
+|---|---|---|
+| 入参校验失败 | 400 | `{ error }`（沿用现有中文文案） |
+| 资源不存在 | 404 | `{ error: "not found" }` |
+| 冲突 / 前置状态不满足 | 409 | `{ error }` |
+| 上游超时 | 504 | `{ error, retryable: true }` |
+| 未知异常 | 500 | `{ error: String(e).slice(0, 500) }` |
+
+阶段 0 只抽类型与映射函数，**响应文案与状态码逐字保持**（含 500 的截断文本）；错误信息收敛到阶段 6，单独 PR，改动需列出受影响端点。
+
+### 9.4 迁移器
+
+```ts
+type Migration = { version: number; name: string; up(sql: SqlHandle): void };
+export const MIGRATIONS: readonly Migration[];
+export function migrate(sql: SqlHandle, now?: () => string): number; // 返回本次应用条数
+```
+
+- 账本表：`schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)`。
+- 按 version 升序执行，每条执行成功后写账本；`SqlHandle` 没有事务入口，因此**每条迁移必须自身幂等**（`IF NOT EXISTS`、`INSERT OR IGNORE`、只容忍 `duplicate column name`）。
+- v1 = 现行 20 张业务表，**先 CREATE 后 ALTER**：修掉 `sessions_meta` 现在"先 ALTER 后 CREATE、空库 ALTER 全被吞"导致首请求缺 `deleted/model/hidden/parent_id/fork_at` 的顺序缺陷。
+- v2 = `vfs_files` → `vfs_v2`（根会话 `'1'`）数据搬迁，`INSERT OR IGNORE` 后 `DROP TABLE IF EXISTS`。
+- 唯一入口 `ensureMigrated()`：`SpikeAgent` 上 `private migrated: Promise<void> | null`，`open()` 与 `alarm()` 先 await；请求路径**不再**出现 `ensureTables`。
+- 不允许在迁移里读 `env`/发起网络请求；向量回填仍由既有后台任务负责。
+
+### 9.5 验收测试
+
+1. `tests/unit/migrations.test.ts`：用 `node:sqlite`（Node 22.5+，CI 为 Node 22）在 `:memory:` 跑真 SQLite，断言空库一次 migrate 后 `PRAGMA table_info(sessions_meta)` 含 `deleted/model/hidden/parent_id/fork_at`；二次 migrate 返回 0；`schema_migrations` 行数等于 `MIGRATIONS.length`；预置 `vfs_files` 后迁移数据进入 `vfs_v2` 且旧表消失。
+2. `tests/api/api.test.ts` 增加"空 persist 首请求"：`rmSync(tests/.tmp-state)` 后第一个 DO 请求为 `GET /api/sessions`，必须 200 且 `sessions` 元素带 `model` 字段定义（无会话时至少断言 200 与数组类型）。
+3. `npm test` 全绿（现有金标 + 上述新增）。
+
+### 9.6 CI 边界检查
+
+`scripts/check-layering.sh`，在 `.github/workflows/deploy.yml` 的 test job 中 `npm test` 之前执行；目录不存在时跳过（阶段 0a 先落地，阶段 0b 起生效）：
+
+```bash
+fail=0
+chk() { [ -d "$1" ] && grep -rEn "$2" "$1" --include='*.ts' && fail=1; return 0; }
+chk src/worker/routes   'sqlFacade|sql\.exec\('
+chk src/worker/services 'new Response|Response\.(json|redirect)|^\s*import .*routes/'
+chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./services|from "\.\./routes'
+[ "$fail" = 0 ] || { echo "分层边界检查失败"; exit 1; }
+```
+
+`worker.ts` 在阶段 6 前仍含 SQL，规则 6 的"worker.ts 不得定义业务 SQL"从阶段 6 开始启用。
+
+### 9.7 执行顺序与并行冲突
+
+| 顺序 | 阶段 | 前置 | 冲突面 |
+|---|---|---|---|
+| 1 | 0a 迁移器 | 无（可立即开） | `worker.ts:46-153`、`open()/alarm()`；PR #17 不碰这段 |
+| 2 | 0b 路由表 | 0a 合并 + PR #17 合并 | `handleFetch` 全段；#17 正在改 12 处 route hunk，必须先合 |
+| 3 | 1 会话/文件 | 0b | `/sessions*`、`/files*` |
+| 4 | 2 知识库 | 1 | `/kb*`；NERE-17 已合并，可动 |
+| 5 | 3 分享 | 2 | `/share`、`/shares`、`/s/`；**吸收 NERE-22** |
+| 6 | 4 设置/供应商/MCP/自动化/审批/问答 | 3 | 同时把 `customToolNames`（`worker.ts:350`）与 `mcpCache`（`worker.ts:2063`）从模块级搬入 DO 实例，消除 R5 跨 DO 串数据 |
+| 7 | 5 chat 合并 | 4 或 0b（可与 2-4 并行，但同一 PR 只做这一域） | `runChat`（2702-2769）/`runChatStream`（3699-3875） |
+| 8 | 6 收口 | 全部 | 删除 `sqlFacade`/`ensureTables`/`scope()` |
+
+## 10. 执行状态
+
+- 2026-10-21：ADR 转 Accepted；阶段 0a 已派给 后端-bei（NERE-21 子任务），0b 等待 PR #17 合并。
+- 后续每个阶段完成后在本节追加一行：阶段号、PR、验收命令结果。
 
 ## 后果
 
@@ -179,7 +307,7 @@ CI 用 grep 检查即可（无需引入新框架）：
 
 ## 备选方案
 
-1. **保持单文件**：改动最快，但已出现 43 处内联 SQL 与跨 DO 全局状态；否决。
+1. **保持单文件**：改动最快，但 `handleFetch` 内已出现 105 处内联 SQL 与跨 DO 全局状态；否决。
 2. **按功能拆成多个 DO**：请求放大、跨 DO 事务丢失、免费额度下子请求成本上升；否决。分层不需要拆部署单元。
 3. **引入 RPC 框架（tRPC/oRPC）**：当前只有同源 HTTP 与内部 DO 协议，收益不足以抵消依赖与类型生成成本；否决。
 4. **只做 lint 规则不拆文件**：规则无法消除已有耦合；作为阶段 0 的辅助手段保留。
