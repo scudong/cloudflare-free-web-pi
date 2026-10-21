@@ -1,0 +1,44 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "bdfdb0d9716236eabb16021309621978eb7f5ded",
+  "prompts": {
+    "65a98388a9d3101c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "409a88fa-569f-4901-a375-c989e1077e38",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 72,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/api.ts": {
+          "accepted_lines": 72
+        }
+      }
+    },
+    "7c3cf012d2155818": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28d4b333-925b-4539-9236-01fb4d90af48",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 1,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "README.zh-CN.md": {
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
