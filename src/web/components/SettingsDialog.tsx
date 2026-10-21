@@ -51,6 +51,11 @@ interface SettingsDialogProps {
 	/** 思考档位（v0.22.0）：off / low / high。 */
 	thinkingLevel: string;
 	onChangeThinkingLevel: (next: string) => void;
+	/** 分享页署名与默认有效期（v0.55.0）。 */
+	displayName: string;
+	onSaveDisplayName: (next: string) => void;
+	shareTtlSeconds: number;
+	onChangeShareTtl: (next: number) => void;
 	/** 上下文压缩策略（v0.30.0）。 */
 	compaction: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number } | null;
 	onChangeCompaction: (patch: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>) => void;
@@ -249,6 +254,10 @@ export function SettingsDialog({
 	onChangeKbRetrieval,
 	thinkingLevel,
 	onChangeThinkingLevel,
+	displayName,
+	onSaveDisplayName,
+	shareTtlSeconds,
+	onChangeShareTtl,
 	compaction,
 	onChangeCompaction,
 	sessionId,
@@ -266,6 +275,8 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
 	const restoreRef = useRef<HTMLInputElement>(null);
 	const [tab, setTab] = useState<SettingsTab>("general");
+	/** 分享署名草稿（v0.55.0）：失焦时保存，避免每敲一个字发一次请求。 */
+	const [nameDraft, setNameDraft] = useState(displayName);
 	const [clearing, setClearing] = useState(false);
 	/** 工具清单（v0.33.0）：打开「对话」tab 时读取，用于逐工具覆盖。 */
 	const [toolList, setToolList] = useState<{ name: string; category: string; policy: string; override: string }[]>([]);
@@ -481,6 +492,10 @@ export function SettingsDialog({
 	useEffect(() => {
 		if (open) setTab("general");
 	}, [open]);
+
+	useEffect(() => {
+		if (open) setNameDraft(displayName);
+	}, [open, displayName]);
 
 	const handleClear = () => {
 		if (clearing || memories.length === 0) return;
@@ -846,6 +861,50 @@ export function SettingsDialog({
 									<Switch checked={webSearch === true} onChange={onToggleWebSearch} label="启用网页搜索" />
 								</div>
 								{webSearch === null && <p className="mt-2 text-xs text-slate-500">正在读取设置…</p>}
+							</Section>
+							<Section title="分享链接">
+								<label className="block text-sm text-slate-200" htmlFor="share-display-name">
+									分享页署名
+								</label>
+								<input
+									id="share-display-name"
+									value={nameDraft}
+									onChange={(event) => setNameDraft(event.target.value)}
+									onBlur={() => {
+										if (nameDraft.trim() !== displayName) onSaveDisplayName(nameDraft);
+									}}
+									maxLength={40}
+									placeholder="未设置时显示 π Harness"
+									className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-1.5 text-sm text-slate-100 outline-none focus:border-sky-500/60"
+								/>
+								<p className="mt-1 text-xs leading-relaxed text-slate-500">显示在分享页页脚，和生成时间一起出现。</p>
+								<p className="mt-3 text-sm text-slate-200">模型分享时的默认有效期</p>
+								<div className="mt-1.5 flex flex-wrap gap-1.5">
+									{[
+										{ label: "1 小时", seconds: 3600 },
+										{ label: "1 天", seconds: 86400 },
+										{ label: "7 天", seconds: 604800 },
+										{ label: "30 天", seconds: 2592000 },
+										{ label: "永久", seconds: 0 },
+									].map((option) => (
+										<button
+											key={option.seconds}
+											type="button"
+											onClick={() => onChangeShareTtl(option.seconds)}
+											aria-pressed={shareTtlSeconds === option.seconds}
+											className={`rounded-lg border px-2.5 py-1 text-xs transition-colors ${
+												shareTtlSeconds === option.seconds
+													? "border-sky-500 bg-sky-500/20 text-sky-100"
+													: "border-slate-700 text-slate-300 hover:bg-slate-800"
+											}`}
+										>
+											{option.label}
+										</button>
+									))}
+								</div>
+								<p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+									share_file / share_conversation 不传 ttlSeconds 时使用；手动分享弹窗仍可选。
+								</p>
 							</Section>
 						</>
 					)}

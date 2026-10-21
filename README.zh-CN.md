@@ -34,7 +34,7 @@
 | 执行 | `codemode`：模型写 JavaScript 在 QuickJS 沙箱里跑，脚本内可 `await tools.<name>()` 调用其它工具；`dispatch_tasks`：2–4 个独立子任务并行分派给子代理后汇总 |
 | 网页 | `web_search` 联网搜索 + `web_fetch_page` 抓取正文（DeepSeek 搜索 API，设置中可开关）；`http_fetch` 直接抓取；**Browserbase MCP** 云端浏览器（导航/点击/提取，无需本地 Chrome） |
 | 记忆 | `remember` / `recall` + 每 6 条自动 `reflect` 抽取长期事实（带去重） |
-| 文件 | 按会话隔离的虚拟文件系统（`write_file` / `read_file` / `list_files`），右栏可预览 Markdown 与 HTML；**左栏「全部文件」跨会话汇总当前用户的所有产出**；Markdown / HTML 可生成**走你自己域名**、带有效期的公开分享链接 |
+| 文件 | 按会话隔离的虚拟文件系统（`write_file` / `read_file` / `list_files`），右栏可预览 Markdown 与 HTML；**左栏「全部文件」跨会话汇总当前用户的所有产出**；Markdown / HTML 可生成**走你自己域名**、带有效期的公开分享链接；模型可用 `share_file` / `share_conversation` 直接产出链接卡（同一文件复用未过期 token） |
 | 知识库 | **每个用户独立的知识库**（每人一个 DO）：粘贴资料自动分块 + 中文全文索引（FTS5 / bm25），模型侧 `kb_search` / `kb_add` / `kb_list` / `kb_delete`；**每轮按用户消息自动预检索并注入前 3 段**（设置→对话可关）；左栏「知识库」可检索、查看全文、删除 |
 | 能力 | **能力注册表**（内置/数据/协议三类汇总）、**提示模板**（`/` 展开，支持 `$1` 占位）、**规则文件**（每轮注入）、自定义技能（`SKILL.md` 规范）+ 一键安装 `badlogic/pi-skills` 社区技能；模型按需 `load_skill`，也可在输入框用 `/技能名` 显式调用 |
 | 扩展 | 任意 **MCP** 服务器（Streamable HTTP，支持自定义请求头） |
@@ -159,11 +159,11 @@ npx wrangler deploy
 | POST | `/api/skills/import` | `{url}` 从 GitHub/raw/任意 md 导入技能 |
 | GET / POST / DELETE | `/api/mcp` | MCP 服务器配置（支持 `headers`） |
 | GET / POST / DELETE | `/api/providers` · `/api/providers/activate` | LLM 供应商（自定义 OpenAI 兼容端点） |
-| GET / POST | `/api/settings` | 全局设置（网页搜索开关 `webSearch`、思考档位 `thinkingLevel`） |
+| GET / POST | `/api/settings` | 全局设置（网页搜索开关 `webSearch`、思考档位 `thinkingLevel`、分享页署名 `displayName`、分享默认有效期 `shareTtlSeconds`） |
 | GET | `/api/plan?sessionId=` | 当前会话的分步计划 |
 | GET | `/api/context?sessionId=` | 上下文占用估算（百分比 / 窗口） |
 | GET / POST / PATCH / DELETE | `/api/automations` | 定时任务 |
-| POST | `/api/share` · GET `/s/<token>` | 只读分享（`kind=conversation/file`，`ttlSeconds` 可选，0 = 永久；`theme` 记录分享页配色） |
+| POST | `/api/share` · GET `/s/<token>` | 只读分享（`kind=conversation/file`，`ttlSeconds` 可选，不传用 `shareTtlSeconds` 设置、0 = 永久；`theme` 记录分享页配色；页脚署名 + 生成时间） |
 | GET | `/api/shares?sessionId=&kind=&name=` | 未过期的分享链接（打开弹窗时复用） |
 | GET | `/api/export?format=md` | 导出 Markdown |
 | GET / POST | `/api/backup` · `/api/restore` | 全量备份 / 合并恢复 |
