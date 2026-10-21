@@ -1,78 +1,190 @@
-# ADR-0001：分层规范
+# ADR-0001：后端分层规范（Route → Service → Repository → DO）
 
-- 状态：提案（Proposed）— 前端章节由 前端架构-qian 起草（NERE-20），后端章节由 后端架构-hou 补齐（NERE-18）
-- 影响范围：`src/web/**`（前端）、`src/worker.ts`（后端）
+- 状态：提案（Proposed）
+- 日期：2026-10-21
+- 决策人：后端架构-hou（NERE-18）
+- 范围：`src/worker.ts` 及后续拆出的后端模块
+- 关联：`docs/architecture-map.md`（现状与 R1-R15 风险编号）、[`docs/adr/0002-frontend-layering.md`](./0002-frontend-layering.md)（前端分层）
 
-分两个独立章节，各自拥有。合并进本文件时**追加，不覆盖**：如果远端已有本文件，先 `git fetch` 看内容，把自己的章节追加进去。
+## 背景
 
----
+后端目前是一个 4856 行的 `src/worker.ts`：78 个 HTTP 端点、41 个 DO 方法、21 张表的 DDL 与 131 处 SQL 调用混在同一文件。路由 handler 内联了 43 处 SQL（`worker.ts:3575-4553`），模块级 helper 通过 `sqlFacade` 这个 AsyncLocalStorage 代理隐式取库（`worker.ts:52-57`），导致：
 
-## 前端章节（owner：前端架构-qian）
+- 业务逻辑无法在 DO 之外单测，任何查询都要构造完整请求作用域。
+- 依赖方向不可见：路由既能直接 SQL，也能调 DO 方法，还能调工具 helper；同一件事有三种写法。
+- 改动半径大：所有后端功能都落在同一文件，任意后端 PR 都会触碰它，评审与回滚都只能整文件进行。
+- 迁移逻辑在请求路径重复执行（51 次 `ensureTables`），且顺序脆弱（R4）。
+- 跨 DO 的模块级可变状态（`customToolNames`、`mcpCache`）构成隔离隐患（R5）。
 
-### 背景
+前端同样需要一条明确的分层边界，但前端细则由前端架构-qian 维护；本 ADR 只锁定与后端契约相关的部分。
 
-`src/web` 从单页聊天长成了 8000 行 / 22 个组件，但没有成文的分层。后果已经可见：
+## 决策（后端）
 
-- `App.tsx` 1775 行、60+ 个 `useState`、58 处 `api.*` 调用，任一处变化重跑整页渲染。
-- 设置项在 `SettingsDialog` 里自取自存（18 处 `api.*`），页面层同时持有同一份设置，出现两个读者。
-- 同一段剪贴板兜底逻辑在 4 个组件里各写一遍；同一张有效期选项表存在两份，文案还不一致。
-- 聊天里的文件卡、分享卡是**从工具结果的中文展示串里正则解析**出来的——展示文案事实上成了跨端协议，worker 侧没有任何断言保护这个格式。
+采用四层，依赖只能向下：
 
-### 决策：四层，目录即层
+```text
+Route（HTTP）
+  ↓
+Service（用例）
+  ↓
+Repository（SQL）
+  ↓
+Durable Object / SQLite / 外部适配器
+```
 
-| 层 | 位置 | 职责 | 硬规则 |
-| --- | --- | --- | --- |
-| L1 页面层 | `App.tsx`, `main.tsx` | 布局组装、页面级服务端状态、事件处理 | 不内联超过 ~40 行的渲染块；不拼 URL |
-| L2 特性组件层 | `components/*` | 一个领域块的全部渲染与交互（消息流、工作台、设置、分享…） | 不新增「自己那一套」全局设置读写 |
-| L3 基础 UI 层 | `components/Icon.tsx`、各组件内的纯展示子组件 | 无业务语义的展示 | 不认识 `api.*`、不认识接口字段名 |
-| L4 逻辑与数据层 | `lib/*` | `api.ts` 唯一传输；`entries.ts`/`collections.ts` 解析成领域模型；`format.ts`/`localStore.ts`/`theme.ts` 纯函数与持久化 | 不引组件（`rich.tsx` 是渲染函数库，例外） |
+### 1. Route 层：只做 HTTP
 
-目标态允许在 L2 与 L4 之间加一层 `hooks/`（`useXxx`）：一个 hook 拥有一个服务端资源的读、写、刷新。**没有 hooks 层的现状就是 `App.tsx` 膨胀的根因**，新增资源优先加 hook，不再往 `App` 里加 `useState` + `loadX`。
+位置：`src/worker/routes/*.ts`，由 `src/worker/routes/index.ts` 汇总为路由表。
 
-### 规则
+允许：method/path 匹配、读取 cookie/header、解析 JSON、基础校验、选择 Service、把 Service 结果映射为状态码/响应头。
 
-**R-FE-1 传输唯一。** `src/web/**` 里只允许 `lib/api.ts` 出现 `fetch(`。新增接口：在 `api.ts` 里加方法并写返回类型，调用方只拿解析结果。违反了就是 `[blocker]`。
+禁止：
 
-**R-FE-2 领域类型唯一。** 领域模型只定义在 `src/web/types.ts`（`ChatMessage`、`FileArtifact`、`ShareLinkInfo` …）。`lib/api.ts` 里的类型是**传输 DTO**，命名必须与领域类型区分（例如 `ShareRecordDto`），不得与 `types.ts` 重名。同名不同类型出现即 `[blocker]`——它会让后续 import 直接拿错。
+- 任何 SQL 字符串或 `sqlFacade`。
+- 任何 `open()`/Harness/LLM/MCP/Vectorize 调用。
+- 业务分支（例如"删除会话时顺带暂停目标"属于 Service）。
+- 直接拼接外部错误文本；统一抛 `AppError`。
 
-**R-FE-3 服务端状态有唯一位。** 同一份服务端数据在任一时刻只有一个持有者。设置项由页面层一次性加载后向下传 props 与 `onChange`；组件自己 `api.settings()` 再 PATCH 视为第二套状态，记 `[建议]`；由此产生前后端默认值常量各写一遍的，记 `[blocker]`（默认值漂移是静默错误）。
+路由表形态（示意）：
 
-**R-FE-4 展示串不是协议。** UI 需要的结构化事实（链接、token、有效期、文件名）必须来自结构化字段，不得正则解析给人看的中文串。过渡期允许保留人读文案，但必须同时输出一行机器可读字段（如 `[share] url=… kind=… expires=…`），且该行有测试。新增「解析展示串」的代码即 `[blocker]`。
+```ts
+type Route = {
+  method: "GET" | "POST" | "PATCH" | "DELETE";
+  path: string;                       // DO 内部短路径，如 "/sessions"
+  handle(ctx: RequestContext): Promise<Response>;
+};
+```
 
-**R-FE-5 平台能力收口到 `lib`。** 剪贴板、存储、主题、URL 拼装（`shareUrlFor`）只许有一份实现。发现第二份实现时，先抽 `lib`，再用在组件里。
+`SpikeAgent.fetch` 只负责建立 `RequestContext`（sql、harness 惰性句柄、env、scopeId、userId）并交给路由表；`UserRegistry.fetch` 同理。
 
-**R-FE-6 常量不重复。** 选项表（有效期、档位、主题）与其文案放在 `lib` 或组件文件顶部一处导出，跨组件复用引同一份。
+### 2. Service 层：用例与编排
 
-**R-FE-7 组件职责单一。** 单个组件 > 300 行或同时负责「取数 + 交互 + 复杂渲染」中的两项以上，记 `[建议]` 并提出拆分（边界、props 契约、迁移步骤）。`[blocker]` 只用于本轮改动新增的巨型组件。
+位置：`src/worker/services/*.ts`，按领域一份：
 
-**R-FE-8 渲染边界。** 列表项与卡片组件在父级高频更新（流式 `elapsed`、消息数组）时提供 memo 边界；新增「每 tick 重算整棵树」的写法记 `[建议]`。
+| Service | 覆盖现状路径/方法 | 备注 |
+|---|---|---|
+| `chat-service` | `/chat`、`/chat/stream`、`/interject`、`/abort`、`/reset`、`/compact` | 合并 R11 的两套实现 |
+| `session-service` | `/sessions*`、`/branches`、`/entries`、`/session` | 会话元数据与 Harness 的唯一协调点 |
+| `file-service` | `/files*` | `vfs_v2` |
+| `kb-service` | `/kb*` | 分块、FTS、向量、预检索 |
+| `share-service` | `/share`、`/shares`、`/s/` | 渲染可作为纯函数单独存在 |
+| `automation-service` | `/automations*`、`alarm`、目标续转 | 调度策略 |
+| `settings-service` | `/settings`、`/providers*`、`/models`、`/model` | 触发 Harness 重建 |
+| `memory-service` | `/memories*`、`/reflect` | |
+| `approval-service` | `/approvals*`、审批闸门 | |
+| `question-service` | `/questions*`、`ask_user` | |
+| `user-service` | `/internal/*`、用户 CRUD、吊销 | UserRegistry 与用户 DO 的跨 DO 协议 |
 
-**R-FE-9 可访问性基线（不可谈判项）。** 图标按钮必须有 `aria-label`；切换态用 `aria-pressed`；异步结果（复制成功、保存成功）要有文本反馈；外链 `rel="noopener noreferrer"`；弹窗 Esc 可关。缺哪条记 `[建议]`，导致键盘/读屏用户无法完成主流程的记 `[blocker]`。
+规则：
 
-### 评审标注约定
+- Service 接收显式依赖：`{ sql, harness(), env, scopeId }`，不读模块级全局。
+- Service 可以组合多个 Repository，但不直接写 SQL。
+- Service 负责事务边界、幂等键、级联清理与生命周期。
+- 长耗时工作（向量补齐、反思、alarm 续转）由 Service 决定是否 `waitUntil`/写 `next_run_at`。
+- 工具扩展（`defineTool`）只能调用 Service 或 Repository，不允许内联 SQL；审批包装在工具边界完成，不进入 Service。
 
-- `[blocker]`：违反 R-FE-1 / R-FE-2 / R-FE-3（默认值漂移）/ R-FE-4 / R-FE-9（主流程不可达）→ 挡合并。
-- `[建议]`：职责、状态归属、重渲染、命名、可访问性缺失。
-- `[nit]`：文案、常量摆位、格式。
+### 3. Repository 层：只做 SQL
 
-### 当前偏差（本 ADR 通过后的清理清单）
+位置：`src/worker/repo/*.ts`，按聚合一份（`sessions-repo`、`files-repo`、`kb-repo`、`shares-repo`、`settings-repo`、`approvals-repo`、`automations-repo`、`providers-repo`、`memory-repo`）。
 
-| 偏差 | 触发规则 | 去向 |
-| --- | --- | --- |
-| `ShareLinkInfo` 在 `types.ts`（UI 模型）与 `lib/api.ts`（分享记录）重名不同形状 | R-FE-2 | PR #7 修复 |
-| 分享卡从 worker 中文展示串解析 | R-FE-4 | `[ARCH]` R1 |
-| 剪贴板兜底 4 份实现 | R-FE-5 | `[ARCH]` R1 |
-| TTL 选项表 2 份、默认值前后端各 1 份 | R-FE-3 / R-FE-6 | `[ARCH]` R1 |
-| `App.tsx` 1775 行 + 58 处 api + 60 useState（hooks 层缺失） | R-FE-7 | `[ARCH]` R2 |
-| `MessageList` 无 memo 边界 | R-FE-8 | `[ARCH]` R3 |
+- 输入/输出都是类型化记录，不返回 `Response`，不抛 HTTP 语义错误。
+- 每个表只有一个写入口；跨表写由 Service 组合（必要时传事务句柄）。
+- 允许 Repository 暴露 `listX`、`getX`、`upsertX`、`deleteX`、`countX`；禁止在 Repository 里做权限判断或格式化。
+- 迁移与 DDL 不属于 Repository 的运行时职责，见第 6 节。
 
----
+### 4. DO 层：组合根与状态容器
 
-## 后端章节（owner：后端架构-hou）
+- `SpikeAgent` 只保留：构造/惰性 `open()`、`fetch` 包装 `agentScope`、`alarm` 包装作用域、Harness 生命周期（`open`/`close`/`recover`）、把依赖注入给路由与 Service。
+- `UserRegistry` 同样拆 route/service/repo，但它不加载 Harness。
+- **不拆 DO**。本次分层是代码边界，不是部署边界；保持每用户单 DO 的事务与一致性。跨 DO 只允许显式、类型化的 `fetch` 协议（当前为 `/internal/verify-code`、`/internal/user-status`）。
 
-（待补：worker / Durable Object / 存储 / 工具层分层。本节由 后端架构-hou 在 NERE-18 内追加，前端章节请勿改动。）
+### 5. 依赖规则（可自动检查）
 
-与前端章节有两处接口约定需要对齐，供后端起草时参考：
+1. `routes/**`：禁止出现 `sql`、`sqlFacade`、`Harness`、`fetch(`、`vectorUpsert`。
+2. `services/**`：禁止出现 `Response`、`Request`、`crypto.subtle`（鉴权 crypto 属于 `auth/`）、直接 `fetch(`（外部适配器除外）。
+3. `repo/**`：禁止 import `services`/`routes`，禁止 `Response`、`fetch`、`Math.random`（token 在 Service 生成）。
+4. `worker.ts` / `do/**`：只允许 import routes、services 的入口与共享纯函数；不允许定义业务 SQL。
+5. 工具扩展文件：只允许 import services/repo，不允许 `sqlFacade`。
+6. 共享纯函数（markdown 渲染、token 编码、RRF、分块）放在 `src/worker/lib/`，不得 import 上述任一层。
+7. 单一写者：每张表在 `architecture-map.md` 第 5 节登记唯一写入口。
 
-1. **工具结果的结构化输出**（对应 R-FE-4）：`share_file` / `share_conversation` 目前只返回中文展示串，前端正则解析。建议在返回文本末尾追加一行机器可读字段，或走结构化输出字段，由前端按行解析。
-2. **设置项的默认值归属**（对应 R-FE-3）：`shareTtlSeconds` 的默认值当前在前端（`7 * 24 * 3600`）与后端（`SHARE_TTL_DEFAULT_SECONDS`）各写一遍。建议由 `GET /api/settings` 始终返回有效值（不回 `undefined`），前端不再保留兜底常量。
+CI 用 grep 检查即可（无需引入新框架）：
+
+```bash
+! grep -rE "sqlFacade|\bsql\.exec\(" src/worker/routes
+! grep -rE "new Response|Response\.json" src/worker/services src/worker/repo
+! grep -rE "sqlFacade" src/worker/extensions
+```
+
+### 6. 迁移与 schema
+
+- 新增 `src/worker/db/migrations.ts`，按版本号有序执行，记录到 `schema_migrations(version, applied_at)`。
+- 请求路径不再调用 `ensureTables`；只在 DO 首次 `open()` 时执行一次 `migrate(sql)`。
+- 迁移必须先 `CREATE TABLE` 再 `ALTER TABLE`；不允许吞掉非"列已存在"的错误。
+- 每个迁移必须能在空库上从 0 跑到最新；CI 增加"空 persist 首次请求"用例。
+
+### 7. 错误、幂等与限额
+
+- `AppError { code, status, message, retryable }`；Route 统一映射，禁止把内部异常原文直接回给客户端。
+- 写操作明确幂等语义：`POST /sessions`、`POST /share` 允许重复创建；`POST /restore` 必须可重入；`POST /chat` 不承诺幂等，需前端去重。
+- Service 内显式声明 DO 子请求/存储限额假设（例如向量索引每批 100 段、备份不分页的上限）。
+- 每个外部调用（LLM/MCP/Vectorize/AI）必须有超时或降级路径；分享、设置读取等只读路径不得因外部服务不可用而失败。
+
+### 8. 前端半（由前端架构-qian 补充）
+
+已对齐的边界，仅约束跨端契约：
+
+- 页面层（`App.tsx` 及路由级组合）负责会话选择与面板编排，不直接 `fetch`。
+- 特性层按域拆（chat、sessions、files、knowledge、settings），持有该域的 UI 状态与副作用。
+- 基础 UI 层（`components/`）无网络、无全局状态。
+- hooks/状态层（`lib/`）封装 API 客户端与可复用状态；所有请求走 `lib/api.ts`。
+- 首屏聚合接口（`/api/bootstrap`）落地后，页面层只保留一个引导请求；变更类操作仍走各自端点。
+
+前端具体目录、状态归属与组件树由前端架构-qian 在 `docs/frontend-map.md` 与其 ADR 补充；本 ADR 不替前端定组件边界。
+
+## 迁移步骤
+
+每个步骤单独 PR、不含行为变更、测试全绿后再进入下一步：
+
+| 阶段 | 内容 | 验收 |
+|---|---|---|
+| 0 | 建 `routes/` + `RequestContext` + `AppError` + 迁移器骨架；原逻辑原样搬入 | 端点行为不变；空库首启通过 |
+| 1 | `session-service` + `file-service` + 对应 repo | 路由层不再有 `sessions_meta`/`vfs_v2` SQL |
+| 2 | `kb-service` + `kb-repo`（含向量补齐） | `/kb*` 路由零 SQL |
+| 3 | `share-service` + 渲染纯函数 | `/s/` 文件分享不启动 Harness |
+| 4 | `settings/providers/mcp/automations/approvals/questions` | 对应路由零 SQL |
+| 5 | `chat-service` 合并流式/非流式；DO 只留组合根 | `chat` 与 `chat/stream` 共用提交路径 |
+| 6 | 删除 `sqlFacade` 与 `ensureTables` 请求路径调用 | CI 边界检查通过 |
+
+约束：
+
+- 不与功能 PR 混做；每个 PR 限定一个域，避免与 NERE-17（KB ingest）、NERE-8（分享工具）等并行改动冲突。
+- 不做全文件格式化；评审用 `git diff -w` 看语义变更。
+- 每阶段保留原端点与响应结构，前端无需同步改动。
+
+## 后果
+
+正面：
+
+- Service 可用 fake repository 单测；路由可用纯函数测校验与状态码。
+- 依赖方向由 CI 强制，新增功能不会再往路由里塞 SQL。
+- 分享、鉴权、向量等热点路径可以独立优化而不牵动全局。
+- 迁移可回放，空库首启可验证。
+
+负面：
+
+- 文件数增加、初期有转发层；需要团队遵守边界，否则会退化成"薄 Service + 胖 Route"。
+- 迁移期间 PR 冲突成本上升，必须按域串行合并。
+- 不拆 DO，单用户热点仍在同一 DO；本 ADR 不解决横向扩展，只解决可维护性与失败半径。
+
+## 备选方案
+
+1. **保持单文件**：改动最快，但已出现 43 处内联 SQL 与跨 DO 全局状态；否决。
+2. **按功能拆成多个 DO**：请求放大、跨 DO 事务丢失、免费额度下子请求成本上升；否决。分层不需要拆部署单元。
+3. **引入 RPC 框架（tRPC/oRPC）**：当前只有同源 HTTP 与内部 DO 协议，收益不足以抵消依赖与类型生成成本；否决。
+4. **只做 lint 规则不拆文件**：规则无法消除已有耦合；作为阶段 0 的辅助手段保留。
+
+## 回滚
+
+- 每个阶段独立 PR，回滚即 revert 该 PR；无 schema 破坏性变更（阶段 0 的迁移器只新增 `schema_migrations`）。
+- 若拆分导致线上问题，保留原 `worker.ts` 路由作为开关回退一个发布周期，再移除。

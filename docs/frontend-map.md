@@ -1,10 +1,10 @@
 # 前端地图（src/web）
 
-维护人：前端架构-qian。基线提交：v0.55.0（PR #7 之后）。改动前端结构时同步更新本文件。
+维护人：前端架构-qian。基线提交：v0.56.0（PR #11 / #14 之后）。改动前端结构时同步更新本文件。
 
 用途：回答「这个页面由哪些组件拼成、状态属于谁、数据从哪个接口来」。评审时用它判断改动是否越层。
 
-分层与命名规则见 [`docs/adr/0001-layering.md`](./adr/0001-layering.md) 的前端章节。
+分层与命名规则见 [`docs/adr/0002-frontend-layering.md`](./adr/0002-frontend-layering.md)。
 
 ## 1. 目录即分层
 
@@ -14,7 +14,7 @@
 | 特性组件层 | `src/web/components/*.tsx` | 一个领域块（消息、工作台、设置、分享…）的渲染与交互 | 绕过 `lib/api.ts` 发请求、自定义一套全局设置读写 |
 | 基础 UI 层 | `components/Icon.tsx`、`components/*` 内的纯展示子组件 | 无业务语义的展示与样式聚合 | 认识 `api.*`、认识具体接口字段 |
 | 逻辑与数据层 | `src/web/lib/*` | `api.ts` 是唯一传输层；`entries.ts`/`collections.ts` 把响应解析成领域模型；`format.ts`/`localStore.ts`/`theme.ts` 放纯函数与本地持久化 | 引 React 组件（`rich.tsx` 除外，它是渲染函数库）、抛业务文案 |
-| 类型 | `src/web/types.ts` | 唯一的领域类型来源（`ChatMessage`、`FileArtifact`、`ShareLinkInfo` …） | 在组件文件里重复声明同名领域类型 |
+| 类型 | `src/web/types.ts` | 唯一的领域类型来源（`ChatMessage`、`FileArtifact`、`ShareLink` …） | 在组件文件里重复声明同名领域类型 |
 
 现状硬约束：`src/web/**` 内除 `lib/api.ts` 外**没有**任何 `fetch(`。新增请求一律加到 `api.ts` 并给返回类型。
 
@@ -42,7 +42,7 @@ App（页面层，1775 行）
 │  │     ├─ ThinkingBlock   思考过程（折叠）
 │  │     ├─ ToolBar         工具活动条（含 args/full 结果）
 │  │     ├─ ArtifactCard    本轮产出文件卡
-│  │     ├─ ShareCard       本轮分享链接卡（v0.55.0）
+│  │     ├─ ShareLinkCard   本轮分享链接卡（v0.55.0）
 │  │     └─ rich.tsx        正文 Markdown 子集渲染
 │  ├─ PlanCard         计划清单（update_plan）
 │  ├─ GoalBar          目标进度
@@ -80,7 +80,7 @@ App（页面层，1775 行）
 | `App` | `leftOpen`/`rightOpen`/`leftWidth`/`rightWidth`/`mobileTab`/`drawerOpen`/`settingsOpen`/`railView` | 纯 UI，已用 `localStorage` 记住尺寸 |
 | `Composer` | 草稿、`/` 菜单、附件 | 纯 UI |
 | `MessageList` | 滚动是否贴底 | 纯 UI |
-| `ShareCard`、`ShareDialog` | `copied`、`result` | 纯 UI（`host`+`path` 不落地） |
+| `ShareLinkCard`、`ShareDialog` | `copied`、`result` | 纯 UI（`host`+`path` 不落地） |
 | `ShareSettings`（`SettingsDialog` 内） | `displayName`、`ttl`、`message` | **服务端状态的局部副本**，见 3.3 |
 
 ### 3.3 已知反例（评审时要挡）
@@ -112,12 +112,12 @@ App（页面层，1775 行）
 ```
 worker 工具结果（中文展示串）
   → pi.tool-result 条目 / stream 的 tool_end.summary
-  → lib/entries.ts: artifactsOf() / parseShareResult()
+  → lib/entries.ts: artifactsOf() / shareOf()（优先 details.share）
   → ChatMessage.files / ChatMessage.shares
-  → MessageList → ArtifactCard / ShareCard
+  → MessageList → ArtifactCard / ShareLinkCard
 ```
 
-流式（`App.tsx` 事件归约）与历史回放（`parseEntries`）都调同一个 `parseShareResult`，两条路径收敛在 `MessageList` 一处渲染——这一点是对的，改动时不要打破。风险在格式：展示串即协议，见 `[ARCH]` 需求 R1。
+流式（`App.tsx` 事件归约）与历史回放（`parseEntries`）都调同一个 `shareOf`（v0.55.0 起优先读 `details.share`，文本仅兜底），两条路径收敛在 `MessageList` 一处渲染——这一点是对的，改动时不要打破。风险在格式：展示串即协议，见 `[ARCH]` 需求 R1。
 
 ## 5. 渲染与性能观察点
 
