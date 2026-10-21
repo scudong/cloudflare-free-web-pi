@@ -1,0 +1,30 @@
+marketing/06-seven-day-posts.md
+  00512495ff504ece 1-255,257-276,278-316,318-382
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "49e3e14f645b88bc7cce40460d1b08a480163a01",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 382,
+      "total_deletions": 0,
+      "accepted_lines": 379,
+      "overriden_lines": 3,
+      "per_file_stats": {
+        "marketing/06-seven-day-posts.md": {
+          "additions": 382,
+          "accepted_lines": 379,
+          "overriden_lines": 3
+        }
+      }
+    }
+  }
+}
