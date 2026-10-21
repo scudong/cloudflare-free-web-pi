@@ -2555,11 +2555,39 @@ img{max-width:100%;border-radius:8px}
 .md>*:first-child{margin-top:0}
 .md>*:last-child{margin-bottom:0}
 .empty{color:var(--muted);text-align:center}
+.thread{min-width:0}
+.fcard{display:flex;align-items:center;gap:.7rem;margin:1rem 0;padding:.7rem .9rem;background:var(--panel);border:1px solid var(--border);border-radius:12px;text-decoration:none;color:var(--fg)}
+a.fcard:hover{border-color:var(--accent-border);background:var(--accent-soft)}
+.fcard-icon{font-size:1.15rem;line-height:1}
+.fcard-text{display:flex;flex-direction:column;min-width:0}
+.fcard-name{font-weight:600;font-size:.92rem;word-break:break-all}
+.fcard-meta{color:var(--muted);font-size:12px}
+.fcard-action{margin-left:auto;color:var(--accent);font-size:12px;white-space:nowrap}
 footer{text-align:center;color:var(--muted);font-size:12px;padding:1.4rem 1rem 2rem}
 .expired{max-width:520px;margin:14vh auto;text-align:center;padding:2rem}
 .expired h1{font-size:1.3rem;margin:0 0 .6rem;border:0}
 .expired p{color:var(--muted)}
 `;
+}
+
+/** 从 write_file 的工具结果里取出文件名与字符数（「已写入 x.md（123 字符）。」）。 */
+function writeFileResult(text: string): { name: string; size: number } | null {
+	const match = /^已写入 (.+?)（(\d+) 字符）。/.exec(text.trim());
+	if (!match) return null;
+	const name = match[1].trim();
+	return name ? { name, size: Number(match[2]) } : null;
+}
+
+/** 工作台文件卡：有文件分享链接时整卡可点，否则只展示文件名与大小。 */
+function shareFileCard(name: string, size: number, href?: string): string {
+	const inner =
+		`<span class="fcard-icon" aria-hidden="true">📄</span>` +
+		`<span class="fcard-text"><span class="fcard-name">${escapeHtml(name)}</span>` +
+		`<span class="fcard-meta">${size} 字符</span></span>` +
+		(href ? `<span class="fcard-action">打开 →</span>` : "");
+	return href
+		? `<a class="fcard" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+		: `<div class="fcard">${inner}</div>`;
 }
 
 /** 分享页外壳（只读、noindex）。页脚显示署名与生成时间；expiresAt > 0 时再显示有效期。 */
@@ -3527,15 +3555,36 @@ export class SpikeAgent extends DurableObject {
 				parts.push(`<div class="msg user"><div class="who">用户</div><div class="md">${markdownToHtml(text, { headings, usedIds })}</div></div>`);
 			} else if (kind === "pi.assistant") {
 				parts.push(`<div class="msg bot"><div class="who">助手</div><div class="md">${markdownToHtml(text, { headings, usedIds })}</div></div>`);
+			} else if (kind === "pi.tool-result") {
+				// 工作台写入在分享页里补一张文件卡（NERE-13）：有同一文件的分享链接时可直接打开。
+				const blocks = Array.isArray(entry.model) ? (entry.model as { toolName?: unknown; isError?: unknown }[]) : [];
+				const block = blocks[0];
+				if (block?.toolName === "write_file" && !block.isError) {
+					const file = writeFileResult(text);
+					if (file) {
+						const tokenRows = sqlFacade!.exec(
+							"SELECT token FROM shares WHERE kind = 'file' AND session_id = ? AND name = ? AND (expires_at = 0 OR expires_at > ?) ORDER BY created_at DESC LIMIT 1",
+							String(share.session_id), file.name, Date.now(),
+						).toArray() as { token: string }[];
+						const href = tokenRows[0]?.token ? `/s/${tokenRows[0].token}` : undefined;
+						parts.push(shareFileCard(file.name, file.size, href));
+					}
+				}
 			}
 		}
 		return {
 			status: 200,
 			contentType: "text/html; charset=utf-8",
-			body: sharePage(title, parts.join("") || "<p class='empty'>（暂无内容）</p>", expiresAt, theme, shareToc(headings), {
-				author: shareAuthor(),
-				createdAt: share.created_at,
-			}),
+			body: sharePage(
+				title,
+				// 消息与文件卡必须包在一个容器里：main.with-toc 是两列网格，
+				// 顶层节点会各自成为网格项，导致文件卡跑到目录下面。
+				`<div class="thread">${parts.join("") || "<p class='empty'>（暂无内容）</p>"}</div>`,
+				expiresAt,
+				theme,
+				shareToc(headings),
+				{ author: shareAuthor(), createdAt: share.created_at },
+			),
 		};
 	}
 
@@ -5022,6 +5071,18 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 const OWNER_ID = "owner";
 const USER_ID_RE = /^u_[a-z0-9]{6,16}$/;
 
+/**
+ * 登录页演示链接（NERE-13）：只接受站内 /s/<token> 或 https 绝对地址。
+ * 配置写错时宁可不显示入口，也不把登录页变成开放跳转。
+ */
+function demoShareUrl(raw: unknown): string {
+	const value = typeof raw === "string" ? raw.trim() : "";
+	if (!value || value.length > 300) return "";
+	if (/^\/s\/[A-Za-z0-9._~-]+$/.test(value)) return value;
+	if (/^https:\/\/[^\s"'<>]+$/.test(value)) return value;
+	return "";
+}
+
 /** 旧版主人令牌 = HMAC(ACCESS_PASSWORD, 固定串)，改密码即全体失效。 */
 async function accessToken(password: string): Promise<string> {
 	const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -5218,7 +5279,14 @@ function sessionResponse(token: string, payload: Record<string, unknown>): Respo
 export default {
 	async fetch(
 		request: Request,
-		env: { SpikeAgent: DurableObjectNamespace; UserRegistry: DurableObjectNamespace; ACCESS_PASSWORD?: string; TEST_REGISTRY_STATS?: string },
+		env: {
+			SpikeAgent: DurableObjectNamespace;
+			UserRegistry: DurableObjectNamespace;
+			ACCESS_PASSWORD?: string;
+			TEST_REGISTRY_STATS?: string;
+			/** 登录页「看一个真实对话」入口：站内 /s/<token> 或 https 绝对地址。 */
+			DEMO_SHARE_URL?: string;
+		},
 	): Promise<Response> {
 		const url = new URL(request.url);
 		const password = env.ACCESS_PASSWORD ?? "";
@@ -5235,10 +5303,12 @@ export default {
 
 		// 登录/登出/状态：不需要已登录。
 		if (url.pathname === "/api/auth" && request.method === "GET") {
+			const demo = demoShareUrl(env.DEMO_SHARE_URL);
 			return Response.json({
 				required: protect,
 				authenticated: protect ? Boolean(userId) : true,
 				owner: !protect || userId === OWNER_ID,
+				...(demo ? { demoUrl: demo } : {}),
 			});
 		}
 		if (url.pathname === "/api/login" && request.method === "POST") {

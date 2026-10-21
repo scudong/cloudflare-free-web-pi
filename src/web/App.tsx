@@ -14,6 +14,7 @@ import { AskUserCard } from "./components/AskUserCard";
 import { UsersPanel } from "./components/UsersPanel";
 import { FilesPanel } from "./components/FilesPanel";
 import { KnowledgePanel } from "./components/KnowledgePanel";
+import { LoginGate } from "./components/LoginGate";
 import { Icon } from "./components/Icon";
 import { api, type BootstrapKey } from "./lib/api";
 import { useBootstrap } from "./hooks/useBootstrap";
@@ -104,7 +105,7 @@ export default function App() {
 	const [sessionId, setSessionId] = useState("1");
 	const [sessions, setSessions] = useState<SessionListItem[]>([]);
 	const [theme, setTheme] = useState<ThemeId>(() => readTheme());
-	const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean; owner?: boolean } | null>(null);
+	const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean; owner?: boolean; demoUrl?: string } | null>(null);
 	const [loginError, setLoginError] = useState<string | null>(null);
 	const [models, setModels] = useState<string[]>([]);
 	/** 供应商变更后重新拉取模型列表（v0.27.0）。 */
@@ -717,7 +718,7 @@ export default function App() {
 		void (async () => {
 			try {
 				const data = await api.auth();
-				if (alive) setAuth({ required: !!data.required, authenticated: !!data.authenticated, owner: !!data.owner });
+				if (alive) setAuth({ required: !!data.required, authenticated: !!data.authenticated, owner: !!data.owner, demoUrl: data.demoUrl });
 			} catch {
 				if (alive) setAuth({ required: false, authenticated: true, owner: true });
 			}
@@ -1333,7 +1334,7 @@ export default function App() {
 
 	// 未登录：整屏登录闸门（登录成功后同一组件继续渲染）
 	if (auth && auth.required && !auth.authenticated) {
-		return <LoginGate onSubmit={handleLogin} error={loginError} />;
+		return <LoginGate onSubmit={handleLogin} error={loginError} demoUrl={auth.demoUrl} />;
 	}
 	if (!auth) {
 		return (
@@ -1642,48 +1643,6 @@ export default function App() {
 					</button>
 				</nav>
 			)}
-		</div>
-	);
-}
-
-/** 访问密码登录闸门（v0.10.0）。 */
-function LoginGate({ onSubmit, error }: { onSubmit: (password: string) => Promise<void>; error: string | null }) {
-	const [password, setPassword] = useState("");
-	const [busy, setBusy] = useState(false);
-	return (
-		<div className="flex h-dvh items-center justify-center bg-slate-950 px-4">
-			<form
-				onSubmit={(e) => {
-					e.preventDefault();
-					if (!password.trim() || busy) return;
-					setBusy(true);
-					void onSubmit(password.trim()).finally(() => setBusy(false));
-				}}
-				className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900/80 p-7 shadow-xl"
-			>
-				<h1 className="mb-1 text-lg font-semibold text-slate-100">π Harness</h1>
-				<p className="mb-5 text-sm text-slate-400">请输入访问密码或邀请码</p>
-				{error && <p className="mb-3 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
-				<input
-					type="text"
-					value={password}
-					onChange={(e) => setPassword(e.target.value)}
-					placeholder="访问密码或邀请码"
-					aria-label="访问密码或邀请码"
-					autoComplete="off"
-					autoCapitalize="none"
-					spellCheck={false}
-					autoFocus
-					className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500"
-				/>
-				<button
-					type="submit"
-					disabled={busy || !password.trim()}
-					className="w-full rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40"
-				>
-					{busy ? "验证中…" : "进入"}
-				</button>
-			</form>
 		</div>
 	);
 }

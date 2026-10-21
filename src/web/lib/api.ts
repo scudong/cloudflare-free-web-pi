@@ -339,7 +339,7 @@ export const api = {
 	/** 当前部署构建号（/api/version 转发到既有 DO 路由）。 */
 	version: () => requestJson<{ build?: string; images?: boolean; search?: boolean }>("/api/version"),
 
-	auth: () => requestJson<{ required?: boolean; authenticated?: boolean; owner?: boolean }>("/api/auth"),
+	auth: () => requestJson<{ required?: boolean; authenticated?: boolean; owner?: boolean; demoUrl?: string }>("/api/auth"),
 
 	login: (password: string) =>
 		requestJson<{ ok?: boolean; owner?: boolean; name?: string; error?: string }>("/api/login", jsonPost({ password })),

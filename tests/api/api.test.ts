@@ -44,7 +44,7 @@ beforeAll(async () => {
 	rmSync(STATE, { recursive: true, force: true });
 	proc = spawn(
 		"npx",
-		["wrangler", "dev", "--config", "wrangler.test.jsonc", "--port", String(PORT), "--var", "ACCESS_PASSWORD:", "--var", "CF_DISABLE_VECTOR:1", "--persist-to", STATE],
+		["wrangler", "dev", "--config", "wrangler.test.jsonc", "--port", String(PORT), "--var", "ACCESS_PASSWORD:", "--var", "CF_DISABLE_VECTOR:1", "--var", "DEMO_SHARE_URL:/s/demo-demo-demo", "--persist-to", STATE],
 		{ cwd: ROOT, env: { ...process.env, CI: "1", WRANGLER_SEND_METRICS: "false" }, stdio: "ignore", detached: true },
 	);
 	await waitForServer();
@@ -59,6 +59,11 @@ describe("访问控制", () => {
 		const { json } = await api("/api/auth");
 		expect(json).toMatchObject({ required: false, authenticated: true });
 		expect(json.owner).toBe(true);
+	});
+
+	it("配置了 DEMO_SHARE_URL 时 auth 返回演示入口（NERE-13）", async () => {
+		const { json } = await api("/api/auth");
+		expect(json.demoUrl).toBe("/s/demo-demo-demo");
 	});
 });
 
@@ -489,6 +494,8 @@ describe("文件分享", () => {
 		expect(html).toContain("<li>第一条</li>");
 		expect(html).toContain("<table>");
 		expect(html).toContain("链接有效期至");
+		// 永久链接也应该显示生成时间（NERE-13 验收 4）
+		expect(html).toContain("生成于");
 		// 未指定主题时回落深色（Arco 深色底）
 		expect(html).toContain("--bg:#17171a");
 	});
