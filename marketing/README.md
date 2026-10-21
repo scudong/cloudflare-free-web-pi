@@ -9,6 +9,7 @@
 | [03-launch-copy.md](03-launch-copy.md) | X 与小红书的现成文案（含英文 thread） |
 | [04-demo-plan.md](04-demo-plan.md) | 公开演示的三种方案、45 秒录屏分镜、发布节奏 |
 | [05-traffic-playbook.md](05-traffic-playbook.md) | 14 天 X / 小红书流量计划、钩子、发布规则、指标与迭代 |
+| [06-seven-day-posts.md](06-seven-day-posts.md) | 前 7 天逐日文案（X 英文 + 小红书中文，含配图与置顶评论） |
 
 ## 一句话
 

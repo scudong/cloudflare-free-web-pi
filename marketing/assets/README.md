@@ -9,5 +9,6 @@
 | `kb-search.png` | 知识库检索命中 |
 | `all-files.png` | 全部文件跨会话汇总 |
 | `xhs-covers.html` | 三张封面的源文件；改文案后重新截图 |
+| `../../docs/architecture.png` | 架构图 PNG（2000×720），X / 小红书可直接上传；SVG 版在 `docs/architecture.svg` |
 
 封面尺寸 2160×2880（3:4），截图与主图 1500×940。截图来自本地演示数据，不含真实用户资料。
