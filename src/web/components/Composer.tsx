@@ -134,10 +134,14 @@ export function Composer({
 	const [inputHeight, setInputHeight] = useState<number | null>(readInputHeight);
 	const heightRef = useRef<number | null>(inputHeight);
 	const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
-	/** 上下文占用（v0.42.0）：估算值，刷新信号来自每轮结束 / 手动压缩。 */
+	/**
+	 * 上下文占用（v0.42.0）：估算值，刷新信号来自每轮结束 / 手动压缩。
+	 * NERE-26：首屏只发一个 bootstrap 请求，首帧不自动取占用；首次交互或轮次结束后再取。
+	 */
 	const [context, setContext] = useState<{ usedTokens: number; contextWindow: number; percent: number } | null>(null);
 	const [contextReload, setContextReload] = useState(0);
 	const [compactBusy, setCompactBusy] = useState(false);
+	const lastContextSession = useRef(sessionId);
 
 	useEffect(() => {
 		if (!draft) return;
@@ -148,6 +152,12 @@ export function Composer({
 	}, [draft]);
 
 	useEffect(() => {
+		// NERE-26：首屏请求只保留 /api/bootstrap，上下文占用推迟到切换会话、
+		// 点击刷新或一轮结束（contextTick）之后再取；首帧显示 “—”。
+		// 用上一次的 sessionId 判断，避免 StrictMode 双跑 effect 时漏过首帧。
+		const sessionChanged = lastContextSession.current !== sessionId;
+		lastContextSession.current = sessionId;
+		if (!sessionChanged && contextTick === 0 && contextReload === 0) return;
 		let alive = true;
 		void (async () => {
 			try {

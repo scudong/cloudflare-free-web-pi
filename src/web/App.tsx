@@ -15,10 +15,10 @@ import { UsersPanel } from "./components/UsersPanel";
 import { FilesPanel } from "./components/FilesPanel";
 import { KnowledgePanel } from "./components/KnowledgePanel";
 import { Icon } from "./components/Icon";
-import { api } from "./lib/api";
+import { api, type BootstrapKey } from "./lib/api";
+import { useBootstrap } from "./hooks/useBootstrap";
 import { shareUrlFor } from "./lib/format";
 import { parseEntries, truncateOneLine } from "./lib/entries";
-import { parseAutomations, parseCustomTools, parseFiles, parseMemories, parsePrompts, parseRules, parseSessions, parseSkills } from "./lib/collections";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
@@ -191,6 +191,14 @@ export default function App() {
 	const idRef = useRef(0);
 	const nextId = useCallback(() => `m${++idRef.current}-${Date.now().toString(36)}`, []);
 
+	// 首屏聚合（NERE-26）：17 个只读面板走一次 /api/bootstrap。
+	// panelTick = 面板增删后刷新；reloadKey = 用户点重试；modelsTick = 设置弹窗里换了供应商。
+	const bootstrap = useBootstrap(sessionId, `${reloadKey}:${panelTick}:${modelsTick}`);
+	/** 当前会话还没有可用的 bootstrap 数据：面板显示加载态（后台刷新时不闪）。 */
+	const bootstrapPending = bootstrap.loading && (bootstrap.dataSessionId !== sessionId || !bootstrap.data);
+	/** 已经整份落地过的 (会话, 重试, 模型变更) 组合：只有它变化时才覆盖消息 / 设置 / 计划等会与本地状态竞争的数据。 */
+	const bootstrapHydratedRef = useRef<{ sessionId: string; reloadKey: number; modelsTick: number } | null>(null);
+
 	// While waiting for a reply, tick the elapsed counter every second
 	useEffect(() => {
 		if (!pending) return;
@@ -198,87 +206,111 @@ export default function App() {
 		return () => window.clearInterval(timer);
 	}, [pending]);
 
-	// Initial load per session: session status + history transcript in parallel;
-	// every setState lives in an async continuation guarded by an alive flag
+	/**
+	 * 首屏聚合落地（NERE-26）：一次 bootstrap 覆盖 17 个只读面板。
+	 *
+	 * 分两档写状态：
+	 * - 面板数据（会话列表 / 文件 / 记忆 / 技能 / 模板 / 规则 / MCP / 定时任务）每次成功都跟随服务端，
+	 *   等价于原先 panelTick 的逐端点刷新；
+	 * - 会话、消息、设置、计划、目标、审批、问答只在「整份数据首次落地 / 用户重试 / 换供应商」时覆盖，
+	 *   避免每轮结束后的刷新把流式消息、本地提示和乐观更新冲掉。
+	 * 单个面板失败只把对应状态置空并给出该面板的错误文案，其它面板照常渲染。
+	 */
 	useEffect(() => {
-		let alive = true;
-		const load = async () => {
-			try {
-				const [session, entries] = await Promise.all([api.session(), api.entries(sessionId)]);
-				if (!alive) return;
-				setOnline(session.ok !== false);
-				setSessionName(typeof session.name === "string" ? session.name : "");
-				// 后端直接返回数组；兼容旧格式 { entries: [...] }
-				const list = Array.isArray(entries) ? entries : (entries as { entries?: unknown[] } | null)?.entries;
-				setMessages(withAbsoluteShareLinks(parseEntries(list)));
-				setLoadError(null);
-			} catch (err) {
-				if (!alive) return;
-				setOnline(false);
-				setLoadError(err instanceof Error ? err.message : String(err));
-			} finally {
-				if (alive) setLoading(false);
-			}
-		};
-		void load();
-		return () => {
-			alive = false;
-		};
-	}, [reloadKey, sessionId]);
+		const data = bootstrap.data;
+		if (!data || bootstrap.dataSessionId !== sessionId) return;
+		const failures = data.errors;
+		const panelError = (key: BootstrapKey, label: string) =>
+			failures[key] ? `${label}加载失败：${failures[key]}` : null;
 
-	// Session list (v3: all sessions; v1: only the current one — parseSessions tolerates both).
-	// If the endpoint is unavailable, fall back to a synthetic current session so the list keeps its structure.
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.sessions();
-				if (!alive) return;
-				setSessions(parseSessions(data.sessions));
-			} catch {
-				if (!alive) return;
-				setSessions((prev) => (prev.length > 0 ? prev : [{ id: sessionId, title: "当前会话", createdAt: "" }]));
-			} finally {
-				if (alive) setSessionsLoading(false);
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [reloadKey, sessionId, panelTick]);
+		// 会话列表：失败时保留上一份；首次失败用当前会话兜底，侧栏结构不塌。
+		if (!failures.sessions) setSessions(data.sessions);
+		else setSessions((prev) => (prev.length > 0 ? prev : [{ id: sessionId, title: "当前会话", createdAt: "" }]));
+		setSessionsLoading(false);
 
-	// Workbench data: files (per session) + memories (global). Refreshed by panelTick after each chat round.
+		// 工作台文件 + 记忆库。
+		setFiles(data.files);
+		setFilesForSession(sessionId);
+		setFilesError(panelError("files", "文件"));
+		setFilesState(failures.files ? "error" : "ready");
+		setMemories(data.memories);
+		setMemoriesError(panelError("memories", "记忆"));
+		setMemoriesState(failures.memories ? "error" : "ready");
+
+		// 左侧面板：技能 / 模板 / 规则 / 自定义工具 / MCP / 定时任务。
+		setPrompts(data.prompts);
+		setRules(data.rules);
+		setCustomTools(data.customTools);
+		setSkills(data.skills);
+		setSkillsError(panelError("skills", "技能"));
+		setSkillsLoading(false);
+		setAutomations(data.automations);
+		setAutomationsError(panelError("automations", "定时任务"));
+		setAutomationsLoading(false);
+		setMcpServers(data.mcpServers);
+		setMcpError(panelError("mcpServers", "MCP"));
+		setMcpLoading(false);
+
+		const last = bootstrapHydratedRef.current;
+		const full = last?.sessionId !== sessionId || last?.reloadKey !== reloadKey || last?.modelsTick !== modelsTick;
+		if (!full) return;
+		bootstrapHydratedRef.current = { sessionId, reloadKey, modelsTick };
+
+		setOnline(data.session.ok);
+		setSessionName(data.session.name);
+		setLoading(false);
+		setLoadError(panelError("entries", "会话记录"));
+		setMessages(withAbsoluteShareLinks(parseEntries(data.entries)));
+
+		const settings = data.settings;
+		if (settings) {
+			setWebSearch(settings.webSearch !== false);
+			if (typeof settings.kbPrefetch === "boolean") setKbPrefetch(settings.kbPrefetch);
+			if (typeof settings.kbRetrieval === "string") setKbRetrieval(settings.kbRetrieval);
+			if (typeof settings.thinkingLevel === "string") setThinkingLevel(settings.thinkingLevel);
+			if (typeof settings.displayName === "string") setDisplayName(settings.displayName);
+			if (typeof settings.shareTtlSeconds === "number") setShareTtlSeconds(settings.shareTtlSeconds);
+			if (settings.compaction) setCompaction(settings.compaction);
+			if (settings.approval) setApprovalSettings(settings.approval);
+		} else {
+			// 设置面板失败时沿用原 api.settings 失败分支的默认值
+			setWebSearch(true);
+		}
+
+		if (!failures.models) {
+			if (data.models.models.length > 0) setModels(data.models.models);
+			if (data.models.default) setModel(data.models.default);
+		}
+
+		setPlan(data.plan);
+		setGoal(data.goal);
+		setApprovals(data.approvals);
+		setAskQuestions(data.questions);
+	}, [bootstrap.data, bootstrap.dataSessionId, sessionId, reloadKey, modelsTick]);
+
+	/**
+	 * 整份 bootstrap 失败（网络 / 401 / 5xx）：只有当前会话还没有可用数据时才降级成错误态；
+	 * 同一会话的后台刷新失败保留上一份面板，不打断正在看的内容。
+	 */
 	useEffect(() => {
-		let alive = true;
-		setFilesState("loading");
-		setMemoriesState("loading");
-		void (async () => {
-			const [filesRes, memoriesRes] = await Promise.allSettled([api.files(sessionId), api.memories()]);
-			if (!alive) return;
-			if (filesRes.status === "fulfilled") {
-				setFiles(parseFiles(filesRes.value.files));
-				setFilesForSession(sessionId);
-				setFilesError(null);
-				setFilesState("ready");
-			} else {
-				const detail = filesRes.reason instanceof Error ? filesRes.reason.message : String(filesRes.reason);
-				setFilesError(detail);
-				setFilesState("error");
-			}
-			if (memoriesRes.status === "fulfilled") {
-				setMemories(parseMemories(memoriesRes.value.memories));
-				setMemoriesError(null);
-				setMemoriesState("ready");
-			} else {
-				const detail = memoriesRes.reason instanceof Error ? memoriesRes.reason.message : String(memoriesRes.reason);
-				setMemoriesError(detail);
-				setMemoriesState("error");
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [sessionId, panelTick]);
+		if (!bootstrap.error) return;
+		if (bootstrap.dataSessionId === sessionId && bootstrap.data) return;
+		const detail = bootstrap.error;
+		setOnline(false);
+		setLoading(false);
+		setLoadError(detail);
+		setSessionsLoading(false);
+		setFilesState("error");
+		setFilesError(detail);
+		setMemoriesState("error");
+		setMemoriesError(detail);
+		setSkillsLoading(false);
+		setSkillsError("加载技能失败。");
+		setAutomationsLoading(false);
+		setAutomationsError("加载定时任务失败。");
+		setMcpLoading(false);
+		setMcpError("加载 MCP 服务器失败。");
+	}, [bootstrap.error, bootstrap.dataSessionId, bootstrap.data, sessionId]);
 
 	/** 拉取待审批列表（工具被拦下后调用）。 */
 	const refreshApprovals = useCallback(async () => {
@@ -711,120 +743,6 @@ export default function App() {
 		}
 	}, []);
 
-	// 可用模型（一次）
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.models();
-				if (!alive) return;
-				const list = Array.isArray(data.models) ? data.models : [];
-				setModels(list);
-				if (data.default) setModel(data.default);
-			} catch {
-				// 保持默认
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [modelsTick]);
-
-	// 网页搜索开关（一次；后端无该接口时保持默认开启）
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.settings();
-				if (alive) {
-					setWebSearch(data.webSearch !== false);
-					if (typeof data.kbPrefetch === "boolean") setKbPrefetch(data.kbPrefetch);
-					if (typeof data.kbRetrieval === "string") setKbRetrieval(data.kbRetrieval);
-					if (typeof data.thinkingLevel === "string") setThinkingLevel(data.thinkingLevel);
-					if (typeof data.displayName === "string") setDisplayName(data.displayName);
-					if (typeof data.shareTtlSeconds === "number") setShareTtlSeconds(data.shareTtlSeconds);
-					if (data.compaction) setCompaction(data.compaction);
-					if (data.approval) setApprovalSettings(data.approval);
-				}
-			} catch {
-				if (alive) setWebSearch(true);
-			}		})();
-		return () => {
-			alive = false;
-		};
-	}, []);
-
-	// 计划（v0.22.0）：切会话时读取该会话的持久化计划
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.plan(sessionId);
-				if (!alive) return;
-				const steps = Array.isArray(data.steps) ? data.steps : [];
-				setPlan(
-					steps.map((s) => ({
-						title: String(s.title ?? ""),
-						status: (s.status === "completed" || s.status === "in_progress" ? s.status : "pending") as PlanStep["status"],
-					})),
-				);
-			} catch {
-				if (alive) setPlan([]);
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [sessionId]);
-
-	// 目标（v0.31.0）：切会话时读取该会话的目标
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.goal(sessionId);
-				if (alive) setGoal(data.goal ?? null);
-			} catch {
-				if (alive) setGoal(null);
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [sessionId]);
-
-	// 待回答的问题（v0.37.0）：切会话时读一次
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.questions(sessionId);
-				if (alive) setAskQuestions((data.questions ?? []) as AskQuestion[]);
-			} catch {
-				if (alive) setAskQuestions([]);
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [sessionId]);
-
-	// 待审批（v0.33.0）：切会话时读一次
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.approvals(sessionId);
-				if (alive) setApprovals(data.approvals ?? []);
-			} catch {
-				if (alive) setApprovals([]);
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [sessionId]);
-
 	// 切换会话时，从会话列表带出该会话的模型（若无则默认）
 	useEffect(() => {
 		const listed = sessions.find((s) => s.id === sessionId);
@@ -838,46 +756,6 @@ export default function App() {
 		},
 		[sessionId],
 	);
-
-	// 提示模板与规则（全局，随 panelTick 刷新）
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const [p, r, ct] = await Promise.all([api.prompts(), api.rules(), api.customTools()]);
-				if (!alive) return;
-				setPrompts(parsePrompts(p.prompts));
-				setRules(parseRules(r.rules));
-				setCustomTools(parseCustomTools(ct.tools));
-			} catch {
-				// 接口不可用时保持为空
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [panelTick]);
-
-	// 技能列表（全局，随 panelTick 刷新）
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.skills();
-				if (alive) {
-					setSkills(parseSkills(data.skills));
-					setSkillsError(null);
-				}
-			} catch {
-				if (alive) setSkillsError("加载技能失败。");
-			} finally {
-				if (alive) setSkillsLoading(false);
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [panelTick]);
 
 	const handleAddSkill = useCallback(async (name: string, description: string, content: string) => {
 		try {
@@ -970,27 +848,6 @@ export default function App() {
 		}
 	}, []);
 
-	// 定时任务列表（全局，随 panelTick 刷新）
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.automations();
-				if (alive) {
-					setAutomations(parseAutomations(data.automations));
-					setAutomationsError(null);
-				}
-			} catch {
-				if (alive) setAutomationsError("加载定时任务失败。");
-			} finally {
-				if (alive) setAutomationsLoading(false);
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [panelTick]);
-
 	const handleAddAutomation = useCallback(
 		async (name: string, prompt: string, schedule: { kind: string; time?: string; minutes?: number }) => {
 			try {
@@ -1024,27 +881,6 @@ export default function App() {
 			return false;
 		}
 	}, []);
-
-	// MCP 服务器列表（全局，随 panelTick 刷新）
-	useEffect(() => {
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.mcpServers();
-				if (!alive) return;
-				const list = Array.isArray(data.servers) ? (data.servers as McpServerInfo[]) : [];
-				setMcpServers(list);
-				setMcpError(null);
-			} catch {
-				if (alive) setMcpError("加载 MCP 服务器失败。");
-			} finally {
-				if (alive) setMcpLoading(false);
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [panelTick]);
 
 	const handleAddMcp = useCallback(async (name: string, url: string, headers?: Record<string, string>) => {
 		try {
@@ -1692,7 +1528,7 @@ export default function App() {
 							sessionId={sessionId}
 							files={files}
 							filesForSession={filesForSession}
-							filesLoading={filesState === "loading"}
+							filesLoading={filesState === "loading" || bootstrapPending}
 							filesError={filesError}
 							wide={workbenchWide}
 							onToggleWide={() => setWorkbenchWide((v) => !v)}
@@ -1742,7 +1578,7 @@ export default function App() {
 				onChangeApproval={handleChangeApproval}
 				onChangeApprovalTool={handleChangeApprovalTool}
 				memories={memories}
-				memoriesLoading={memoriesState === "loading"}
+				memoriesLoading={memoriesState === "loading" || bootstrapPending}
 				memoriesError={memoriesError}
 				onDeleteMemory={handleDeleteMemory}
 				onClearMemories={handleClearMemories}

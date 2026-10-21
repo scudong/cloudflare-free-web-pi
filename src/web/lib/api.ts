@@ -4,15 +4,87 @@
  * All list endpoints are parsed tolerantly on the caller side (see lib/collections.ts).
  */
 
-export interface SessionInfo {
-	ok: boolean;
-	name?: string;
-}
-
 import type { GoalInfo } from "../types";
 import { ingestNetworkFailure, parseIngestResponse, type IngestResult } from "./ingest";
 
 export type { GoalInfo };
+
+/* ---------------- 首屏聚合（NERE-23 / NERE-26） ---------------- */
+
+/** 与后端 `src/worker/bootstrap.ts` 的 BOOTSTRAP_KEYS 保持一致；tests/unit/bootstrap-web.test.ts 会断言两份清单相同。 */
+export const BOOTSTRAP_KEYS = [
+	"session",
+	"entries",
+	"sessions",
+	"files",
+	"memories",
+	"approvals",
+	"settings",
+	"plan",
+	"goal",
+	"questions",
+	"prompts",
+	"rules",
+	"customTools",
+	"skills",
+	"automations",
+	"mcpServers",
+	"models",
+] as const;
+
+export type BootstrapKey = (typeof BOOTSTRAP_KEYS)[number];
+
+/** GET /api/settings 的响应体（设置弹窗与 bootstrap.settings 共用同一份类型）。 */
+export interface SettingsView {
+	webSearch?: boolean;
+	/** 知识库预检索（v0.46.0）：每轮自动把命中的资料注入系统提示。 */
+	kbPrefetch?: boolean;
+	/** 知识库检索模式（v0.53.0）：fts / vector / hybrid。 */
+	kbRetrieval?: string;
+	kbVector?: { available?: boolean; index?: string };
+	thinkingLevel?: string;
+	/** 分享页署名（v0.55.0）。 */
+	displayName?: string;
+	/** 分享默认有效期（秒，0 = 永久，v0.55.0）。 */
+	shareTtlSeconds?: number;
+	compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number };
+	approval?: { read: string; write: string; exec: string };
+}
+
+/** GET /api/models 的响应体（Composer / bootstrap.models 共用）。 */
+export interface ModelsView {
+	models?: string[];
+	default?: string;
+	provider?: string;
+}
+
+/**
+ * GET /api/bootstrap?sessionId= 的响应体（NERE-23）。
+ *
+ * 字段与单端点一一对应，但数组面板失败时后端会回退成 `[]`、其它面板回退成 `null`，
+ * 失败原因写进 `errors`（键为面板名，值截断到 200 字），HTTP 仍是 200。
+ * 这里用 `unknown` 接收列表，交给 lib/bootstrap.ts 宽容解析，避免后端字段漂移时整页崩。
+ */
+export interface BootstrapResponse {
+	session: { ok?: boolean; name?: string } | null;
+	entries: unknown;
+	sessions: unknown;
+	files: unknown;
+	memories: unknown;
+	approvals: unknown;
+	settings: SettingsView | null;
+	plan: unknown;
+	goal: unknown;
+	questions: unknown;
+	prompts: unknown;
+	rules: unknown;
+	customTools: unknown;
+	skills: unknown;
+	automations: unknown;
+	mcpServers: unknown;
+	models: ModelsView | null;
+	errors?: Partial<Record<BootstrapKey, string>>;
+}
 
 export interface ChatResult {
 	answer: string;
@@ -162,10 +234,12 @@ async function ingestUrlRequest(url: string): Promise<IngestResult> {
 }
 
 export const api = {
-	session: () => requestJson<SessionInfo>("/api/session"),
+	/**
+	 * 首屏聚合（NERE-26）：一次拉取 17 个只读面板，替代原先 17 个单端点请求。
+	 * 失败面板不抛错：字段回退空值并写进 `errors`，由 lib/bootstrap.ts 解析成空态。
+	 */
+	bootstrap: (sessionId: string) => requestJson<BootstrapResponse>(withQuery("/api/bootstrap", { sessionId })),
 
-	/** GET /api/sessions — v3 returns a list; v1 may return only the current one. */
-	sessions: () => requestJson<{ sessions?: unknown[] }>("/api/sessions"),
 	/** POST /api/sessions — create a new conversation and return its id. */
 	createSession: () => requestJson<{ id?: string; title?: string }>("/api/sessions", { method: "POST" }),
 
@@ -228,10 +302,6 @@ export const api = {
 		requestJson<ChatResult>("/api/chat", { ...jsonPost({ message, sessionId }), signal }),
 
 	/** 后端返回条目数组本身（不是 { entries } 包装），由调用方宽容解析。 */
-	entries: (sessionId?: string) => requestJson<unknown>(withQuery("/api/entries", { sessionId: sessionId ?? "" })),
-
-	files: (sessionId: string) => requestJson<{ files?: unknown[] }>(withQuery("/api/files", { sessionId })),
-
 	fileContent: (sessionId: string, name: string) =>
 		requestJson<{ name?: string; content?: string }>(withQuery("/api/files/content", { sessionId, name })),
 
@@ -289,16 +359,12 @@ export const api = {
 
 	abort: (sessionId: string) => requestJson<{ ok?: boolean }>("/api/abort", jsonPost({ sessionId })),
 
-	skills: () => requestJson<{ skills?: unknown[] }>("/api/skills"),
-
-	/** 提示模板（v0.31.0）。 */
-	prompts: () => requestJson<{ prompts?: unknown[] }>("/api/prompts"),
+	/** 提示模板写入（v0.31.0）；读取由 api.bootstrap() 提供。 */
 	addPrompt: (name: string, description: string, content: string) =>
 		requestJson<{ ok?: boolean; error?: string }>("/api/prompts", jsonPost({ name, description, content })),
 	deletePrompt: (name: string) => requestJson<{ ok?: boolean }>(withQuery("/api/prompts", { name }), { method: "DELETE" }),
 
-	/** 规则文件（v0.31.0）：每轮注入 instructions。 */
-	rules: () => requestJson<{ rules?: unknown[] }>("/api/rules"),
+	/** 规则写入（v0.31.0）；读取由 api.bootstrap() 提供。 */
 	addRule: (name: string, content: string, enabled = true) =>
 		requestJson<{ ok?: boolean; error?: string }>("/api/rules", jsonPost({ name, content, enabled })),
 	toggleRule: (name: string, enabled: boolean) =>
@@ -343,7 +409,8 @@ export const api = {
 	restore: (payload: unknown) =>
 		requestJson<{ ok?: boolean; counts?: Record<string, number>; error?: string }>("/api/restore", jsonPost(payload)),
 
-	models: () => requestJson<{ models?: string[]; default?: string; provider?: string }>("/api/models"),
+	/** 首屏由 api.bootstrap() 提供；这里只用于设置弹窗的独立读取（ADR-0002 记录的既有偏差）。 */
+	models: () => requestJson<ModelsView>("/api/models"),
 
 	/** LLM 供应商（v0.27.0，CCswitch 式）。 */
 	providers: () =>
@@ -368,23 +435,11 @@ export const api = {
 	setModel: (sessionId: string, modelId: string) =>
 		requestJson<{ ok?: boolean }>("/api/model", jsonPost({ sessionId, modelId })),
 
-	/** 全局设置（v0.20.0 网页搜索；v0.22.0 思考档位；v0.33.0 工具审批）。 */
-	settings: () =>
-		requestJson<{
-			webSearch?: boolean;
-			/** 知识库预检索（v0.46.0）：每轮自动把命中的资料注入系统提示。 */
-			kbPrefetch?: boolean;
-			/** 知识库检索模式（v0.53.0）：fts / vector / hybrid。 */
-			kbRetrieval?: string;
-			kbVector?: { available?: boolean; index?: string };
-			thinkingLevel?: string;
-			/** 分享页署名（v0.55.0）。 */
-			displayName?: string;
-			/** 分享默认有效期（秒，0 = 永久，v0.55.0）。 */
-			shareTtlSeconds?: number;
-			compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number };
-			approval?: { read: string; write: string; exec: string };
-		}>("/api/settings"),
+	/**
+	 * 全局设置（v0.20.0 网页搜索；v0.22.0 思考档位；v0.33.0 工具审批）。
+	 * 首屏由 api.bootstrap().settings 提供；这里只用于设置弹窗的独立读取。
+	 */
+	settings: () => requestJson<SettingsView>("/api/settings"),
 
 	setSettings: (patch: {
 		webSearch?: boolean;
@@ -398,17 +453,14 @@ export const api = {
 		approvalTools?: Record<string, string>;
 	}) => requestJson<{ ok?: boolean }>("/api/settings", jsonPost(patch)),
 
-	/** 待回答的问题（v0.37.0）。 */
+	/** 待回答的问题（v0.37.0）：首屏由 bootstrap 提供，这里只用于轮次内的增量刷新。 */
 	questions: (sessionId: string) =>
 		requestJson<{ questions?: unknown[] }>(withQuery("/api/questions", { sessionId })),
 
 	answerQuestion: (id: number, answers: { id: string; choice?: string; text?: string }[]) =>
 		requestJson<{ ok?: boolean; id?: number; resume?: string; error?: string }>("/api/questions", jsonPost({ id, answers })),
 
-	/** 自定义工具（v0.36.0）。 */
-	customTools: () =>
-		requestJson<{ tools?: unknown[] }>("/api/custom-tools"),
-
+	/** 自定义工具写入（v0.36.0）；读取由 api.bootstrap() 提供。 */
 	addCustomTool: (body: { name: string; description: string; parameters: string; code: string }) =>
 		requestJson<{ ok?: boolean; name?: string; tools?: number; error?: string }>("/api/custom-tools", jsonPost(body)),
 
@@ -437,7 +489,7 @@ export const api = {
 	interject: (sessionId: string, message: string) =>
 		requestJson<{ ok?: boolean; id?: string; error?: string }>("/api/interject", jsonPost({ sessionId, message })),
 
-	/** 待审批的工具调用（v0.33.0）。 */
+	/** 待审批的工具调用（v0.33.0）：首屏由 bootstrap 提供，这里只用于轮次内的增量刷新。 */
 	approvals: (sessionId: string) =>
 		requestJson<{
 			approvals?: { id: number; tool: string; category: string; args: string; created_at: string }[];
@@ -450,12 +502,7 @@ export const api = {
 		),
 
 	/** 当前会话的分步计划（v0.22.0）。 */
-	plan: (sessionId: string) =>
-		requestJson<{ steps?: { title: string; status: string }[] }>(withQuery("/api/plan", { sessionId })),
-
-	/** 目标（v0.31.0）：一个会话一份，active 时自动续转。 */
-	goal: (sessionId: string) => requestJson<{ goal?: GoalInfo | null }>(withQuery("/api/goal", { sessionId })),
-
+	/** 目标写入（v0.31.0）：读取由 api.bootstrap() 提供。 */
 	setGoal: (body: { sessionId: string; objective: string; tokenBudget?: number; maxTurns?: number }) =>
 		requestJson<{ ok?: boolean; goal?: GoalInfo | null; error?: string }>("/api/goal", jsonPost(body)),
 
@@ -481,8 +528,7 @@ export const api = {
 			withQuery("/api/shares", { sessionId, kind, ...(name ? { name } : {}) }),
 		),
 
-	automations: () => requestJson<{ automations?: unknown[] }>("/api/automations"),
-
+	/** 定时任务写入。 */
 	addAutomation: (name: string, prompt: string, sessionId: string, schedule: { kind: string; time?: string; minutes?: number }) =>
 		requestJson<{ ok?: boolean; id?: string }>("/api/automations", jsonPost({ name, prompt, sessionId, schedule })),
 
@@ -495,15 +541,13 @@ export const api = {
 
 	deleteAutomation: (id: string) => requestJson<{ ok?: boolean }>(withQuery("/api/automations", { id }), { method: "DELETE" }),
 
-	mcpServers: () => requestJson<{ servers?: unknown[] }>("/api/mcp"),
-
+	/** MCP 写入。 */
 	addMcp: (name: string, url: string, headers?: Record<string, string>) =>
 		requestJson<{ ok?: boolean; tools?: number; error?: string }>("/api/mcp", jsonPost({ name, url, headers })),
 
 	deleteMcp: (id: string) => requestJson<{ ok: boolean }>(withQuery("/api/mcp", { id }), { method: "DELETE" }),
 
-	memories: () => requestJson<{ memories?: unknown[] }>("/api/memories"),
-
+	/** 记忆库写入；读取由 api.bootstrap() 提供。 */
 	deleteMemory: (id: number) => requestJson<{ ok: boolean }>(withQuery("/api/memories", { id: String(id) }), { method: "DELETE" }),
 
 	/** 一键清空记忆库（v0.26.0）。 */
