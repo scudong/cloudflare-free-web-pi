@@ -1,0 +1,64 @@
+README.md
+  00512495ff504ece 9,27,31,37
+marketing/01-selling-points.md
+  00512495ff504ece 47,49
+marketing/06-seven-day-posts.md
+  00512495ff504ece 53,168
+docs/semantic-search-options.md
+  00512495ff504ece 1-131
+marketing/03-launch-copy.md
+  00512495ff504ece 37
+README.zh-CN.md
+  00512495ff504ece 25,30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "89c5a373a8825513b32b37e54775fc0a627f52e2",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 142,
+      "total_deletions": 11,
+      "accepted_lines": 142,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "README.zh-CN.md": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "marketing/01-selling-points.md": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "docs/semantic-search-options.md": {
+          "additions": 131,
+          "accepted_lines": 131
+        },
+        "marketing/06-seven-day-posts.md": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "README.md": {
+          "additions": 4,
+          "deletions": 4,
+          "accepted_lines": 4
+        },
+        "marketing/03-launch-copy.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
