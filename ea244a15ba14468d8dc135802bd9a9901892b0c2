@@ -1,0 +1,78 @@
+src/web/index.html
+  00512495ff504ece 8-9
+src/web/components/TopBar.tsx
+  00512495ff504ece 29
+README.md
+  00512495ff504ece 1,8
+src/worker.ts
+  00512495ff504ece 2381
+.github/workflows/deploy.yml
+  00512495ff504ece 8
+package.json
+  00512495ff504ece 2
+.github/workflows/smoke.yml
+  00512495ff504ece 12
+CHANGELOG.md
+  00512495ff504ece 7-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "ea244a15ba14468d8dc135802bd9a9901892b0c2",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 17,
+      "total_deletions": 8,
+      "accepted_lines": 17,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        ".github/workflows/smoke.yml": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "CHANGELOG.md": {
+          "additions": 7,
+          "accepted_lines": 7
+        },
+        "package.json": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/components/TopBar.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        ".github/workflows/deploy.yml": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/index.html": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "README.md": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 3
+        },
+        "src/worker.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
