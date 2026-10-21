@@ -1,0 +1,98 @@
+tests/fixtures/wrangler.ingest.jsonc
+  7c3cf012d2155818 1-19
+src/web/lib/api.ts
+  65a98388a9d3101c 13,100-163,251-257
+README.zh-CN.md
+  7c3cf012d2155818 154
+tests/fixtures/ai-mock-worker.ts
+  7c3cf012d2155818 1-44
+docs/knowledge-base.md
+  7c3cf012d2155818 60-80,85,90
+tests/fixtures/wrangler.ai-mock.jsonc
+  7c3cf012d2155818 1-5
+src/web/lib/ingest.ts
+  65a98388a9d3101c 1-236
+src/web/components/KbImport.tsx
+  65a98388a9d3101c 1-379
+src/web/components/KnowledgePanel.tsx
+  65a98388a9d3101c 1-2,9,13,31-34,128-170,176-181,204-210,219-220,266-277,332-334,365-372
+src/web/components/Icon.tsx
+  65a98388a9d3101c 53,101
+tests/api/ingest.test.ts
+  7c3cf012d2155818 1-14,16-26,28-36,38,41,43,46-142,148-149,151-162,166-170,174-176,179-183,187-192,196-200,204-210,214-222,225-229,233-237,240-241
+tests/unit/ingest.test.ts
+  65a98388a9d3101c 1-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "18c140b7aaa00bb34b20fc2aa5642e0c1a0d31e4",
+  "prompts": {
+    "65a98388a9d3101c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "409a88fa-569f-4901-a375-c989e1077e38",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 942,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/unit/ingest.test.ts": {
+          "accepted_lines": 164
+        },
+        "src/web/components/Icon.tsx": {
+          "accepted_lines": 2
+        },
+        "src/web/lib/ingest.ts": {
+          "accepted_lines": 236
+        },
+        "src/web/components/KbImport.tsx": {
+          "accepted_lines": 379
+        },
+        "src/web/components/KnowledgePanel.tsx": {
+          "accepted_lines": 89
+        },
+        "src/web/lib/api.ts": {
+          "accepted_lines": 72
+        }
+      }
+    },
+    "7c3cf012d2155818": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28d4b333-925b-4539-9236-01fb4d90af48",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 292,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/fixtures/wrangler.ai-mock.jsonc": {
+          "accepted_lines": 5
+        },
+        "docs/knowledge-base.md": {
+          "accepted_lines": 23
+        },
+        "tests/fixtures/ai-mock-worker.ts": {
+          "accepted_lines": 44
+        },
+        "README.zh-CN.md": {
+          "accepted_lines": 1
+        },
+        "tests/api/ingest.test.ts": {
+          "accepted_lines": 200
+        },
+        "tests/fixtures/wrangler.ingest.jsonc": {
+          "accepted_lines": 19
+        }
+      }
+    }
+  }
+}
