@@ -25,8 +25,11 @@ tests/
     theme.test.ts      主题注册表与无 DOM 降级
   api/           接口金标（自动 spawn wrangler dev）
     api.test.ts        会话 / 设置 / 供应商 / 技能 / 记忆 / 备份 / 导出
+    multiuser.test.ts  多用户隔离
+    share-tools.test.ts 分享工具端到端（本地假 OpenAI 流式上游驱动 tool_calls）
   helpers/
     reactText.ts   React 元素树 → 纯文本，便于断言
+    fakeOpenAI.ts  最小 OpenAI 兼容 SSE 服务，按步骤返回 tool_calls / 文本
 ```
 
 ---
@@ -45,7 +48,7 @@ tests/
 
 ## 已知未覆盖
 
-- **真实模型调用**：需要 stub provider（pi-ai 的 `providers/faux`）才能进 CI，尚未接入。
+- **真实模型调用**：仍未接入；分享工具用 `helpers/fakeOpenAI.ts` 的假流式上游驱动 tool_calls，验证工具执行、审批与分享落库，不验证真实模型的措辞。
 - **浏览器交互**：目前靠手工 CDP 截图验收，未做自动化。
 
 ---
@@ -77,3 +80,4 @@ tests/
 | **pi 内核版本** | `unit/kernel.test.ts` |
 | **自定义工具** | `api/api.test.ts` · 自定义工具 |
 | **交互式问答** | `api/api.test.ts` · 交互式问答 |
+| **分享工具 / 链接卡** | `api/share-tools.test.ts`（成功/复用/过期/审批/默认有效期）+ `api/api.test.ts` · 文件分享 / 工具注册 + `unit/entries.test.ts` · 分享链接 |

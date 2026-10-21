@@ -378,6 +378,10 @@ export const api = {
 			kbRetrieval?: string;
 			kbVector?: { available?: boolean; index?: string };
 			thinkingLevel?: string;
+			/** 分享页署名（v0.55.0）。 */
+			displayName?: string;
+			/** 分享默认有效期（秒，0 = 永久，v0.55.0）。 */
+			shareTtlSeconds?: number;
 			compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number };
 			approval?: { read: string; write: string; exec: string };
 		}>("/api/settings"),
@@ -387,6 +391,8 @@ export const api = {
 		kbPrefetch?: boolean;
 		kbRetrieval?: string;
 		thinkingLevel?: string;
+		displayName?: string;
+		shareTtlSeconds?: number;
 		compaction?: Partial<{ enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number }>;
 		approval?: Partial<{ read: string; write: string; exec: string }>;
 		approvalTools?: Record<string, string>;

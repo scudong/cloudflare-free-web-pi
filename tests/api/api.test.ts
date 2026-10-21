@@ -493,6 +493,29 @@ describe("文件分享", () => {
 		expect(html).toContain("--bg:#17171a");
 	});
 
+	it("默认有效期与分享页署名/生成时间跟随设置（v0.55.0）", async () => {
+		const set = await post("/api/settings", { displayName: "董长阳", shareTtlSeconds: 3600 });
+		expect(set.json).toMatchObject({ displayName: "董长阳", shareTtlSeconds: 3600 });
+
+		const before = Date.now();
+		const created = await post("/api/share", { sessionId: "1", kind: "file", name: "share-test.md" });
+		expect(created.status).toBe(200);
+		// 不传 ttlSeconds → 用设置里的 1 小时，而不是永久
+		expect(created.json.expiresAt).toBeGreaterThan(before);
+		expect(created.json.expiresAt).toBeLessThanOrEqual(Date.now() + 3600_000);
+
+		const html = await (await fetch(created.json.url)).text();
+		expect(html).toContain("由 董长阳 分享");
+		expect(html).toContain("生成于");
+		expect(html).toContain("链接有效期至");
+
+		// 显式 ttlSeconds 覆盖设置默认
+		const explicit = await post("/api/share", { sessionId: "1", kind: "file", name: "share-test.md", ttlSeconds: 60 });
+		expect(explicit.json.expiresAt).toBeLessThanOrEqual(Date.now() + 60_000);
+
+		await post("/api/settings", { displayName: "", shareTtlSeconds: 604800 });
+	});
+
 	it("分享页记录主题，?theme= 可覆盖", async () => {
 		const created = await post("/api/share", {
 			sessionId: "1",
@@ -665,6 +688,10 @@ describe("工具注册（防回归）", () => {
 		for (const name of ["dispatch_tasks", "update_plan", "web_search", "web_fetch_page", "write_file", "codemode", "remember", "recall", "install_skill"]) {
 			expect(tools).toContain(name);
 		}
+		// 分享工具（v0.55.0）：模型必须能直接生成链接
+		for (const name of ["share_file", "share_conversation"]) {
+			expect(tools).toContain(name);
+		}
 		// 用户知识库（v0.45.0）
 		for (const name of ["kb_add", "kb_search", "kb_list", "kb_delete"]) {
 			expect(tools).toContain(name);
@@ -811,6 +838,8 @@ describe("自定义工具", () => {
 		const bad = await post("/api/custom-tools", { name: "codemode", code: "return 1" });
 		expect(bad.status).toBe(400);
 		expect(bad.json.error).toContain("内置");
+		const share = await post("/api/custom-tools", { name: "share_file", code: "return 1" });
+		expect(share.status).toBe(400);
 	});
 
 	it("参数 schema 必须是对象", async () => {
@@ -854,6 +883,8 @@ describe("工具审批", () => {
 		const byName = new Map(json.tools.map((t: { name: string; category: string; policy: string }) => [t.name, t]));
 		expect(byName.get("read_file")).toMatchObject({ category: "read", policy: "allow" });
 		expect(byName.get("write_file")).toMatchObject({ category: "write" });
+		expect(byName.get("share_file")).toMatchObject({ category: "write" });
+		expect(byName.get("share_conversation")).toMatchObject({ category: "write" });
 		expect(byName.get("codemode")).toMatchObject({ category: "exec" });
 		expect(byName.get("dispatch_tasks")).toMatchObject({ category: "exec" });
 	});

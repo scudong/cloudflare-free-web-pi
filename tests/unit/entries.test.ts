@@ -81,6 +81,61 @@ describe("parseEntries · 工具与产出", () => {
 	});
 });
 
+describe("parseEntries · 分享链接（v0.55.0）", () => {
+	it("share_file 成功：文件卡与链接卡同属一条助手消息", () => {
+		const raw = [
+			entry(4, "pi.assistant", [{ content: [{ type: "text", text: "周报和链接都在这里。" }] }]),
+			entry(3, "pi.tool-result", [
+				{
+					toolName: "share_file",
+					content: [{ type: "text", text: "已生成分享链接：https://pi.example.com/s/abc123（有效期至 2026-10-28 10:00:00）。" }],
+					details: {
+						share: {
+							kind: "file",
+							name: "weekly.md",
+							url: "https://pi.example.com/s/abc123",
+							expiresAt: Date.now() + 7 * 86400_000,
+							createdAt: new Date().toISOString(),
+							reused: false,
+						},
+					},
+				},
+			]),
+			entry(2, "pi.tool-result", [{ toolName: "write_file", content: [{ type: "text", text: "已写入 weekly.md（2048 字符）。" }] }]),
+			entry(1, "pi.user", [{ role: "user", content: "写一份本周周报并给我分享链接" }]),
+		];
+		const messages = parseEntries(raw);
+		const assistant = messages.find((m) => m.role === "assistant") as {
+			files?: { name: string }[];
+			shares?: { url: string; title: string; kind: string }[];
+		};
+		expect(assistant.files?.map((f) => f.name)).toEqual(["weekly.md"]);
+		expect(assistant.shares?.[0]).toMatchObject({
+			url: "https://pi.example.com/s/abc123",
+			title: "weekly.md",
+			kind: "file",
+		});
+	});
+
+	it("过期的 share_file 仍解析成链接卡（card 负责显示已过期）", () => {
+		const past = Date.now() - 60_000;
+		const raw = [
+			entry(2, "pi.assistant", [{ content: [{ type: "text", text: "链接已过期。" }] }]),
+			entry(1, "pi.tool-result", [
+				{
+					toolName: "share_file",
+					content: [{ type: "text", text: "已生成分享链接：https://pi.example.com/s/old" }],
+					details: { share: { kind: "file", name: "old.md", url: "https://pi.example.com/s/old", expiresAt: past } },
+				},
+			]),
+		];
+		const assistant = parseEntries(raw).find((m) => m.role === "assistant") as {
+			shares?: { expiresAt: number }[];
+		};
+		expect(assistant.shares?.[0]?.expiresAt).toBe(past);
+	});
+});
+
 describe("parseEntries · 上下文压缩（v0.31.0）", () => {
 	it("pi.compaction 渲染成一条系统提示", () => {
 		const raw = [

@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolCallInfo } from "../types";
+import type { ChatMessage, ShareLink, ToolCallInfo } from "../types";
 
 /** 工具活动条摘要的最大长度（字）。 */
 export const TOOL_SUMMARY_MAX = 60;
@@ -85,6 +85,36 @@ function artifactsOf(toolName: string, text: string): { name: string; size?: num
 	return [{ name: m[1]!.trim(), ...(Number.isFinite(size) ? { size } : {}) }];
 }
 
+/** 从 share_file / share_conversation 的 details（优先）或结果文本里提取链接卡数据（v0.55.0）。 */
+function shareOf(toolName: string, details: unknown, text: string): ShareLink | null {
+	if (toolName !== "share_file" && toolName !== "share_conversation") return null;
+	if (details && typeof details === "object" && "share" in details) {
+		const share = details.share;
+		if (share && typeof share === "object" && "url" in share && typeof share.url === "string") {
+			const kind = "kind" in share && share.kind === "conversation" ? "conversation" : "file";
+			const name = "name" in share && typeof share.name === "string" ? share.name : "";
+			return {
+				url: share.url,
+				title: name || (kind === "conversation" ? "对话分享" : "文件分享"),
+				kind,
+				expiresAt: "expiresAt" in share && typeof share.expiresAt === "number" ? share.expiresAt : 0,
+				createdAt: "createdAt" in share && typeof share.createdAt === "string" ? share.createdAt : undefined,
+				reused: "reused" in share && share.reused === true,
+			};
+		}
+	}
+	// 旧记录/裁剪后的详情：退回从「分享链接：<url>」里取
+	const m = /分享链接：([^\s（）]+)/.exec(text);
+	if (!m) return null;
+	const kind = toolName === "share_conversation" ? "conversation" : "file";
+	return {
+		url: m[1]!,
+		title: kind === "conversation" ? "对话分享" : "文件分享",
+		kind,
+		expiresAt: 0,
+	};
+}
+
 function pickString(o: Record<string, unknown>, keys: string[]): string {
 	for (const key of keys) {
 		const v = o[key];
@@ -132,6 +162,8 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 	let pendingTools: ToolCallInfo[] = [];
 	/** 待挂到下一条助手消息的文件产出。 */
 	let pendingFiles: { name: string; size?: number }[] = [];
+	/** 待挂到下一条助手消息的分享链接。 */
+	let pendingShares: ShareLink[] = [];
 	let seq = 0;
 
 	const flushStandaloneTools = () => {
@@ -169,6 +201,8 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			if (!text && tools.length === 0 && !thinking) continue;
 			const files = pendingFiles;
 			pendingFiles = [];
+			const shares = pendingShares;
+			pendingShares = [];
 			messages.push({
 				id: `a${seq++}`,
 				role: "assistant",
@@ -176,6 +210,7 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 				tools: tools.length ? tools : undefined,
 				thinking: thinking || undefined,
 				files: files.length ? files : undefined,
+				shares: shares.length ? shares : undefined,
 			});
 		} else if (kind === "compaction") {
 			// pi.compaction：早期对话被摘要成一条记录（v0.31.0），聊天里显示为一条系统提示
@@ -210,6 +245,10 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			pendingTools.push({ name, summary: prefix + summary, full: prefix + rawSummary, ...(args ? { args } : {}) });
 			// 文件产出：留到下一条助手消息一起渲染（v0.25.2 修正归属）
 			pendingFiles.push(...artifactsOf(name, rawSummary));
+			// 分享链接：details 优先，缺 details 时从文本取（v0.55.0）
+			const details = firstModel?.details;
+			const share = shareOf(name, details, rawSummary);
+			if (share) pendingShares.push(share);
 		}
 		// 其他 kind：宽容跳过
 	}
