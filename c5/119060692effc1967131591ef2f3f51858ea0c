@@ -1,0 +1,36 @@
+src/worker.ts
+  00512495ff504ece 969-971,974,976-978
+CHANGELOG.md
+  00512495ff504ece 7-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "c5119060692effc1967131591ef2f3f51858ea0c",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 13,
+      "total_deletions": 3,
+      "accepted_lines": 13,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/worker.ts": {
+          "additions": 7,
+          "deletions": 3,
+          "accepted_lines": 7
+        },
+        "CHANGELOG.md": {
+          "additions": 6,
+          "accepted_lines": 6
+        }
+      }
+    }
+  }
+}
