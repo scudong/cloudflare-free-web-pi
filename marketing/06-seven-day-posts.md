@@ -42,7 +42,7 @@ Stack:
 • 1 Cloudflare Worker + static React app
 • Durable Objects + SQLite (no Postgres/Redis)
 • pi-durable agent loop
-• 126 golden tests, CI deploy + live smoke
+• golden test suite, CI deploy + live smoke
 
 `wrangler deploy` and you're done.
 
@@ -186,7 +186,7 @@ No login for the recipient.
 
 ### X
 
-126 tests. 0 servers.
+Full golden test suite. 0 servers.
 
 The API suite spawns a real `wrangler dev` with its own SQLite. A second run starts a password-protected instance to prove user isolation. CI deploys, then smoke-tests the live Worker.
 
@@ -196,12 +196,12 @@ Boring infrastructure is the feature.
 
 ### 小红书
 
-**标题**：126 条测试后才敢开源
+**标题**：金标回归全绿后才敢开源
 
 **正文**：
 把这个项目开源之前，我先补了测试。
 
-现在有 126 条：
+现在有一整套金标：
 · 单元测试
 · 接口测试：真的拉起一个 `wrangler dev`，用独立的 SQLite
 · 多用户隔离：再起一个带密码的实例，确认两个用户互相看不到数据
@@ -376,7 +376,7 @@ ChatGPT 是租的，这个是自己的网站：自己的域名、自己的数据
 需要一点命令行基础：克隆、填两个 key、`wrangler deploy`。README 里有四步；卡住可以把报错发我。
 
 **「有在线演示吗？」**
-暂时没有公开演示，避免模型费用被滥用；仓库有截图、架构图和 126 条测试。
+暂时没有公开演示，避免模型费用被滥用；仓库有截图、架构图和完整金标回归。
 
 **「为什么不做成 SaaS？」**
 数据在自己手里是这类工具的核心价值；做成 SaaS 就回到了「租用」。
