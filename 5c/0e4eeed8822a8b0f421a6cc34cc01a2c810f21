@@ -1,0 +1,62 @@
+wrangler.jsonc
+  7c3cf012d2155818 3-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "5c0e4eeed8822a8b0f421a6cc34cc01a2c810f21",
+  "prompts": {
+    "7c3cf012d2155818": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28d4b333-925b-4539-9236-01fb4d90af48",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 297,
+      "total_deletions": 364,
+      "accepted_lines": 55,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/unit/loginGate.test.tsx": {
+          "additions": 23,
+          "deletions": 23
+        },
+        "src/worker.ts": {
+          "additions": 5,
+          "deletions": 74,
+          "accepted_lines": 5
+        },
+        "scripts/create-demo-share.mjs": {
+          "additions": 131,
+          "deletions": 131
+        },
+        "src/web/App.tsx": {
+          "additions": 49,
+          "deletions": 49,
+          "accepted_lines": 45
+        },
+        "tests/api/api.test.ts": {
+          "additions": 9,
+          "deletions": 9,
+          "accepted_lines": 1
+        },
+        "wrangler.jsonc": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 3
+        },
+        "src/web/components/LoginGate.tsx": {
+          "additions": 75,
+          "deletions": 75
+        },
+        "src/web/lib/api.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
