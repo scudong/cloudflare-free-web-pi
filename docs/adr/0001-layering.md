@@ -246,14 +246,21 @@ export function migrate(sql: SqlHandle, now?: () => string): number; // 返回�
 
 - 账本表：`schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)`。
 - 按 version 升序执行，每条执行成功后写账本；`SqlHandle` 没有事务入口，因此**每条迁移必须自身幂等**（`IF NOT EXISTS`、`INSERT OR IGNORE`、只容忍 `duplicate column name`）。
-- v1 = 现行 20 张业务表，**先 CREATE 后 ALTER**：修掉 `sessions_meta` 现在"先 ALTER 后 CREATE、空库 ALTER 全被吞"导致首请求缺 `deleted/model/hidden/parent_id/fork_at` 的顺序缺陷。
+- v1 = 现行 schema 全量，**先 CREATE 后 ALTER**：修掉 `sessions_meta` 现在"先 ALTER 后 CREATE、空库 ALTER 全被吞"导致首请求缺 `deleted/model/hidden/parent_id/fork_at` 的顺序缺陷。v1 必须覆盖 `ensureTables` 的全部对象，不只是表：
+  - 20 张表：`pi_mem`、`vfs_v2`、`sessions_meta`、`skills`、`shares`、`automations`、`mcp_servers`、`reflect_state`、`app_settings`、`plans`、`prompts`、`rules`、`kb_docs`、`kb_chunks`、`goals`、`questions`、`custom_tools`、`approvals`、`approval_grants`、`providers`
+  - 普通索引 `kb_chunks_doc`
+  - FTS5 虚拟表 `kb_fts(title_tokens, body_tokens)`（`CREATE VIRTUAL TABLE`，`PRAGMA table_info` 看不到，必须单独断言可用）
+  - 4 条补列：`shares.expires_at`、`shares.theme`、`kb_chunks.vectorized`、`pi_mem.source`
 - v2 = `vfs_files` → `vfs_v2`（根会话 `'1'`）数据搬迁，`INSERT OR IGNORE` 后 `DROP TABLE IF EXISTS`。
+- DDL **原文照抄，只调整顺序**：列名、类型、`NOT NULL`、`DEFAULT`、主键、`AUTOINCREMENT` 不得改动（例如 `sessions_meta.model ... DEFAULT 'deepseek-flash'`、`kb_chunks.vectorized ... DEFAULT 0`）。默认值漂移即行为变更。
+- 必须对**已有数据的老库**幂等：线上库 `schema_migrations` 为空，首次执行 v1 会跑全部语句，`CREATE ... IF NOT EXISTS` 幂等、补列靠 `duplicate column name` 容忍；v2 在 `vfs_files` 已删的库上是 no-op。
+- 一条 `exec` 只放一条语句（与现行 `ensureTables` 一致），避免依赖 DO `exec` 的多语句行为。
 - 唯一入口 `ensureMigrated()`：`SpikeAgent` 上 `private migrated: Promise<void> | null`，`open()` 与 `alarm()` 先 await；请求路径**不再**出现 `ensureTables`。
 - 不允许在迁移里读 `env`/发起网络请求；向量回填仍由既有后台任务负责。
 
 ### 9.5 验收测试
 
-1. `tests/unit/migrations.test.ts`：用 `node:sqlite`（Node 22.5+，CI 为 Node 22）在 `:memory:` 跑真 SQLite，断言空库一次 migrate 后 `PRAGMA table_info(sessions_meta)` 含 `deleted/model/hidden/parent_id/fork_at`；二次 migrate 返回 0；`schema_migrations` 行数等于 `MIGRATIONS.length`；预置 `vfs_files` 后迁移数据进入 `vfs_v2` 且旧表消失。
+1. `tests/unit/migrations.test.ts`：用 `node:sqlite`（CI 的 Node 22 最新版实测 22.23.3，无需 `--experimental-sqlite`，只会打一条 ExperimentalWarning）在 `:memory:` 跑真 SQLite，断言空库一次 migrate 后 `PRAGMA table_info(sessions_meta)` 含 `deleted/model/hidden/parent_id/fork_at`；二次 migrate 返回 0；`schema_migrations` 行数等于 `MIGRATIONS.length`；预置 `vfs_files` 后迁移数据进入 `vfs_v2` 且旧表消失；`kb_fts` 可 `INSERT` + `MATCH` 查到行；`PRAGMA index_list(kb_chunks)` 含 `kb_chunks_doc`；对已含全部列的库再跑 v1 不抛错。
 2. `tests/api/api.test.ts` 增加"空 persist 首请求"：`rmSync(tests/.tmp-state)` 后第一个 DO 请求为 `GET /api/sessions`，必须 200 且 `sessions` 元素带 `model` 字段定义（无会话时至少断言 200 与数组类型）。
 3. `npm test` 全绿（现有金标 + 上述新增）。
 
@@ -287,7 +294,7 @@ chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./servi
 
 ## 10. 执行状态
 
-- 2026-10-21：ADR 转 Accepted；阶段 0a 已派给 后端-bei（NERE-21 子任务），0b 等待 PR #17 合并。
+- 2026-10-21：ADR 转 Accepted（PR #18）。NERE-21 子任务按 stage 排期：0a=NERE-27（in_progress，后端-bei）、0b=NERE-28（等 PR #17 合并）、1=NERE-29、2=NERE-30、3=NERE-31（吸收 NERE-22）、4=NERE-32、5=NERE-33、6=NERE-34。
 - 后续每个阶段完成后在本节追加一行：阶段号、PR、验收命令结果。
 
 ## 后果
