@@ -1,0 +1,29 @@
+marketing/04-demo-plan.md
+  00512495ff504ece 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "83434dce84fbd5ebcaf031f84c7d2947b2fc8da5",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 40,
+      "total_deletions": 0,
+      "accepted_lines": 40,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "marketing/04-demo-plan.md": {
+          "additions": 40,
+          "accepted_lines": 40
+        }
+      }
+    }
+  }
+}
