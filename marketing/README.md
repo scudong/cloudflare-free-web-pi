@@ -27,6 +27,6 @@
 - [x] 仓库名改为 `cloudflare-free-web-pi`（见 02；短名备选 `cf-free-web-pi`）
 - [x] 加 LICENSE（MIT）
 - [x] 公开演示：已决定首发暂不做（见 04）；只发仓库 + 截图
-- [x] README 补一段英文摘要（X 受众）
+- [x] README 默认英文（结构参考 magpie），完整中文在 `README.zh-CN.md`
 - [x] GitHub Description / Topics 更新；1200×630 社交预览图已生成（`docs/social-preview.png`），GitHub 设置里手动上传
 - [x] 确认 `.dev.vars`、备份文件、真实用户数据没有进仓库（历史里只有占位符 `sk-...`）
