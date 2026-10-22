@@ -141,6 +141,7 @@ npx wrangler deploy
 |---|---|---|
 | GET | `/api/auth` | 是否需要登录 / 当前是否已登录 |
 | POST | `/api/login` | `{password}` → 下发签名 cookie |
+| GET | `/api/bootstrap?sessionId=` | 首屏聚合：一次返回 `session` / `entries` / `sessions` / `files` / `memories` / `approvals` / `settings` / `plan` / `goal` / `questions` / `prompts` / `rules` / `customTools` / `skills` / `automations` / `mcpServers` / `models`；单个面板失败时该字段为 `null` 或 `[]`，并在 `errors` 里给出原因 |
 | GET | `/api/sessions` | 会话列表 |
 | POST | `/api/sessions` | 新建会话 |
 | PATCH / DELETE | `/api/sessions` | 重命名 / 删除（同时清空该会话文件） |

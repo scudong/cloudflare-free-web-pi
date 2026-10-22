@@ -3,7 +3,7 @@
   // 这两个绑定在无凭证的 CI 里会让 wrangler dev 启动失败；
   // 测试用 CF_DISABLE_VECTOR=1 关闭向量模式，只验证 FTS / 回退路径。
   "name": "pi-harness-spike",
-  "vars": { "BUILD": "test" },
+  "vars": { "BUILD": "test", "TEST_REGISTRY_STATS": "1" },
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],

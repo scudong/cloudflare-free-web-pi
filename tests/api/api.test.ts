@@ -931,3 +931,97 @@ describe("导出与版本", () => {
 		expect(typeof json.build).toBe("string");
 	});
 });
+
+describe("首屏聚合 /api/bootstrap", () => {
+	it("一次返回所有面板，且与单端点结果一致", async () => {
+		const created = await post("/api/sessions", {});
+		const sid = created.json.id as string;
+		await post("/api/restore", {
+			version: 1,
+			data: {
+				files: [{ conversation_id: sid, name: "bootstrap.md", content: "# bootstrap", updated_at: new Date().toISOString() }],
+				memories: [{ content: "bootstrap 记忆", created_at: new Date().toISOString(), source: "manual" }],
+			},
+		});
+
+		const boot = await api(`/api/bootstrap?sessionId=${sid}`);
+		expect(boot.status).toBe(200);
+		expect(boot.json.errors).toEqual({});
+		expect(boot.json.session).toEqual({ ok: true, name: "pi-harness-spike" });
+		expect(boot.json.models.models.length).toBeGreaterThan(0);
+		expect(boot.json.models.default).toBe(boot.json.models.models[0]);
+
+		const [
+			entries, sessions, files, memories, approvals, settings, plan,
+			goal, questions, prompts, rules, customTools, skills, automations, mcpServers,
+		] = await Promise.all([
+			api(`/api/entries?sessionId=${sid}`),
+			api("/api/sessions"),
+			api(`/api/files?sessionId=${sid}`),
+			api("/api/memories"),
+			api(`/api/approvals?sessionId=${sid}`),
+			api("/api/settings"),
+			api(`/api/plan?sessionId=${sid}`),
+			api(`/api/goal?sessionId=${sid}`),
+			api(`/api/questions?sessionId=${sid}`),
+			api("/api/prompts"),
+			api("/api/rules"),
+			api("/api/custom-tools"),
+			api("/api/skills"),
+			api("/api/automations"),
+			api("/api/mcp"),
+		]);
+
+		expect(boot.json.entries).toEqual(entries.json);
+		expect(boot.json.sessions).toEqual(sessions.json.sessions);
+		expect(boot.json.files).toEqual(files.json.files);
+		expect(boot.json.files.map((f: { name: string }) => f.name)).toContain("bootstrap.md");
+		expect(boot.json.memories).toEqual(memories.json.memories);
+		expect(boot.json.approvals).toEqual(approvals.json.approvals);
+		expect(boot.json.settings).toEqual(settings.json);
+		expect(boot.json.plan).toEqual(plan.json.steps);
+		expect(boot.json.goal).toEqual(goal.json.goal);
+		expect(boot.json.questions).toEqual(questions.json.questions);
+		expect(boot.json.prompts).toEqual(prompts.json.prompts);
+		expect(boot.json.rules).toEqual(rules.json.rules);
+		expect(boot.json.customTools).toEqual(customTools.json.tools);
+		expect(boot.json.skills).toEqual(skills.json.skills);
+		expect(boot.json.automations).toEqual(automations.json.automations);
+		expect(boot.json.mcpServers).toEqual(mcpServers.json.servers);
+
+		await api(`/api/sessions?id=${sid}`, { method: "DELETE" });
+	});
+
+	it("空白会话的默认值可被前端容错解析", async () => {
+		const created = await post("/api/sessions", {});
+		const sid = created.json.id as string;
+		const { json } = await api(`/api/bootstrap?sessionId=${sid}`);
+
+		expect(json.entries).toEqual([]);
+		expect(json.files).toEqual([]);
+		expect(json.approvals).toEqual([]);
+		expect(json.plan).toEqual([]);
+		expect(json.goal).toBeNull();
+		expect(json.questions).toEqual([]);
+		expect(Array.isArray(json.sessions)).toBe(true);
+		expect(json.sessions.some((s: { id: string }) => s.id === sid)).toBe(true);
+		expect(typeof json.settings.webSearch).toBe("boolean");
+		expect(json.errors).toEqual({});
+
+		await api(`/api/sessions?id=${sid}`, { method: "DELETE" });
+	});
+
+	it("非法 sessionId 返回 400", async () => {
+		for (const value of ["abc", "0", "-1", "1.5", "1e3"]) {
+			const res = await api(`/api/bootstrap?sessionId=${encodeURIComponent(value)}`);
+			expect(res.status).toBe(400);
+			expect(res.json.error).toContain("正整数");
+		}
+	});
+
+	it("缺省 sessionId 落到根会话", async () => {
+		const res = await api("/api/bootstrap");
+		expect(res.status).toBe(200);
+		expect(res.json.errors).toEqual({});
+	});
+});
