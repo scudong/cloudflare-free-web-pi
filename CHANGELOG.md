@@ -37,6 +37,12 @@
 
 ## 2026-10-22
 
+### 后端可靠 / 性能 P1：Harness 误标 + 向量化截断 + bootstrap 错误码（NERE-78）
+- `needsHarness` 收口：24 个只读写 SQL 的 method+path 改为 `false`（automations/files/kb/data 的 `/memories`/capabilities 的 `/capabilities`、`GET /mcp`）；`POST /goal` 仍为 `true`（`baselineTokens` 要读 Harness 用量）。冷启动首个 DO 请求打纯 SQL 端点时 `/debug/harness` 的 `opens` 保持 0
+- KB 入库向量索引改为分批循环到该文档无剩余（原先只建前 100 段）：入库响应与 `GET /kb/status` 新增 `pending`，`vectorized` 回报该文档当前已建数；中途 AI 失败保留已完成批次，剩余量可轮询或 `POST /kb/reindex` 续建
+- `GET /api/bootstrap` 的 `errors` 只输出稳定码 `internal_error` / `unavailable`，异常原文（表名 / SQL）只进 `console.warn`；HTTP 状态仍为 200
+- 测试：`api/sql-cold.test.ts`（空 persist 冷启动零 open）+ `unit/kb-service.test.ts`（300 段全建 / 中途失败 pending）+ `unit/bootstrap.test.ts`（码值与不泄漏）
+
 ### 定时任务上次运行结果落库：`last_status`（NERE-68 2b）
 - 迁移 v8 给 `automations` 加 `last_status TEXT`（`ok` / `failed` / `deferred`），老数据为 NULL，走 `ensureColumn` 幂等补列
 - alarm 三条路径各写各的状态：成功 `ok`、异常 `failed`（`console.warn` 保留）、会话忙 `deferred`；`deferred` 只推后 `next_run_at`，不动 `last_run_at`

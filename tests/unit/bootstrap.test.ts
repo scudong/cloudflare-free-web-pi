@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BOOTSTRAP_KEYS, collectBootstrap, type BootstrapLoaders } from "../../src/worker/bootstrap";
+import { AppError } from "../../src/worker/http/errors";
 
 const VALUES: Record<string, unknown> = {
 	session: { ok: true, name: "pi-harness-spike" },
@@ -28,13 +29,20 @@ function loaders(overrides: Partial<Record<string, () => unknown>> = {}): Bootst
 }
 
 describe("首屏聚合 collectBootstrap", () => {
+	beforeEach(() => {
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+	});
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	it("全部面板成功时原样返回，errors 为空", async () => {
 		const payload = await collectBootstrap(loaders());
 		for (const key of BOOTSTRAP_KEYS) expect(payload[key]).toEqual(VALUES[key]);
 		expect(payload.errors).toEqual({});
 	});
 
-	it("单个数组面板失败：该字段回退空数组，其余照常", async () => {
+	it("单个数组面板失败：该字段回退空数组，errors 只给稳定码，不回传异常原文", async () => {
 		const payload = await collectBootstrap(
 			loaders({
 				files: () => {
@@ -43,7 +51,8 @@ describe("首屏聚合 collectBootstrap", () => {
 			}),
 		);
 		expect(payload.files).toEqual([]);
-		expect(payload.errors).toEqual({ files: "vfs_v2: no such table" });
+		expect(payload.errors).toEqual({ files: "internal_error" });
+		expect(JSON.stringify(payload)).not.toContain("vfs_v2");
 		expect(payload.entries).toEqual(VALUES.entries);
 		expect(payload.settings).toEqual(VALUES.settings);
 	});
@@ -53,20 +62,42 @@ describe("首屏聚合 collectBootstrap", () => {
 			loaders({ settings: () => Promise.reject(new Error("app_settings locked")) }),
 		);
 		expect(payload.settings).toBeNull();
-		expect(payload.errors).toEqual({ settings: "app_settings locked" });
+		expect(payload.errors).toEqual({ settings: "internal_error" });
 		expect(payload.memories).toEqual(VALUES.memories);
 	});
 
-	it("非 Error 抛出让错误信息仍然可读，且截断到 200 字", async () => {
+	it("非 Error 抛出与非 503 AppError 都收敛为 internal_error", async () => {
 		const payload = await collectBootstrap(
 			loaders({
 				skills: () => {
 					throw "x".repeat(500);
 				},
+				prompts: () => {
+					throw new AppError("bad_request", 400, "bad");
+				},
 			}),
 		);
 		expect(payload.skills).toEqual([]);
-		expect(payload.errors.skills).toHaveLength(200);
+		expect(payload.prompts).toEqual([]);
+		expect(payload.errors).toEqual({ skills: "internal_error", prompts: "internal_error" });
+	});
+
+	it("依赖不可用（Harness 会话失败 / 503）报 unavailable，原文仍只进日志", async () => {
+		const sessionFailed = new Error("Session failed after a storage error; close and reopen it");
+		sessionFailed.name = "SessionFailed";
+		const payload = await collectBootstrap(
+			loaders({
+				entries: () => {
+					throw sessionFailed;
+				},
+				settings: () => {
+					throw new AppError("unavailable", 503, "upstream down");
+				},
+			}),
+		);
+		expect(payload.entries).toEqual([]);
+		expect(payload.errors).toEqual({ entries: "unavailable", settings: "unavailable" });
+		expect(JSON.stringify(payload)).not.toContain("storage error");
 	});
 
 	it("多个面板同时失败互不影响", async () => {
@@ -82,7 +113,7 @@ describe("首屏聚合 collectBootstrap", () => {
 		);
 		expect(payload.entries).toEqual([]);
 		expect(payload.mcpServers).toEqual([]);
-		expect(payload.errors).toEqual({ entries: "harness down", mcpServers: "mcp table missing" });
+		expect(payload.errors).toEqual({ entries: "internal_error", mcpServers: "internal_error" });
 		expect(payload.sessions).toEqual(VALUES.sessions);
 		expect(payload.models).toEqual(VALUES.models);
 	});

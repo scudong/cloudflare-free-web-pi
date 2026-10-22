@@ -63,13 +63,13 @@ export const dataRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/memories",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => Response.json({ memories: createMemoryService(ctx.sql()).list() }),
 	},
 	{
 		method: "DELETE",
 		path: "/memories",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const memories = createMemoryService(ctx.sql());
 			// all=1 → 一键清空（v0.26.0）

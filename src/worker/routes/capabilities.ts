@@ -17,7 +17,7 @@ export const capabilityRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/capabilities",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => Response.json(capabilities({ sql: ctx.sql(), settings: view(ctx) })),
 	},
 	{
@@ -42,7 +42,7 @@ export const capabilityRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/mcp",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => Response.json({ servers: listServers(ctx.sql()) }),
 	},
 	{

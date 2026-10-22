@@ -12,7 +12,7 @@ export const fileRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/files",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const sessionId = ctx.url.searchParams.get("sessionId") ?? "1";
 			return Response.json({ files: service(ctx).list(sessionId) });
@@ -21,7 +21,7 @@ export const fileRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/files/content",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const name = ctx.url.searchParams.get("name") ?? "";
 			const sessionId = ctx.url.searchParams.get("sessionId") ?? "1";
@@ -33,7 +33,7 @@ export const fileRoutes: readonly Route[] = [
 	{
 		method: "DELETE",
 		path: "/files",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const sessionId = ctx.url.searchParams.get("sessionId") ?? "1";
 			service(ctx).delete(sessionId, ctx.url.searchParams.get("name") ?? "");
@@ -43,7 +43,7 @@ export const fileRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/files/all",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => Response.json({ files: service(ctx).listAll(ctx.url.searchParams.get("q") ?? "") }),
 	},
 ];

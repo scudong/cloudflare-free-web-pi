@@ -230,3 +230,14 @@ export function countUnvectorized(sql: SqlHandle): number {
 		(sql.exec("SELECT COUNT(*) AS n FROM kb_chunks WHERE vectorized = 0").toArray() as { n: number }[])[0]?.n ?? 0,
 	);
 }
+
+/** 单篇文档尚未建向量的分块数（入库/补建后用于回报 pending）。 */
+export function countUnvectorizedForDoc(sql: SqlHandle, docId: number): number {
+	return Number(
+		(
+			sql
+				.exec("SELECT COUNT(*) AS n FROM kb_chunks WHERE doc_id = ? AND vectorized = 0", docId)
+				.toArray() as { n: number }[]
+		)[0]?.n ?? 0,
+	);
+}

@@ -4,8 +4,10 @@
  * 这里只做编排与容错，不碰 SQL / Harness：
  * - 各面板的读取函数由 SpikeAgent 传入，与对应单端点共用同一实现；
  * - 单个面板抛错只影响自己的字段（数组 → []，其它 → null），其余照常返回；
- * - 出错摘要放在 errors，便于线上定位，不把内部异常扩散成 500。
+ * - `errors` 只放稳定码（NERE-78），原文只进 `console.warn`，避免表名 / SQL 泄漏到响应。
  */
+
+import { AppError } from "./http/errors";
 
 export const BOOTSTRAP_KEYS = [
 	"session",
@@ -48,13 +50,27 @@ const ARRAY_FALLBACK: Partial<Record<BootstrapKey, true>> = {
 
 export type BootstrapLoaders = { [K in BootstrapKey]: () => unknown };
 
+/** `errors` 只暴露稳定码；异常原文（可能带表名 / SQL）只进服务端日志。 */
+export type BootstrapErrorCode = "internal_error" | "unavailable";
+
 export type BootstrapPayload = { [K in BootstrapKey]: unknown } & {
-	errors: Partial<Record<BootstrapKey, string>>;
+	errors: Partial<Record<BootstrapKey, BootstrapErrorCode>>;
 };
 
-function message(err: unknown): string {
-	const text = err instanceof Error ? err.message : String(err);
-	return text.slice(0, 200);
+/** Harness 会话 / 存储请求失败意味着依赖暂时不可用；其余归为内部错误。 */
+const UNAVAILABLE_NAMES: Record<string, true> = {
+	SessionFailed: true,
+	StorageRequestError: true,
+};
+
+function errorCode(err: unknown): BootstrapErrorCode {
+	if (err instanceof Error && UNAVAILABLE_NAMES[err.name] === true) return "unavailable";
+	if (err instanceof AppError && (err.status === 503 || err.code === "unavailable")) return "unavailable";
+	return "internal_error";
+}
+
+function warnFailure(key: BootstrapKey, err: unknown): void {
+	console.warn(`bootstrap panel failed: ${key}`, err);
 }
 
 export async function collectBootstrap(loaders: BootstrapLoaders): Promise<BootstrapPayload> {
@@ -63,13 +79,14 @@ export async function collectBootstrap(loaders: BootstrapLoaders): Promise<Boots
 			try {
 				return { key, value: await loaders[key]() };
 			} catch (err) {
-				return { key, value: ARRAY_FALLBACK[key] ? [] : null, error: message(err) };
+				warnFailure(key, err);
+				return { key, value: ARRAY_FALLBACK[key] ? [] : null, error: errorCode(err) };
 			}
 		}),
 	);
 
 	const payload = {} as BootstrapPayload;
-	const errors: Partial<Record<BootstrapKey, string>> = {};
+	const errors: Partial<Record<BootstrapKey, BootstrapErrorCode>> = {};
 	// 按固定字段顺序赋值，响应体字段顺序稳定，便于快照/体积对比。
 	for (const item of settled) {
 		payload[item.key] = item.value;

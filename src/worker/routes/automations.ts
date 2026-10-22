@@ -21,13 +21,13 @@ export const automationRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/automations",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => Response.json({ automations: automations(ctx).list() }),
 	},
 	{
 		method: "POST",
 		path: "/automations",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			try {
 				const created = automations(ctx).create((await ctx.req.json()) as never);
@@ -41,7 +41,7 @@ export const automationRoutes: readonly Route[] = [
 	{
 		method: "PATCH",
 		path: "/automations",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			try {
 				const body = (await ctx.req.json()) as { id?: string } & AutomationPatchInput;
@@ -56,7 +56,7 @@ export const automationRoutes: readonly Route[] = [
 	{
 		method: "DELETE",
 		path: "/automations",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			automations(ctx).remove(ctx.url.searchParams.get("id") ?? "");
 			await ctx.alarmRuntime.schedule();
@@ -66,13 +66,13 @@ export const automationRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/plan",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => Response.json({ steps: readPlan(ctx.sql(), ctx.url.searchParams.get("sessionId") ?? "1") }),
 	},
 	{
 		method: "GET",
 		path: "/goal",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const goal = createGoalService({ sql: ctx.sql(), runtime: ctx.goalRuntime });
 			return Response.json({ goal: goal.view(ctx.url.searchParams.get("sessionId") ?? "1") });
@@ -101,7 +101,7 @@ export const automationRoutes: readonly Route[] = [
 	{
 		method: "DELETE",
 		path: "/goal",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const goal = createGoalService({ sql: ctx.sql(), runtime: ctx.goalRuntime });
 			const paused = goal.pause(ctx.url.searchParams.get("sessionId") ?? "1");

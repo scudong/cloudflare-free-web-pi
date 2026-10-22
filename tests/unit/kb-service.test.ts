@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { migrate, type SqlHandle } from "../../src/worker/db/migrations";
 import {
 	createKbService,
@@ -40,10 +40,12 @@ function withDb(run: (sql: SqlHandle) => Promise<void>): () => Promise<void> {
 
 type FakeAi = { calls: { model: string; texts: string[] }[]; run(model: string, input: unknown): Promise<{ data?: number[][] }> };
 
-function fakeAi(): FakeAi {
+function fakeAi(options: { failOnCall?: number } = {}): FakeAi {
 	return {
 		calls: [],
 		async run(model, input) {
+			// 计数以「这一批是第几次 AI 调用」为准，用来模拟大批量索引中途失败。
+			if (this.calls.length + 1 === options.failOnCall) throw new Error("AI unavailable");
 			const raw = input && typeof input === "object" && "text" in input ? input.text : [];
 			const texts = Array.isArray(raw) ? raw.map(String) : [];
 			this.calls.push({ model, texts });
@@ -227,6 +229,50 @@ describe("kb-service：向量索引重建分批（NERE-66）", () => {
 			expect(await kb.reindex()).toEqual({ indexed: 200, remaining: 0 });
 			expect(vec.upserts).toHaveLength(700);
 			expect(kb.status()).toMatchObject({ total: 700, indexed: 700 });
+		}),
+	);
+});
+
+describe("kb-service：入库向量索引补齐（NERE-78）", () => {
+	/** 150 段 851 字正文：每段按 720 步长切成 2 块，共 300 块（低于 20 万字符上限）。 */
+	const LONG_CONTENT = Array.from({ length: 150 }, (_, i) => `P${String(i).padStart(3, "0")}${"甲".repeat(847)}`).join("\n\n");
+
+	it(
+		"300 段文档 addIndexed 循环建完向量，status 不再有 pending",
+		withDb(async (sql) => {
+			const ai = fakeAi();
+			const vec = fakeVector();
+			const kb = service(sql, { env: { AI: ai, KB_VEC: vec }, settings: hybridSettings });
+
+			const added = await kb.addIndexed({ title: "长文档", content: LONG_CONTENT, source: "long.txt" });
+			expect(added.chunks).toBe(300);
+			expect(added.vectorized).toBe(300);
+			expect(added.pending).toBe(0);
+			expect(vec.upserts).toHaveLength(300);
+			expect(kb.status()).toMatchObject({ total: 300, indexed: 300, pending: 0 });
+			// 单次 embed 仍按既有批大小切分，逐批循环而不是把 300 段塞进一次调用。
+			expect(Math.max(...ai.calls.map((call) => call.texts.length))).toBeLessThanOrEqual(16);
+		}),
+	);
+
+	it(
+		"中途 AI 失败：已完成批次保留，响应与 status 的 pending 可轮询",
+		withDb(async (sql) => {
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+			try {
+				// 第一批 200 段用 13 次调用；第 15 次（第二批 100 段内）失败。
+				const ai = fakeAi({ failOnCall: 15 });
+				const vec = fakeVector();
+				const kb = service(sql, { env: { AI: ai, KB_VEC: vec }, settings: hybridSettings });
+
+				const added = await kb.addIndexed({ title: "长文档", content: LONG_CONTENT, source: "long.txt" });
+				expect(added.vectorized).toBe(200);
+				expect(added.pending).toBe(100);
+				expect(vec.upserts).toHaveLength(200);
+				expect(kb.status()).toMatchObject({ total: 300, indexed: 200, pending: 100 });
+			} finally {
+				warn.mockRestore();
+			}
 		}),
 	);
 });
