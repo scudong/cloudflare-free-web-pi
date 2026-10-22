@@ -45,3 +45,8 @@ export function insert(sql: SqlHandle, row: { sessionId: string; payload: string
 export function markAnswered(sql: SqlHandle, id: number, now: string): void {
 	sql.exec("UPDATE questions SET status = 'answered', answered_at = ? WHERE id = ?", now, id);
 }
+
+/** 会话删除时清掉该会话的问题（NERE-24 级联）：返回实际删除行数。 */
+export function removeForSession(sql: SqlHandle, sessionId: string): number {
+	return sql.exec("DELETE FROM questions WHERE session_id = ? RETURNING id", sessionId).toArray().length;
+}

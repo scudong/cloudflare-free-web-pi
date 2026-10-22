@@ -35,6 +35,11 @@ export type ShareRuntime = {
 	entries(sessionId: string): Promise<readonly unknown[]>;
 };
 
+/* ---------------- NERE-24：用户数据处置 ---------------- */
+
+/** 用户 DO 的存储清空端口；只由 owner 触发的显式 purge 调用。 */
+export type UserLifecycleRuntime = { purge(): Promise<void> };
+
 /* ---------------- 阶段 4：设置 / 自动化 / 上下文 / 能力 / MCP ---------------- */
 
 /** 设置域：压缩策略或当前供应商变更后重建 Harness（先写库后重建）。 */

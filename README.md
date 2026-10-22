@@ -37,7 +37,7 @@ Cloudflare Free Web Pi is the opposite: a workspace you deploy to your own Cloud
 ## What you get
 
 - **A durable agent, not a chat shell.** Work is persisted before it runs. Restart the Durable Object and it continues. Cron automations and goal mode keep going with the browser closed.
-- **Per-user spaces.** Invite codes; each user gets their own Durable Object — sessions, files, memory, knowledge base, and share tokens are isolated. The owner issues, resets, and revokes codes from the UI.
+- **Per-user spaces.** Invite codes; each user gets their own Durable Object — sessions, files, memory, knowledge base, and share tokens are isolated. The owner issues, resets, and revokes codes from the UI. Revoking is immediate: the old token stops working and every share link that user created returns 404, while their data is retained by default; a separate, explicitly confirmed purge removes it (export first, irreversible after).
 - **Files with a share button — on your own domain.** The agent writes Markdown and HTML into a workbench. One click produces a public page served from your Cloudflare domain (the default `*.pages.dev` subdomain, or a custom domain you bind) with an expiry (1 hour to forever), four themes, and a table of contents.
 - **A knowledge base that answers first.** Per-user FTS5 index with Chinese bigram tokenization and bm25. The top 3 chunks are injected before every turn; the model can also call `kb_search` itself. Switch to Vectorize + bge-m3, or hybrid retrieval (RRF), in Settings.
 - **Real tools.** 24 built-in tools in the default install: web search, MCP servers, skills, prompts, rules, custom JS tools, parallel subagents, and a QuickJS codemode sandbox.

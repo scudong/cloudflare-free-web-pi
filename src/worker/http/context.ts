@@ -15,6 +15,7 @@ import type {
 	SettingsRuntime,
 	ShareRuntime,
 	ToolRuntime,
+	UserLifecycleRuntime,
 } from "./ports";
 
 /** Worker 绑定（ADR-0001 §9.2）；只在 Http 层按需读取，不落库。 */
@@ -52,6 +53,8 @@ export type RequestContext = {
 	readonly sessionRuntime: SessionRuntime;
 	/** 分享域的 Harness 端口（阶段 3）：只有会话分享真正读条目时才 open()。 */
 	readonly shareRuntime: ShareRuntime;
+	/** 用户数据清空端口（NERE-24）：仅内部 purge 端点使用。 */
+	readonly userLifecycleRuntime: UserLifecycleRuntime;
 	/** 设置读取端口（DO 用既有 getSetting 实现），供服务替代模块级 getSetting。 */
 	readonly settings: SettingsPort;
 	/** 设置写入（`/kernel` 的版本缓存）；写入口径在 `repo/settings-repo`。 */
@@ -91,6 +94,7 @@ export type BuildContextInput = {
 	open(): Promise<Harness>;
 	sessionRuntime: SessionRuntime;
 	shareRuntime: ShareRuntime;
+	userLifecycleRuntime: UserLifecycleRuntime;
 	settings: SettingsPort;
 	setSetting(key: string, value: string): void;
 	settingsRuntime: SettingsRuntime;
@@ -119,6 +123,7 @@ export function buildContext(input: BuildContextInput): RequestContext {
 		harness: () => input.open(),
 		sessionRuntime: input.sessionRuntime,
 		shareRuntime: input.shareRuntime,
+		userLifecycleRuntime: input.userLifecycleRuntime,
 		settings: input.settings,
 		setSetting: (key, value) => input.setSetting(key, value),
 		settingsRuntime: input.settingsRuntime,

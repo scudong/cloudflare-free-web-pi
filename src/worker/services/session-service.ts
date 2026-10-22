@@ -8,6 +8,10 @@ import {
 import { get, insertFork, insertIfAbsent, listKnownIds, listVisible, markDeleted, rename } from "../repo/sessions-repo";
 import type { SessionMetaRow } from "../repo/sessions-repo";
 import { removeSession as removeSessionFiles } from "../repo/files-repo";
+import { removeForSession as removeApprovals } from "../repo/approvals-repo";
+import { removeForSession as removeQuestions } from "../repo/questions-repo";
+import { remove as removePlan } from "../repo/plans-repo";
+import { deleteBySession as removeShares } from "../repo/shares-repo";
 
 /**
  * 会话域用例（ADR-0001 §2）：`sessions_meta` 与 Harness 的唯一协调点。
@@ -45,14 +49,25 @@ export type SessionList = {
 	}[];
 };
 
+/** 会话删除的实际清理计数（NERE-24）：每一步都幂等，重复删除返回 0。 */
+export type SessionDeleteCounts = {
+	shares: number;
+	files: number;
+	plans: number;
+	approvals: number;
+	approvalGrants: number;
+	questions: number;
+	kbRefs: number;
+};
+
 export interface SessionService {
 	/** 元数据表为准，存储里存在但元数据缺失的会话补齐（已删除/隐藏的不复活）。 */
 	list(): Promise<SessionList>;
 	create(): Promise<{ id: string; title: string }>;
 	fork(sessionId: string, entryId: number, title?: string): Promise<{ id: string; title: string }>;
 	rename(id: string, title: string): void;
-	/** 删除仍是非级联：标记 deleted、删该会话文件、暂停目标；shares/plans 等不动（R10）。 */
-	remove(id: string): void;
+	/** 删除会级联清理该会话的分享、文件、计划、审批/许可、问题与 KB 旁路行（NERE-24）。 */
+	remove(id: string): SessionDeleteCounts;
 	entries(sessionId?: string): Promise<readonly unknown[]>;
 	/** 记下一条 assistant entry 本轮注入的知识库命中（NERE-40）；空命中不写。 */
 	saveEntryKbRefs(conversationId: string, entryId: number, refs: readonly KbRef[]): void;
@@ -130,11 +145,17 @@ export function createSessionService({ sql, runtime }: SessionServiceDeps): Sess
 		},
 
 		remove(id) {
-			markDeleted(sql, id, new Date().toISOString());
-			removeSessionFiles(sql, id);
+			// 先删分享，让链接在后续清理期间就失效；每步都可重入。
+			const shares = removeShares(sql, id);
+			const files = removeSessionFiles(sql, id);
+			const plans = removePlan(sql, id);
+			const { approvals, grants } = removeApprovals(sql, id);
+			const questions = removeQuestions(sql, id);
 			// 旁路元数据不随 Harness 条目级联，删除会话时一并清掉，避免长期留存（NERE-40 review）。
-			removeEntryKbRefs(sql, id);
+			const kbRefs = removeEntryKbRefs(sql, id);
+			markDeleted(sql, id, new Date().toISOString());
 			runtime.pauseGoal(id);
+			return { shares, files, plans, approvals, approvalGrants: grants, questions, kbRefs };
 		},
 
 		async entries(sessionId) {

@@ -189,3 +189,113 @@ describe("阶段 4：设置 / 自定义工具按用户隔离（R5）", () => {
 		expect(ownerList.json.tools.find((t: { name: string }) => t.name === "owner_probe")?.category).toBe("exec");
 	});
 });
+
+describe("用户吊销生命周期（NERE-24）", () => {
+	async function inviteUser(name: string) {
+		const created = await post("/api/users", { name }, ownerCookie);
+		const id = created.json.user.id as string;
+		const login = await post("/api/login", { password: created.json.code as string }, "");
+		return { id, cookie: login.cookie as string };
+	}
+
+	async function seedUser(cookie: string) {
+		const session = await post("/api/sessions", {}, cookie);
+		const sessionId = session.json.id as string;
+		await post(
+			"/api/restore",
+			{
+				version: 1,
+				data: {
+					files: [{ conversation_id: sessionId, name: "lifecycle.md", content: "# keep", updated_at: new Date().toISOString() }],
+				},
+			},
+			cookie,
+		);
+		const conversation = await post("/api/share", { sessionId, kind: "conversation", ttlSeconds: 0 }, cookie);
+		const file = await post("/api/share", { sessionId, kind: "file", name: "lifecycle.md", ttlSeconds: 0 }, cookie);
+		return { sessionId, conversationToken: conversation.json.token as string, fileToken: file.json.token as string };
+	}
+
+	it("删除用户后旧分享链接 404、旧 token 401，重复删除幂等", async () => {
+		const { id, cookie } = await inviteUser("吊销链接用户");
+		const seeded = await seedUser(cookie);
+		expect((await fetch(`${BASE}/s/${seeded.conversationToken}`)).status).toBe(200);
+		expect((await fetch(`${BASE}/s/${seeded.fileToken}`)).status).toBe(200);
+
+		const removed = await call(`/api/users?id=${id}`, { method: "DELETE" }, ownerCookie);
+		expect(removed.status).toBe(200);
+		expect(removed.json).toMatchObject({ ok: true, id, deleted: true, shares: 2 });
+		expect(removed.json.retained.sessions).toBeGreaterThanOrEqual(1);
+		expect(removed.json.retained.files).toBe(1);
+
+		expect((await fetch(`${BASE}/s/${seeded.conversationToken}`)).status).toBe(404);
+		expect((await fetch(`${BASE}/s/${seeded.fileToken}`)).status).toBe(404);
+		expect((await call("/api/kb", {}, cookie)).status).toBe(401);
+
+		const again = await call(`/api/users?id=${id}`, { method: "DELETE" }, ownerCookie);
+		expect(again.status).toBe(200);
+		expect(again.json).toMatchObject({ ok: true, id, deleted: false, shares: 0 });
+	});
+
+	it("导出 → 删除用户 → 二次确认清空数据，重复清空为 0", async () => {
+		const { id, cookie } = await inviteUser("待清空用户");
+		await post("/api/kb", { title: "待导出笔记", content: "purge 前必须能导出" }, cookie);
+		const seeded = await seedUser(cookie);
+
+		const exported = await call(`/api/users/export?id=${id}`, {}, ownerCookie);
+		expect(exported.status).toBe(200);
+		expect(exported.json.version).toBe(1);
+		expect(exported.json.data.kbDocs.map((doc: { title: string }) => doc.title)).toEqual(["待导出笔记"]);
+		expect(exported.json.data.files.map((file: { name: string }) => file.name)).toContain("lifecycle.md");
+
+		const missingConfirm = await call(`/api/users/data?id=${id}`, { method: "DELETE" }, ownerCookie);
+		expect(missingConfirm.status).toBe(400);
+		const stillRegistered = await call(`/api/users/data?id=${id}&confirm=${id}`, { method: "DELETE" }, ownerCookie);
+		expect(stillRegistered.status).toBe(409);
+
+		expect((await call(`/api/users?id=${id}`, { method: "DELETE" }, ownerCookie)).json.ok).toBe(true);
+		expect((await fetch(`${BASE}/s/${seeded.fileToken}`)).status).toBe(404);
+
+		const purged = await call(`/api/users/data?id=${id}&confirm=${id}`, { method: "DELETE" }, ownerCookie);
+		expect(purged.status).toBe(200);
+		expect(purged.json).toMatchObject({ ok: true, id });
+		expect(purged.json.purged).toMatchObject({ sessions: 1, files: 1, shares: 0, kbDocs: 1 });
+		expect(purged.json.purged.kbChunks).toBeGreaterThanOrEqual(1);
+
+		const again = await call(`/api/users/data?id=${id}&confirm=${id}`, { method: "DELETE" }, ownerCookie);
+		expect(again.status).toBe(200);
+		expect(again.json.purged).toMatchObject({ sessions: 0, files: 0, shares: 0, kbDocs: 0, kbChunks: 0 });
+		expect((await call("/api/kb", {}, cookie)).status).toBe(401);
+	});
+
+	it("客户端伪造内部头也不能调用处置端点", async () => {
+		const spoof = await call(
+			"/api/internal/purge-user",
+			{ method: "POST", headers: { "x-pi-internal": "1" } },
+			ownerCookie,
+		);
+		expect(spoof.status).toBe(404);
+	});
+
+	it("删除会话级联失效该会话的分享并清理文件", async () => {
+		const session = await post("/api/sessions", {});
+		const sessionId = session.json.id as string;
+		await post("/api/restore", {
+			version: 1,
+			data: {
+				files: [{ conversation_id: sessionId, name: "cascade.md", content: "# cascade", updated_at: new Date().toISOString() }],
+			},
+		});
+		const conversation = await post("/api/share", { sessionId, kind: "conversation", ttlSeconds: 0 });
+		const file = await post("/api/share", { sessionId, kind: "file", name: "cascade.md", ttlSeconds: 0 });
+
+		const removed = await call(`/api/sessions?id=${sessionId}`, { method: "DELETE" }, ownerCookie);
+		expect(removed.status).toBe(200);
+		expect(removed.json.deleted).toMatchObject({ shares: 2, files: 1 });
+
+		expect((await fetch(`${BASE}/s/${conversation.json.token}`)).status).toBe(404);
+		expect((await fetch(`${BASE}/s/${file.json.token}`)).status).toBe(404);
+		const files = await call(`/api/files/all?q=cascade`, {}, ownerCookie);
+		expect(files.json.files).toEqual([]);
+	});
+});

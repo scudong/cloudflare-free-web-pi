@@ -144,7 +144,7 @@ npx wrangler deploy
 | GET | `/api/bootstrap?sessionId=` | 首屏聚合：一次返回 `session` / `entries` / `sessions` / `files` / `memories` / `approvals` / `settings` / `plan` / `goal` / `questions` / `prompts` / `rules` / `customTools` / `skills` / `automations` / `mcpServers` / `models`；单个面板失败时该字段为 `null` 或 `[]`，并在 `errors` 里给出原因 |
 | GET | `/api/sessions` | 会话列表 |
 | POST | `/api/sessions` | 新建会话 |
-| PATCH / DELETE | `/api/sessions` | 重命名 / 删除（同时清空该会话文件） |
+| PATCH / DELETE | `/api/sessions` | 重命名 / 删除。删除会级联清空该会话的分享、文件、计划、审批/许可、问题与 KB 命中旁路；响应 `{ok:true,deleted:{shares,files,plans,approvals,approvalGrants,questions,kbRefs}}` |
 | POST | `/api/chat` | `{message, sessionId?, images?}` → `{answer, tools}` |
 | POST | `/api/chat/stream` | 同上，SSE：`text` / `tool_start` / `tool_end` / `done`；`done` 在本轮命中知识库时透传 `kbRefs`（与 entry 同一份，未命中不带该字段） |
 | GET | `/api/entries?sessionId=` | 会话转录；命中知识库的 assistant entry 带 `kbRefs: {docId, chunkId, chunkSeq, title, source?}[]`，未命中不带该字段 |
@@ -174,7 +174,9 @@ npx wrangler deploy
 | GET | `/api/export?format=md` | 导出 Markdown |
 | GET / POST | `/api/backup` · `/api/restore` | 全量备份 / 合并恢复 |
 | GET | `/api/version` | 线上构建号（CI 注入 git SHA） |
-| GET / POST / DELETE | `/api/users` · `POST /api/users/reset` | 邀请用户管理（仅主人；码只返回一次） |
+| GET / POST / DELETE | `/api/users` · `POST /api/users/reset` | 邀请用户管理（仅主人；码只返回一次）。`DELETE?id=` 吊销访问：注册表行删除、该用户全部分享立即失效，**数据默认保留**；响应 `{ok,id,deleted,shares,retained:{sessions,files,kbDocs,...}}`，重复调用幂等 |
+| GET | `/api/users/export?id=` | 导出某用户的完整备份（仅主人；与 `/api/backup` 同形，purge 前留档用） |
+| DELETE | `/api/users/data?id=&confirm=<id>` | 显式清空某用户 DO 的全部数据（仅主人；必须已吊销且 `confirm` 等于用户 id）。不可逆；返回 `{ok,id,purged:{...}}`，重复调用为 0 |
 
 ---
 
@@ -189,7 +191,7 @@ npx wrangler deploy
 ## 注意事项
 
 - **Durable Object 换代码有延迟**：部署后旧实例可能继续运行旧代码 **5–10 分钟**，且持续请求会让它不驱逐。判断线上是否真的更新，看 `GET /api/version` 返回的 git SHA，不要凭「功能没生效」下结论。
-- **访问密码与邀请码**：`ACCESS_PASSWORD` 是主人密码；左栏「用户」可生成邀请码，邀请码登录后进入独立空间（自己的会话 / 文件 / 记忆）。删除用户后其登录态立即失效；改密码会让所有设备立即退出（邀请码仍可重新登录）。
+- **访问密码与邀请码**：`ACCESS_PASSWORD` 是主人密码；左栏「用户」可生成邀请码，邀请码登录后进入独立空间（自己的会话 / 文件 / 记忆）。删除用户 = **吊销访问**：旧登录态立即失效、该用户所有 `/s/*` 分享链接立即 404，会话/文件/知识库数据默认保留；需要彻底删除时先 `GET /api/users/export` 留档，再调 `DELETE /api/users/data?id=&confirm=<id>`（不可逆，无自动回滚）。改密码会让所有设备立即退出（邀请码仍可重新登录）。
 - **数据隔离**：主人沿用历史数据所在的 Durable Object；每个邀请用户使用独立的 `user:<id>` Durable Object，互不可见。会话、文件、记忆、知识库、分享链接都按这套边界隔离。
 - **密钥落库**：MCP 的请求头（如 `x-bb-api-key`）存在 DO 数据库里，**会随 `/api/backup` 导出**，分享备份时注意。
 - **免费额度**：Workers / DO / QuickJS 均在免费额度内；DeepSeek 与 Browserbase 按量计费。
