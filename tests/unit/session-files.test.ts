@@ -33,7 +33,7 @@ function withDb(run: (sql: SqlHandle, db: DatabaseSync) => Promise<void>): () =>
 
 function runtime(overrides: Partial<SessionRuntime> = {}): SessionRuntime {
 	return {
-		entries: async () => [],
+		entries: async () => ({ conversationId: "1", items: [] }),
 		createConversation: async () => "1",
 		forkBefore: async () => ({ id: "2", parentId: "1", at: 5 }),
 		rootId: async () => "1",
@@ -177,7 +177,7 @@ describe("session-service", () => {
 		withDb(async (sql) => {
 			const service = createSessionService({
 				sql,
-				runtime: runtime({ entries: async (sessionId) => [{ sessionId }] }),
+				runtime: runtime({ entries: async (sessionId) => ({ conversationId: sessionId ?? "1", items: [{ sessionId }] }) }),
 			});
 			expect(await service.entries("42")).toEqual([{ sessionId: "42" }]);
 		}),

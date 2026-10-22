@@ -83,7 +83,28 @@ const vfsRootConversation: Migration = {
 	},
 };
 
-export const MIGRATIONS: readonly Migration[] = [initialSchema, vfsRootConversation];
+/**
+ * v3：assistant entry 的知识库命中旁路表（NERE-40）。
+ * Harness 的 `Entry<never>` 不承载自定义字段，命中按 (conversation_id, entry_id) 另存，
+ * `/entries` 序列化时再合并；删除会话/会话历史时行会失去引用，读取侧按 entry 存在与否过滤即可。
+ */
+const entryKbRefs: Migration = {
+	version: 3,
+	name: "entry-kb-refs",
+	up(sql) {
+		sql.exec(
+			`CREATE TABLE IF NOT EXISTS entry_kb_refs (
+				conversation_id TEXT NOT NULL,
+				entry_id INTEGER NOT NULL,
+				refs TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				PRIMARY KEY (conversation_id, entry_id)
+			)`,
+		);
+	},
+};
+
+export const MIGRATIONS: readonly Migration[] = [initialSchema, vfsRootConversation, entryKbRefs];
 
 // 版本号是账本的唯一真源：重复或乱序会被 INSERT OR IGNORE 静默跳过，模块加载时就暴露。
 const migrationVersions = MIGRATIONS.map((migration) => migration.version);

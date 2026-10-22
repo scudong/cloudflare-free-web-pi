@@ -2,6 +2,14 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## 2026-10-22
+
+### 知识库命中随 assistant entry 落库（v0.58.0，NERE-40）
+- `GET /api/entries` 的 assistant entry 新增可选 `kbRefs: {docId, chunkId, chunkSeq, title, source?}[]`：本轮预检索的命中与注入 instructions 的参考资料逐条对应；未命中或 `kb_prefetch` 关闭时不写该字段
+- Harness 的 `pi.assistant` entry 不承载自定义字段，命中落在旁路表 `entry_kb_refs(conversation_id, entry_id, refs, created_at)`；迁移 v3 建表，读路径在 session-service 合并，老会话无行时响应与迁移前一致
+- 流式 `done` 事件透传同一份 `kbRefs`（仅命中时），前端无需刷新即可渲染「参考资料」
+- 单测覆盖：命中/未命中/多文档去重/老会话兼容/坏 JSON 容错；API 金标新增「久期」命中与「今天天气」未命中的端到端验收
+
 ## 2026-10-21（公开发布准备）
 
 ### 首屏聚合 `/api/bootstrap`（v0.57.0）

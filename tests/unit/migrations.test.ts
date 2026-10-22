@@ -179,4 +179,23 @@ describe("migrate", () => {
 			db.close();
 		}
 	});
+
+	it("v3 建立 entry_kb_refs 旁路表，老库补跑只应用一次", () => {
+		const db = new DatabaseSync(":memory:");
+		try {
+			const sql = sqlHandle(db);
+			migrate(sql);
+			expect(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='entry_kb_refs'").all()).toHaveLength(1);
+			const pk = (db.prepare("PRAGMA table_info(entry_kb_refs)").all() as { name: string; pk: number }[])
+				.filter((column) => column.pk > 0)
+				.map((column) => column.name);
+			expect(pk).toEqual(["conversation_id", "entry_id"]);
+
+			db.exec("DELETE FROM schema_migrations WHERE version = 3");
+			expect(migrate(sql)).toBe(1);
+			expect(ledgerCount(db)).toBe(MIGRATIONS.length);
+		} finally {
+			db.close();
+		}
+	});
 });

@@ -233,3 +233,48 @@ describe("kb-service：链接导入", () => {
 		}),
 	);
 });
+
+describe("kb-service：预检索引用（NERE-40）", () => {
+	it(
+		"命中时 refs 与注入块逐条对应，带文档定位信息",
+		withDb(async (sql) => {
+			const added = service(sql).add({ ...DOC, content: "久期是衡量利率风险的核心指标。久期越长，价格对利率越敏感。" });
+			const result = await service(sql).prefetch("久期怎么看");
+
+			expect(result.block).toContain("债券研究笔记");
+			expect(result.refs.length).toBeGreaterThan(0);
+			// 块里每条参考资料一条 ref：分隔符数量 + 1
+			expect(result.refs).toHaveLength(result.block.split("\n\n---\n\n").length);
+			expect(result.refs[0]).toMatchObject({ docId: added.id, title: DOC.title, source: DOC.source });
+			expect(result.refs[0]!.chunkSeq).toBeGreaterThanOrEqual(0);
+			expect(result.refs[0]!.chunkId).toBeGreaterThan(0);
+			for (const ref of result.refs) expect(result.block).toContain(ref.title);
+		}),
+	);
+
+	it(
+		"未命中 / 开关关闭 / 查询过短都不产生引用",
+		withDb(async (sql) => {
+			service(sql).add(DOC);
+			expect(await service(sql).prefetch("今天天气怎么样")).toEqual({ block: "", refs: [] });
+			expect(await service(sql).prefetch("久")).toEqual({ block: "", refs: [] });
+
+			const off = service(sql, { settings: { get: (key, fallback) => (key === "kb_prefetch" ? "0" : fallback) } });
+			expect(await off.prefetch("久期怎么看")).toEqual({ block: "", refs: [] });
+		}),
+	);
+
+	it(
+		"多文档命中时按 docId:chunkId 去重，refs 不重复",
+		withDb(async (sql) => {
+			const kb = service(sql);
+			kb.add({ title: "债券研究笔记", content: "久期是衡量利率风险的核心指标。", source: "a.md" });
+			kb.add({ title: "组合管理手册", content: "组合久期与利率敏感度成正比。", source: "b.md" });
+			const result = await kb.prefetch("久期");
+
+			const keys = result.refs.map((ref) => `${ref.docId}:${ref.chunkId}`);
+			expect(new Set(keys).size).toBe(keys.length);
+			expect(result.refs.map((ref) => ref.title).sort()).toEqual(["债券研究笔记", "组合管理手册"]);
+		}),
+	);
+});
