@@ -12,6 +12,8 @@ import type {
 	ShareRecord,
 	SkillInfo,
 } from "../types";
+import { automationScheduleLabel, parseAutomationSchedule } from "./automation-schedule";
+import { formatNextRunAt } from "./format";
 
 /**
  * Tolerant parsers for panel data (sessions / files / memories).
@@ -94,27 +96,18 @@ export function parseMemories(raw: unknown): MemoryInfo[] {
 export function parseAutomations(raw: unknown): AutomationInfo[] {
 	const list = arrayOf(raw, ["automations"]).filter(isObject);
 	return list.map((entry, index) => {
-		const rawSchedule = entry.schedule;
-		let scheduleLabel = "每天 09:00";
-		try {
-			const schedule = (typeof rawSchedule === "string" ? JSON.parse(rawSchedule) : rawSchedule) as {
-				kind?: string;
-				time?: string;
-				minutes?: number;
-			};
-			scheduleLabel =
-				schedule?.kind === "interval" ? `每隔 ${schedule.minutes ?? 60} 分钟` : `每天 ${schedule?.time ?? "09:00"}`;
-		} catch {
-			// 保持默认文案
-		}
+		// NERE-65：保留原始调度与会话，编辑弹窗要回填；文案仍由同一份函数生成。
+		const schedule = parseAutomationSchedule(entry.schedule);
 		const next = typeof entry.next_run_at === "number" ? entry.next_run_at : undefined;
 		return {
 			id: pickString(entry, ["id"]) || `a${index}`,
 			name: pickString(entry, ["name", "title"]) || `任务 ${index + 1}`,
 			prompt: pickString(entry, ["prompt", "message"]),
-			scheduleLabel,
-			nextLabel: next ? new Date(next).toLocaleString("zh-CN", { hour12: false }) : undefined,
+			scheduleLabel: automationScheduleLabel(schedule),
+			nextLabel: formatNextRunAt(next),
 			enabled: entry.enabled !== 0 && entry.enabled !== false,
+			schedule,
+			sessionId: pickString(entry, ["session_id", "sessionId"]) || undefined,
 		};
 	});
 }

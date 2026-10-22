@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
+import { AutomationEditDialog } from "./AutomationEditDialog";
 import { Icon } from "./Icon";
 import { SkillCard } from "./SkillCard";
 import { SkillHubPanel } from "./SkillHubPanel";
-import type { AutomationInfo, CustomToolInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
+import type { AutomationInfo, AutomationPatch, CustomToolInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
 
 /** 左栏面板头部（NERE-43 起导出复用）：标题 + 可选操作 / 计数 / 收起。 */
 export function PanelHeader({
@@ -165,6 +166,8 @@ export function AutomationPanel({
 	onAdd,
 	onToggle,
 	onDelete,
+	onUpdate,
+	defaultSessionId = "",
 	onCollapse,
 }: {
 	items: AutomationInfo[];
@@ -173,6 +176,10 @@ export function AutomationPanel({
 	onAdd: (name: string, prompt: string, schedule: { kind: string; time?: string; minutes?: number }) => Promise<boolean>;
 	onToggle: (id: string, enabled: boolean) => Promise<boolean>;
 	onDelete: (id: string) => Promise<boolean>;
+	/** 编辑保存（NERE-65）：走 PATCH，失败时返回可展示文案。 */
+	onUpdate: (patch: AutomationPatch) => Promise<{ ok: boolean; error?: string }>;
+	/** 任务没有记录会话时的兜底回填。 */
+	defaultSessionId?: string;
 	onCollapse?: () => void;
 }) {
 	const [name, setName] = useState("");
@@ -181,6 +188,8 @@ export function AutomationPanel({
 	const [time, setTime] = useState("09:00");
 	const [minutes, setMinutes] = useState("60");
 	const [busy, setBusy] = useState(false);
+	/** 正在编辑的任务；非空即弹出编辑弹窗（NERE-65）。 */
+	const [editing, setEditing] = useState<AutomationInfo | null>(null);
 
 	const submit = () => {
 		if (!name.trim() || !prompt.trim() || busy) return;
@@ -275,6 +284,15 @@ export function AutomationPanel({
 								<span className="min-w-0 flex-1 truncate text-[13px] text-slate-100">{job.name}</span>
 								<button
 									type="button"
+									title="编辑"
+									aria-label={`编辑 ${job.name}`}
+									onClick={() => setEditing(job)}
+									className="rounded p-1 text-slate-500 hover:bg-slate-700 hover:text-slate-200"
+								>
+									<Icon name="edit" className="h-3.5 w-3.5" />
+								</button>
+								<button
+									type="button"
 									title={job.enabled ? "暂停" : "启用"}
 									aria-label={`${job.enabled ? "暂停" : "启用"} ${job.name}`}
 									onClick={() => void onToggle(job.id, !job.enabled)}
@@ -303,6 +321,15 @@ export function AutomationPanel({
 					))}
 				</ul>
 			</div>
+			{editing && (
+				<AutomationEditDialog
+					key={editing.id}
+					job={editing}
+					defaultSessionId={defaultSessionId}
+					onClose={() => setEditing(null)}
+					onSave={onUpdate}
+				/>
+			)}
 		</div>
 	);
 }

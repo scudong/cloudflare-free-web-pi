@@ -35,7 +35,7 @@ App（页面层，1736 行）
 │  ├─ Sidebar          会话列表 + 搜索 + 重命名/删除
 │  ├─ FilesPanel       全库文件（自取数）
 │  ├─ SharesPanel      分享清单（NERE-56 能力门禁）
-│  ├─ AutomationPanel  定时任务
+│  ├─ AutomationPanel  定时任务（行内「编辑」→ AutomationEditDialog / ModalShell md，NERE-65）
 │  └─ UsersPanel       用户管理（owner 可见，自取数）
 ├─ TopBar              在线状态 / 会话名 / 打开设置 / 移动端抽屉
 ├─ 聊天栏
@@ -83,7 +83,7 @@ App（页面层，1736 行）
 | 消息流 | `messages` | 流式事件 + bootstrap `entries` 回放 |
 | 文件（当前会话 / 全库） | `files`, `filesState` | bootstrap（`panelTick` 重取） |
 | 记忆 | `memories`, `memoriesState` | bootstrap（`panelTick` 重取） |
-| 技能 / 模板 / 规则 / 自定义工具 / MCP / 定时任务 | `skills`, `prompts`, `rules`, `customTools`, `mcpServers`, `automations` | bootstrap（`panelTick` 重取）；技能行额外带 `runtime` / `auditStatus` / `lastInvokedAt`（NERE-59） |
+| 技能 / 模板 / 规则 / 自定义工具 / MCP / 定时任务 | `skills`, `prompts`, `rules`, `customTools`, `mcpServers`, `automations` | bootstrap（`panelTick` 重取）；技能行额外带 `runtime` / `auditStatus` / `lastInvokedAt`（NERE-59）；定时任务编辑用 PATCH 返回值就地合并（NERE-65），不整表重取 |
 | 技能 Hub 列表（NERE-54） | `useSkillHub`（SkillHubPanel 内） | 切到 Hub 视图时取 `GET /api/skills/hub`；筛选变化带查询串重取（q 防抖），失败保留旧数据并可重试 |
 | 全局设置 | `thinkingLevel`, `compaction`, `approvalSettings`, `webSearch`, `kbPrefetch`, `kbRetrieval`, `model`, `theme` | bootstrap `settings` + 局部回写 |
 | 计划 / 目标 / 审批 / 提问 | `plan`, `goal`, `approvals`, `askQuestions` | bootstrap + 每轮 `done` / `tool_end` 后增量刷新 |
@@ -118,7 +118,7 @@ App（页面层，1736 行）
 
 | 调用点 | api.* 次数 | 主要接口 |
 | --- | --- | --- |
-| `App.tsx` | 47 | `/api/bootstrap`（经 `useBootstrap`）, `/api/stream`, `/api/files*`, `/api/memories`, `/api/skills`, `/api/prompts`, `/api/rules`, `/api/custom-tools`, `/api/mcp`, `/api/automations`, `/api/settings`, `/api/model(s)`, `/api/approvals`, `/api/questions`, `/api/goal`, `/api/sessions`, `/api/auth`, `/api/abort`, `/api/interject`, `/api/users` |
+| `App.tsx` | 48 | `/api/bootstrap`（经 `useBootstrap`）, `/api/stream`, `/api/files*`, `/api/memories`, `/api/skills`, `/api/prompts`, `/api/rules`, `/api/custom-tools`, `/api/mcp`, `/api/automations`, `/api/settings`, `/api/model(s)`, `/api/approvals`, `/api/questions`, `/api/goal`, `/api/sessions`, `/api/auth`, `/api/abort`, `/api/interject`, `/api/users` |
 | `SettingsDialog.tsx` | 18 | `/api/settings`, `/api/backup`, `/api/restore`, `/api/kernel`, `/api/tools`, `/api/compact`, `/api/providers`, `/api/models`, `/api/kb/status`, `/api/version` |
 | `KnowledgePanel.tsx` | 5 | `/api/kb*` |
 | `UsersPanel.tsx` | 4 | `/api/users*` |
@@ -128,7 +128,7 @@ App（页面层，1736 行）
 | `Workbench.tsx` | 1 | `/api/files/content` |
 | `LeftPanels.tsx` | 1 | `/api/automations` |
 
-NERE-63 的面板弹窗外壳（`components/ModalShell.tsx`、`lib/focus.ts`）不调用任何 `api.*`；三个面板迁入弹窗后各自的调用点与次数不变。
+NERE-63 的面板弹窗外壳（`components/ModalShell.tsx`、`lib/focus.ts`）不调用任何 `api.*`；三个面板迁入弹窗后各自的调用点与次数不变。NERE-65 的编辑弹窗（`components/AutomationEditDialog.tsx`）同样只接收 `onSave` 回调，PATCH 由 `App.tsx` 发出。
 
 首屏业务请求数：旧版 18 个（session、entries、sessions、files、memories、settings、plan、goal、questions、approvals、prompts、rules、custom-tools、skills、automations、mcp、models、context），NERE-26 之后为 1 个 `/api/bootstrap`。`/api/auth` 是登录闸门（改造前后各 1 次，不计入面板读取）；Composer 的 `/api/context` 改为切换会话、轮次结束或点击刷新时再取，不再出现在首屏。
 
