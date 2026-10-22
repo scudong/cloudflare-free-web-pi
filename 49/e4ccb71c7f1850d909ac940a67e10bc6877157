@@ -1,0 +1,77 @@
+tests/unit/bootstrap-web.test.ts
+  65a7d1b825e7a87b 1-174
+src/web/App.tsx
+  65a7d1b825e7a87b 18-19,194-201,209-218,220-278,280-289,291-294,296-313,1531,1581
+src/web/hooks/useBootstrap.ts
+  65a7d1b825e7a87b 1-68
+src/web/lib/api.ts
+  65a7d1b825e7a87b 12-87,237-241,362,367,412-413,438-442,456,463,492,505,531,544,550
+src/web/components/Composer.tsx
+  65a7d1b825e7a87b 137-140,144,155-160
+docs/frontend-map.md
+  65a7d1b825e7a87b 14,20-22,29,67-73,76-83,85-87,107,111,121-122
+src/web/lib/bootstrap.ts
+  65a7d1b825e7a87b 1-194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "49e4ccb71c7f1850d909ac940a67e10bc6877157",
+  "prompts": {
+    "65a7d1b825e7a87b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6645e613-2f07-4e19-b769-f77f0118ba62",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 1161,
+      "total_deletions": 396,
+      "accepted_lines": 684,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/bootstrap.ts": {
+          "additions": 194,
+          "accepted_lines": 194
+        },
+        "src/web/lib/api.ts": {
+          "additions": 98,
+          "deletions": 54,
+          "accepted_lines": 98
+        },
+        "src/web/components/Composer.tsx": {
+          "additions": 17,
+          "deletions": 7,
+          "accepted_lines": 11
+        },
+        "src/web/App.tsx": {
+          "additions": 115,
+          "deletions": 279,
+          "accepted_lines": 115
+        },
+        "src/web/hooks/useBootstrap.ts": {
+          "additions": 68,
+          "accepted_lines": 68
+        },
+        "tests/unit/bootstrap-web.test.ts": {
+          "additions": 177,
+          "deletions": 3,
+          "accepted_lines": 174
+        },
+        "docs/frontend-map.md": {
+          "additions": 29,
+          "deletions": 14,
+          "accepted_lines": 28
+        },
+        "docs/nere-26-first-screen.png": {
+          "additions": 463,
+          "accepted_lines": 463
+        },
+        "reply.md": {
+          "deletions": 39
+        }
+      }
+    }
+  }
+}

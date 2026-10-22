@@ -1,0 +1,101 @@
+src/web/hooks/useBootstrap.ts
+  65a7d1b825e7a87b 1-68
+docs/frontend-map.md
+  65a7d1b825e7a87b 14,20-22,29,67-73,76-83,85-87,107,111,121-122
+tests/unit/bootstrap-web.test.ts
+  65a7d1b825e7a87b 1-174
+src/web/lib/api.ts
+  65a7d1b825e7a87b 12-87,237-241,362,367,412-413,438-442,456,463,492,505,531,544,550
+src/web/App.tsx
+  65a7d1b825e7a87b 18-19,194-201,209-218,220-278,280-289,291-294,296-313,1531,1581
+src/web/components/Composer.tsx
+  65a7d1b825e7a87b 137-140,144,155-160
+src/web/lib/bootstrap.ts
+  65a7d1b825e7a87b 1-194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "9e6a83d1c118b7aea0c76c195a237dcd09efebdc",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 13,
+      "total_deletions": 3,
+      "accepted_lines": 13,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/worker.ts": {
+          "additions": 7,
+          "deletions": 3,
+          "accepted_lines": 7
+        },
+        "CHANGELOG.md": {
+          "additions": 6,
+          "accepted_lines": 6
+        }
+      }
+    },
+    "65a7d1b825e7a87b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6645e613-2f07-4e19-b769-f77f0118ba62",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 1161,
+      "total_deletions": 396,
+      "accepted_lines": 1151,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/hooks/useBootstrap.ts": {
+          "additions": 68,
+          "accepted_lines": 68
+        },
+        "src/web/App.tsx": {
+          "additions": 115,
+          "deletions": 279,
+          "accepted_lines": 115
+        },
+        "src/web/components/Composer.tsx": {
+          "additions": 17,
+          "deletions": 7,
+          "accepted_lines": 11
+        },
+        "src/web/lib/api.ts": {
+          "additions": 98,
+          "deletions": 54,
+          "accepted_lines": 98
+        },
+        "src/web/lib/bootstrap.ts": {
+          "additions": 194,
+          "accepted_lines": 194
+        },
+        "tests/unit/bootstrap-web.test.ts": {
+          "additions": 177,
+          "deletions": 3,
+          "accepted_lines": 174
+        },
+        "reply.md": {
+          "deletions": 39
+        },
+        "docs/frontend-map.md": {
+          "additions": 29,
+          "deletions": 14,
+          "accepted_lines": 28
+        },
+        "docs/nere-26-first-screen.png": {
+          "additions": 463,
+          "accepted_lines": 463
+        }
+      }
+    }
+  }
+}
