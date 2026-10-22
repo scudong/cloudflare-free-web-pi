@@ -1,4 +1,5 @@
 import type { SqlHandle } from "../db/migrations";
+import { AppError, defaultErrorCode } from "../http/errors";
 import * as approvalsRepo from "../repo/approvals-repo";
 import { isHidden } from "../repo/sessions-repo";
 import { approvalSettings as readApprovalSettings, type ApprovalPolicy, type GetSetting } from "./settings-service";
@@ -148,12 +149,10 @@ export function withApproval<T extends { name: string; execute?: (...args: never
 	} as T;
 }
 
-export class ApprovalApiError extends Error {
-	constructor(
-		readonly status: number,
-		message: string,
-	) {
-		super(message);
+export class ApprovalApiError extends AppError {
+	constructor(status: number, message: string, code = defaultErrorCode(status)) {
+		super(code, status, message);
+		this.name = "ApprovalApiError";
 	}
 }
 

@@ -1,4 +1,5 @@
 import type { SqlHandle } from "../db/migrations";
+import { AppError } from "../http/errors";
 import type { SettingsPort } from "../http/ports";
 import {
 	CONTENT_MAX_BYTES,
@@ -46,14 +47,9 @@ import {
  * SQL 全部经 repo；HTTP 状态码与响应体在 `routes/skills.ts`。
  */
 
-export class SkillApiError extends Error {
-	constructor(
-		readonly status: number,
-		readonly code: string,
-		message: string,
-		readonly details?: Record<string, unknown>,
-	) {
-		super(message);
+export class SkillApiError extends AppError {
+	constructor(status: number, code: string, message: string, details?: Record<string, unknown>) {
+		super(code, status, message, false, details);
 		this.name = "SkillApiError";
 	}
 }

@@ -1,4 +1,5 @@
 import type { SqlHandle } from "../db/migrations";
+import { AppError, defaultErrorCode } from "../http/errors";
 import { KB_VECTOR_DEFAULT_INDEX } from "./kb-service";
 import { MAX_SHARE_TTL, shareDefaultTtl } from "./share-service";
 import * as providersRepo from "../repo/providers-repo";
@@ -164,12 +165,10 @@ export type SettingsUpdateBody = {
 };
 
 /** 端点错误 -> Route 映射为 `{ error }` + status（与旧响应逐字一致）。 */
-export class SettingsApiError extends Error {
-	constructor(
-		readonly status: number,
-		message: string,
-	) {
-		super(message);
+export class SettingsApiError extends AppError {
+	constructor(status: number, message: string, code = defaultErrorCode(status)) {
+		super(code, status, message);
+		this.name = "SettingsApiError";
 	}
 }
 

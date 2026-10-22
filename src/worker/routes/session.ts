@@ -1,5 +1,5 @@
 import { createSessionService } from "../services/session-service";
-import { AppError } from "../http/errors";
+import { AppError, errorText } from "../http/errors";
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
 
@@ -57,7 +57,7 @@ export const sessionRoutes: readonly Route[] = [
 				return Response.json({ ok: true, ...created });
 			} catch (err) {
 				// 旧行为：分叉失败一律 400，并保留「分支创建失败：」前缀与 200 字符截断。
-				throw new AppError("branch_failed", 400, `分支创建失败：${String(err).slice(0, 200)}`);
+				throw new AppError("branch_failed", 400, `分支创建失败：${errorText(err, 200)}`);
 			}
 		},
 	},

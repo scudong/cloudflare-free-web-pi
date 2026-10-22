@@ -1,6 +1,7 @@
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
-import { createAutomationService, AutomationApiError, type AutomationPatchInput, type AutomationService } from "../services/automation-service";
+import { AppError, toResponse } from "../http/errors";
+import { createAutomationService, type AutomationPatchInput, type AutomationService } from "../services/automation-service";
 import { createGoalService } from "../services/goal-service";
 import { readPlan } from "../services/plan-service";
 
@@ -10,11 +11,6 @@ import { readPlan } from "../services/plan-service";
  */
 function automations(ctx: RequestContext): AutomationService {
 	return createAutomationService(ctx.sql());
-}
-
-function failure(err: unknown): Response {
-	if (err instanceof AutomationApiError) return Response.json({ error: err.message }, { status: err.status });
-	throw err;
 }
 
 export const automationRoutes: readonly Route[] = [
@@ -29,13 +25,9 @@ export const automationRoutes: readonly Route[] = [
 		path: "/automations",
 		needsHarness: false,
 		handle: async (ctx) => {
-			try {
-				const created = automations(ctx).create((await ctx.req.json()) as never);
-				await ctx.alarmRuntime.schedule();
-				return Response.json({ ok: true, ...created });
-			} catch (err) {
-				return failure(err);
-			}
+			const created = automations(ctx).create((await ctx.req.json()) as never);
+			await ctx.alarmRuntime.schedule();
+			return Response.json({ ok: true, ...created });
 		},
 	},
 	{
@@ -43,14 +35,10 @@ export const automationRoutes: readonly Route[] = [
 		path: "/automations",
 		needsHarness: false,
 		handle: async (ctx) => {
-			try {
-				const body = (await ctx.req.json()) as { id?: string } & AutomationPatchInput;
-				const automation = automations(ctx).update(body.id ?? "", body);
-				await ctx.alarmRuntime.schedule();
-				return Response.json({ ok: true, automation });
-			} catch (err) {
-				return failure(err);
-			}
+			const body = (await ctx.req.json()) as { id?: string } & AutomationPatchInput;
+			const automation = automations(ctx).update(body.id ?? "", body);
+			await ctx.alarmRuntime.schedule();
+			return Response.json({ ok: true, automation });
 		},
 	},
 	{
@@ -90,7 +78,7 @@ export const automationRoutes: readonly Route[] = [
 				maxTurns?: number;
 			};
 			const objective = String(body.objective ?? "").trim().slice(0, 300);
-			if (!objective) return Response.json({ ok: false, error: "目标不能为空。" }, { status: 400 });
+			if (!objective) return toResponse(new AppError("bad_request", 400, "目标不能为空。"), { ok: false });
 			const goal = createGoalService({ sql: ctx.sql(), runtime: ctx.goalRuntime });
 			return Response.json({
 				ok: true,

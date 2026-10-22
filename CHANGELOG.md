@@ -37,6 +37,13 @@
 
 ## 2026-10-22
 
+### 统一错误契约：4 套 ApiError → AppError（NERE-79）
+- `KbIngestError` / `SkillApiError` / `AutomationApiError` / `SettingsApiError`（以及审批、问答、提示模板、自定义工具的同类错误）全部继承 `AppError`，保留 `code` / `details`；路由不再各自映射状态码
+- `toResponse` 统一输出 `{error, code, details?, retryable?}`；未知异常固定 500 + `code:"internal_error"`，只回传 `message` 截断、不带 `Error:` 前缀与堆栈
+- 兼容一个版本：`POST /api/kb/ingest` 保留 `ok:false` / `message`，`POST /api/skills/import` 保留 `ok:false` / `installed:false`，审批/问答/插话/目标/自定义工具保留 `ok:false`；HTTP 状态码与业务语义不变
+- `scripts/check-layering.sh` 新增两条硬约束：`src/worker/routes` 禁止 `String(err)`，禁止手写 `Response.json({error…})` / `new Response(JSON.stringify({error…}))` 错误体（必须经 `toResponse`）
+- 测试：`api/error-contract.test.ts` 覆盖四条 ApiError 路径（状态码与 code 一致、无内部异常文本）+ `unit/errors.test.ts` / `unit/http-context.test.ts` 断言统一响应体
+
 ### 后端可靠 / 性能 P1：Harness 误标 + 向量化截断 + bootstrap 错误码（NERE-78）
 - `needsHarness` 收口：24 个只读写 SQL 的 method+path 改为 `false`（automations/files/kb/data 的 `/memories`/capabilities 的 `/capabilities`、`GET /mcp`）；`POST /goal` 仍为 `true`（`baselineTokens` 要读 Harness 用量）。冷启动首个 DO 请求打纯 SQL 端点时 `/debug/harness` 的 `opens` 保持 0
 - KB 入库向量索引改为分批循环到该文档无剩余（原先只建前 100 段）：入库响应与 `GET /kb/status` 新增 `pending`，`vectorized` 回报该文档当前已建数；中途 AI 失败保留已完成批次，剩余量可轮询或 `POST /kb/reindex` 续建

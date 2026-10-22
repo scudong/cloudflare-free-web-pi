@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import type { SqlHandle } from "../db/migrations";
+import { AppError, defaultErrorCode } from "../http/errors";
 import * as customToolsRepo from "../repo/custom-tools-repo";
 import * as settingsRepo from "../repo/settings-repo";
 import { withApproval } from "./approval-service";
@@ -105,12 +106,10 @@ export function listTools(sql: SqlHandle): CustomToolView[] {
 	return customToolsRepo.listAll(sql);
 }
 
-export class CustomToolApiError extends Error {
-	constructor(
-		readonly status: number,
-		message: string,
-	) {
-		super(message);
+export class CustomToolApiError extends AppError {
+	constructor(status: number, message: string, code = defaultErrorCode(status)) {
+		super(code, status, message);
+		this.name = "CustomToolApiError";
 	}
 }
 

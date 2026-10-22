@@ -419,13 +419,14 @@ describe("技能审计真相（NERE-77）", () => {
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ name: "big", content: "x".repeat(256 * 1024 + 1) }),
 		});
-		const response = await route.handle({
-			req: request,
-			url: new URL(request.url),
-			sql: () => sql,
-			settings: { get: () => "" },
-		} as unknown as RequestContext);
-		expect(response.status).toBe(413);
+		await expect(
+			route.handle({
+				req: request,
+				url: new URL(request.url),
+				sql: () => sql,
+				settings: { get: () => "" },
+			} as unknown as RequestContext),
+		).rejects.toMatchObject({ status: 413, code: "too_large" });
 		expect(listSkillRows(sql)).toHaveLength(0);
 	});
 });

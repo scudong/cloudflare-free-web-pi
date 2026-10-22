@@ -1,4 +1,5 @@
 import type { SqlHandle } from "../db/migrations";
+import { AppError, defaultErrorCode } from "../http/errors";
 import * as automationsRepo from "../repo/automations-repo";
 import * as goalsRepo from "../repo/goals-repo";
 
@@ -28,12 +29,10 @@ export function nextRunAt(schedule: Schedule, now = Date.now()): number {
 	return at;
 }
 
-export class AutomationApiError extends Error {
-	constructor(
-		readonly status: number,
-		message: string,
-	) {
-		super(message);
+export class AutomationApiError extends AppError {
+	constructor(status: number, message: string, code = defaultErrorCode(status)) {
+		super(code, status, message);
+		this.name = "AutomationApiError";
 	}
 }
 

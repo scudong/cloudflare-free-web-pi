@@ -96,7 +96,7 @@ describe("dispatch", () => {
 		const ctx = context({ ensureMigrated, open });
 		const res = await dispatch(ctx, []);
 		expect(res.status).toBe(404);
-		expect(await res.json()).toEqual({ error: "not found" });
+		expect(await res.json()).toEqual({ error: "not found", code: "not_found" });
 		expect(ensureMigrated).not.toHaveBeenCalled();
 		expect(open).not.toHaveBeenCalled();
 	});
@@ -148,7 +148,7 @@ describe("dispatch", () => {
 			}),
 		]);
 		expect(bad.status).toBe(400);
-		expect(await bad.json()).toEqual({ error: "参数错误" });
+		expect(await bad.json()).toEqual({ error: "参数错误", code: "bad_request" });
 
 		const unknown = await dispatch(context(), [
 			route({
@@ -158,6 +158,6 @@ describe("dispatch", () => {
 			}),
 		]);
 		expect(unknown.status).toBe(500);
-		expect(await unknown.json()).toEqual({ error: "Error: boom" });
+		expect(await unknown.json()).toEqual({ error: "boom", code: "internal_error" });
 	});
 });
