@@ -109,7 +109,7 @@ beforeAll(async () => {
 	await fake.listen();
 	proc = spawn(
 		"npx",
-		["wrangler", "dev", "--config", "wrangler.test.jsonc", "--port", String(PORT), "--var", "CF_DISABLE_VECTOR:1", "--persist-to", STATE],
+		["wrangler", "dev", "--config", "wrangler.test.jsonc", "--port", String(PORT), "--var", "ACCESS_PASSWORD:", "--var", "CF_DISABLE_VECTOR:1", "--persist-to", STATE],
 		{ cwd: ROOT, env: { ...process.env, CI: "1", WRANGLER_SEND_METRICS: "false" }, stdio: "ignore", detached: true },
 	);
 	await waitForServer();
