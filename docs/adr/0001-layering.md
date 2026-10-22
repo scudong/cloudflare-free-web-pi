@@ -299,7 +299,8 @@ chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./servi
 ## 10. 执行状态
 
 - 2026-10-21：ADR 转 Accepted（PR #18）。NERE-21 子任务按 stage 排期：0a=NERE-27、0b=NERE-28、1=NERE-29、2=NERE-30、3=NERE-31（吸收 NERE-22）、4=NERE-32、5=NERE-33、6=NERE-34。
-- 2026-10-22：阶段 0a 合并（PR #21，`958c950`）：`src/worker/db/migrations.ts` 落地，`worker.ts` 内 `ensureTables` 计数 0，`open()` 走 `ensureMigrated()`。空的 `sessions_meta` 首启五列由 `tests/unit/migrations.test.ts` 与 `tests/api/api.test.ts` 空库用例守住。0b 启动。
+- 2026-10-22：阶段 0a 合并（PR #21，`958c950`）：`src/worker/db/migrations.ts` 落地，`worker.ts` 内 `ensureTables` 计数 0，`open()` 走 `ensureMigrated()`。空的 `sessions_meta` 首启五列由 `tests/unit/migrations.test.ts` 与 `tests/api/api.test.ts` 空库用例守住。
+- 2026-10-22：阶段 0b 路由骨架（PR #23，基线 `1553908`）：`http/context|errors|router` + `routes/index` 落地，`handleFetch` 重命名为 `handleLegacyFetch` 并委托；`scripts/check-layering.sh` 接入 CI。`npm test` 212 passed，`check-layering` 退出 0；auth/version/sessions/bootstrap/chat/`/s/`/404 探针前后响应一致。
 - 后续每个阶段完成后在本节追加一行：阶段号、PR、验收命令结果。
 
 ## 后果
