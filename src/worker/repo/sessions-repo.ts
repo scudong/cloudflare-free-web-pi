@@ -112,3 +112,38 @@ export function upsertTitle(sql: SqlHandle, id: string, title: string, now: stri
 export function touchUpdatedAt(sql: SqlHandle, id: string, now: string): void {
 	sql.exec("UPDATE sessions_meta SET updated_at = ? WHERE id = ?", now, id);
 }
+
+/** 备份：未删除会话的元数据（不含 deleted/hidden）。 */
+export function listForBackup(
+	sql: SqlHandle,
+): { id: string; title: string; created_at: string; updated_at: string; model: string }[] {
+	return sql
+		.exec("SELECT id, title, created_at, updated_at, model FROM sessions_meta WHERE deleted = 0")
+		.toArray() as { id: string; title: string; created_at: string; updated_at: string; model: string }[];
+}
+
+/** 恢复：按 id upsert 标题与模型（旧 restore 只更新这两列）。 */
+export function restoreRow(
+	sql: SqlHandle,
+	row: { id: string; title: string; created_at: string; updated_at: string; model: string },
+): void {
+	sql.exec(
+		"INSERT INTO sessions_meta (id, title, created_at, updated_at, model) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, model = excluded.model",
+		row.id,
+		row.title,
+		row.created_at,
+		row.updated_at,
+		row.model,
+	);
+}
+
+/** 子代理会话（dispatch_tasks）：隐藏、不覆盖已有行。 */
+export function insertHiddenIfAbsent(sql: SqlHandle, id: string, title: string, now: string): void {
+	sql.exec(
+		"INSERT INTO sessions_meta (id, title, created_at, updated_at, hidden) VALUES (?, ?, ?, ?, 1) ON CONFLICT(id) DO NOTHING",
+		id,
+		title,
+		now,
+		now,
+	);
+}

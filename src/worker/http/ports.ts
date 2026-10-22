@@ -149,3 +149,33 @@ export type ChatRuntime = {
 	scheduleAlarm(): Promise<void>;
 	waitUntil(promise: Promise<unknown>): void;
 };
+
+/* ---------------- 阶段 6：数据 / 系统 / 提示模板域 ---------------- */
+
+/** 导出快照（`/export` 用）：Service 渲染 Markdown，DO 只负责读 Harness 与标题。 */
+export type ExportSnapshot = {
+	sessionId: string;
+	title: string;
+	entries: readonly Record<string, unknown>[];
+};
+
+/**
+ * 数据域端口（`/backup`、`/restore`、`/export`、`/reflect`）：
+ * 导出与反思需要 Harness；恢复后要清 MCP 缓存并重排 alarm。
+ */
+export type DataRuntime = {
+	exportSnapshot(sessionId?: string): Promise<ExportSnapshot>;
+	reflect(sessionId?: string): Promise<number>;
+	afterRestore(): Promise<void>;
+};
+
+/** 系统域端口（`/debug/agent`）：读取当前注册表的工具/扩展清单，可选返回本轮 instructions。 */
+export type DebugRuntime = {
+	inspect(input: { message: string | null; sessionId: string }): Promise<unknown>;
+};
+
+/** 自定义工具写操作（`/custom-tools` POST/DELETE）：同时更新 DO 的扩展与注册表。 */
+export type CustomToolsRuntime = {
+	save(body: unknown): { name: string; tools: number };
+	remove(name: string): { tools: number };
+};

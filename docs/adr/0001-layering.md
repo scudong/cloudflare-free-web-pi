@@ -120,7 +120,7 @@ CI 用 grep 检查即可（无需引入新框架）：
 
 - 新增 `src/worker/db/migrations.ts`，按版本号有序执行，记录到 `schema_migrations(version, name, applied_at)`。
 - 请求路径不再调用 `ensureTables`；只在 DO 首次 `open()` 时执行一次 `migrate(sql)`。
-- 本阶段只收口 `SpikeAgent` 的 DDL；`UserRegistry` 自己库里的 `users` 建表仍在其 `db()`，随阶段 0b 的路由层收口一起处理。
+- `SpikeAgent` 的 DDL 在 `db/migrations.ts`；`UserRegistry` 自己库里的 `users` 建表在阶段 6 也移入 `migrateRegistry()`（`db/migrations.ts` 的 `REGISTRY_MIGRATIONS`），`worker.ts` 不再出现 `CREATE TABLE`。
 - 迁移必须先 `CREATE TABLE` 再 `ALTER TABLE`；不允许吞掉非"列已存在"的错误。
 - 每个迁移必须能在空库上从 0 跑到最新；CI 增加"空 persist 首次请求"用例。
 
@@ -224,7 +224,7 @@ export type RequestContext = {
 - **端口增长规则**：新域的端口一律加在这里，类型定义放 `src/worker/http/ports.ts`（或就地定义在该文件），**不要 import 具体 service 的实现类型**——`http` 层只依赖端口形状，Service 实现向下依赖端口，避免 `http → services → http` 的环。阶段 3 起新增的分享/设置端口按此办理；阶段 2 遗留的 `KbSettings` 类型在阶段 6 收口时移到 `http/ports.ts`。
 - **dispatch 对每个命中路由先 `await ctx.ready()`，再按 `needsHarness` 决定是否 `await ctx.harness()`。** 迁移与 Harness 是两件事：阶段 3 把 `/s/*` 标成 `needsHarness: false` 后，分享页仍要读 `shares` 表，`sql()` 必须已经可用；把迁移绑在 `open()` 上会让冷启动分享页拿到未建表的库。
 - 阶段 0b 所有现存端点 `needsHarness: true`（与现状"每个请求先 `open()`"等价）；阶段 3 起 `/s/*` 与只读端点按实测改为 `false`，这是 NERE-22 的落地方式，不另写实现。
-- `agentScope`/`scope()` 保留为兼容层，供尚未迁移的模块级 helper 使用；**新代码不得调用 `scope()`**，阶段 6 删除。
+- ~~`agentScope`/`scope()` 保留为兼容层~~ **阶段 6 已删除**：工具扩展按请求构造并显式注入 SQL/设置/服务；`src/worker.ts` 只剩组合根。
 
 ### 9.3 AppError
 
@@ -333,6 +333,7 @@ chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./servi
 - 2026-10-22：阶段 4 设置/供应商/MCP/自动化/审批/问答（NERE-32）：`routes/settings|automations|approvals|capabilities.ts` → `services/settings|automation|goal|plan|approval|question|mcp|custom-tool|capability-service.ts` → `repo/settings|providers|mcp|automations|goals|plans|approvals|questions|custom-tools|panels-repo.ts`。`alarm()` 仍由 DO 包 `agentScope.run`，到点筛选/下一次时间/顺延进 `automation-service`。`customToolNames`/`mcpCache` 搬入 `SpikeAgent` 实例，`buildCustomToolsExtension`/`buildMcpExtension` 显式收缓存（R5 关闭）。路由层零 SQL；`app_settings|providers|mcp_servers|automations|goals|plans|approvals|approval_grants|questions|custom_tools` 的读写（含备份/恢复）只在 repo。`npm test` 全绿、`check-layering` 退出 0。
 - 2026-10-22：阶段 4 合并（PR #51，`3b131ff`）：设置/供应商/MCP/自动化/审批/问答收口，`routes/` 10 个文件、`services/` 14 个；R5 关闭——`customToolNames`/`mcpCache` 变为 `SpikeAgent` 实例字段并经参数注入 builder。`handleLegacyFetch` 258 行、`sqlFacade` 14 处；`src/worker.ts` 2977 行。阶段 5（NERE-33）wakeup 已触发但 issue 仍 backlog，已手动置 todo。
 - 2026-10-22：阶段 5 对话提交路径合并（NERE-33）：新增 `routes/chat.ts` → `services/chat-service.ts`，`/chat` 与 `/chat/stream` 共用 `prepare → submit → finish`；目标续转、并发闸门（`ChatGate`）、reflection 节流与标题策略进 Service，DO 只保留 `chatRuntime()` 端口。路由层零 SQL；SSE 事件名/顺序不变；`npm test` 全绿（375 passed）、`scripts/check-layering.sh` 通过；R11 关闭。
+- 2026-10-22：阶段 6 收口（NERE-34）：删除 `handleLegacyFetch` / `RequestContext.legacy()` / `sqlFacade` / `scope()` / `agentScope`；12 个遗留路径拆到 `routes/system|data|prompts.ts` → `services/bootstrap|kernel|data|memory|reflect|prompts|context-service.ts` → `repo/memory|prompts|sessions|files|skills|shares-repo.ts`，`/bootstrap`、`/backup`、`/restore`、`/export` 的响应逐字不变。工具扩展迁到 `tools/spike-tools.ts`，按请求显式注入 SQL/设置/文件/KB/分享/Harness；`UserRegistry` 的 DDL 迁入 `migrateRegistry()`。`scripts/check-layering.sh` 新增「`worker.ts` 禁止 DDL」「`worker/**` 禁止 `sqlFacade`/`ensureTables`/`scope(`」两条。`src/worker.ts` 2654 → 1165 行；`npm test` 414 passed；R1/R4/R5/R11 全部关闭。
 - 后续每个阶段完成后在本节追加一行：阶段号、PR、验收命令结果。
 
 ## 后果

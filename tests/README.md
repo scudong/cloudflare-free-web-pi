@@ -18,7 +18,8 @@ CI 里 `npm test` 在 `wrangler deploy` **之前**执行——用例不过就不
 
 ```
 tests/
-  unit/          纯函数金标（不需要服务器）
+  unit/          纯函数与结构金标（不需要服务器）
+    route-coverage.test.ts  路由表冻结清单（阶段 6 的 12 个遗留路径）
     rich.test.tsx      Markdown 渲染：标题/表格/列表/代码块/XSS
     entries.test.ts    会话转录解析：顺序、思考块、工具归属、文件产出
     format.test.ts     格式化函数
@@ -82,3 +83,4 @@ tests/
 | **交互式问答** | `api/api.test.ts` · 交互式问答 |
 | **分享工具 / 链接卡** | `api/share-tools.test.ts`（成功/复用/过期/审批/默认有效期）+ `api/api.test.ts` · 文件分享 / 工具注册 + `unit/entries.test.ts` · 分享链接 |
 | **首屏聚合 `/api/bootstrap`** | `unit/bootstrap.test.ts` · 逐字段容错 + `api/api.test.ts` · 首屏聚合 + `api/multiuser.test.ts` · 邀请用户注册表计数 |
+| **路由表覆盖（阶段 6）** | `unit/route-coverage.test.ts`（20 个 method+path 全部命中，未知路径不命中） |

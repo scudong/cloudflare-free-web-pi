@@ -1,5 +1,5 @@
 // 版本化迁移器（ADR-0001 §9.4）：DDL 只在 DO 首次 open()/alarm() 时执行一次，
-// 请求路径不再调用 ensureTables。每条迁移必须自身幂等——SqlHandle 没有事务入口。
+// 请求路径不再执行 DDL。每条迁移必须自身幂等——SqlHandle 没有事务入口。
 export type SqlHandle = { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } };
 
 export type Migration = { version: number; name: string; up(sql: SqlHandle): void };
@@ -213,6 +213,45 @@ export function migrate(sql: SqlHandle, now: () => string = () => new Date().toI
 	);
 	let count = 0;
 	for (const migration of [...MIGRATIONS].sort((a, b) => a.version - b.version)) {
+		if (applied.has(migration.version)) continue;
+		migration.up(sql);
+		sql.exec(
+			"INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+			migration.version,
+			migration.name,
+			now(),
+		);
+		count += 1;
+	}
+	return count;
+}
+
+/* ---------------- UserRegistry（独立 DO 库） ---------------- */
+
+/**
+ * 注册表自己的库只存 `users`。DDL 同样留在迁移器里（阶段 6），
+ * `UserRegistry.fetch` 不再内联 `CREATE TABLE`。
+ */
+export const REGISTRY_MIGRATIONS: readonly Migration[] = [
+	{
+		version: 1,
+		name: "users-schema",
+		up(sql) {
+			sql.exec(
+				`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', code_hash TEXT NOT NULL UNIQUE, code_hint TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, last_used_at TEXT)`,
+			);
+		},
+	},
+];
+
+/** 注册表迁移：与业务库同一账本协议，互不引用。 */
+export function migrateRegistry(sql: SqlHandle, now: () => string = () => new Date().toISOString()): number {
+	sql.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)`);
+	const applied = new Set(
+		(sql.exec("SELECT version FROM schema_migrations").toArray() as { version: number }[]).map((row) => Number(row.version)),
+	);
+	let count = 0;
+	for (const migration of [...REGISTRY_MIGRATIONS].sort((a, b) => a.version - b.version)) {
 		if (applied.has(migration.version)) continue;
 		migration.up(sql);
 		sql.exec(
