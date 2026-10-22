@@ -1,0 +1,223 @@
+src/worker/routes/automations.ts
+  f07b4d16bec2e100 3-4,28-30,38-41,81
+tests/unit/errors.test.ts
+  f07b4d16bec2e100 2,5,8,11,14,20,23-36,41-56
+src/worker/routes/approvals.ts
+  f07b4d16bec2e100 3-5,8-9,29,49
+src/worker/routes/kb.ts
+  f07b4d16bec2e100 1,17-20,22-23,140
+docs/knowledge-base.md
+  f07b4d16bec2e100 68
+src/worker/http/errors.ts
+  f07b4d16bec2e100 2-5,13,20-53,55,57-59
+scripts/check-layering.sh
+  f07b4d16bec2e100 16-19
+src/worker/services/kb-service.ts
+  f07b4d16bec2e100 2,87-90
+src/worker/routes/session.ts
+  f07b4d16bec2e100 2,60
+src/worker/services/custom-tool-service.ts
+  f07b4d16bec2e100 4,109-112
+src/worker/routes/capabilities.ts
+  f07b4d16bec2e100 3,58
+src/worker/routes/index.ts
+  f07b4d16bec2e100 2,46-47
+src/worker/services/automation-service.ts
+  f07b4d16bec2e100 2,32-35
+src/worker/services/settings-service.ts
+  f07b4d16bec2e100 2,168-171
+src/worker/services/approval-service.ts
+  f07b4d16bec2e100 2,152-155
+src/worker/services/prompts-service.ts
+  f07b4d16bec2e100 2,9-11
+README.zh-CN.md
+  f07b4d16bec2e100 182-183
+src/worker/routes/data.ts
+  f07b4d16bec2e100 3,43
+src/worker/routes/settings.ts
+  f07b4d16bec2e100 3,41,49,57-58,72-74
+tests/api/error-contract.test.ts
+  f07b4d16bec2e100 1-124
+src/worker/routes/share.ts
+  f07b4d16bec2e100 3,51,72
+tests/unit/http-context.test.ts
+  f07b4d16bec2e100 99,151,161
+src/worker/routes/skills.ts
+  f07b4d16bec2e100 3,15,17-18,33-46,75-76,90-95,112
+src/worker/routes/prompts.ts
+  f07b4d16bec2e100 3,5,11-15,30-31,54-55,63-65,92,105
+src/worker/services/question-service.ts
+  f07b4d16bec2e100 2,7,47-50
+CHANGELOG.md
+  f07b4d16bec2e100 40-46
+src/worker/services/skill-service.ts
+  f07b4d16bec2e100 2,50-52
+src/worker/routes/chat.ts
+  f07b4d16bec2e100 3,69,73
+tests/unit/skill-hub-service.test.ts
+  f07b4d16bec2e100 422-429
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "d8b679b773b97de4acddb6b1f88138d5febbe035",
+  "prompts": {
+    "f07b4d16bec2e100": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84adf721-5ebd-49a4-a205-fa345a5d5b98",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 361,
+      "total_deletions": 250,
+      "accepted_lines": 358,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/worker/services/custom-tool-service.ts": {
+          "additions": 5,
+          "deletions": 6,
+          "accepted_lines": 5
+        },
+        "tests/api/error-contract.test.ts": {
+          "additions": 124,
+          "accepted_lines": 124
+        },
+        "src/worker/services/prompts-service.ts": {
+          "additions": 4,
+          "deletions": 6,
+          "accepted_lines": 4
+        },
+        "src/worker/routes/share.ts": {
+          "additions": 3,
+          "deletions": 4,
+          "accepted_lines": 3
+        },
+        "src/worker/http/errors.ts": {
+          "additions": 43,
+          "deletions": 5,
+          "accepted_lines": 43
+        },
+        "src/worker/services/settings-service.ts": {
+          "additions": 5,
+          "deletions": 6,
+          "accepted_lines": 5
+        },
+        "docs/knowledge-base.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "README.zh-CN.md": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "tests/unit/http-context.test.ts": {
+          "additions": 3,
+          "deletions": 3,
+          "accepted_lines": 3
+        },
+        "src/worker/routes/approvals.ts": {
+          "additions": 7,
+          "deletions": 11,
+          "accepted_lines": 7
+        },
+        "src/worker/routes/session.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "src/worker/routes/index.ts": {
+          "additions": 3,
+          "deletions": 3,
+          "accepted_lines": 3
+        },
+        "CHANGELOG.md": {
+          "additions": 7,
+          "accepted_lines": 7
+        },
+        "src/worker/routes/kb.ts": {
+          "additions": 8,
+          "deletions": 7,
+          "accepted_lines": 8
+        },
+        "src/worker/routes/settings.ts": {
+          "additions": 8,
+          "deletions": 35,
+          "accepted_lines": 8
+        },
+        "src/worker/services/kb-service.ts": {
+          "additions": 5,
+          "deletions": 7,
+          "accepted_lines": 5
+        },
+        "src/worker/routes/capabilities.ts": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "src/worker/routes/data.ts": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "src/worker/routes/skills.ts": {
+          "additions": 27,
+          "deletions": 57,
+          "accepted_lines": 27
+        },
+        "src/worker/routes/prompts.ts": {
+          "additions": 16,
+          "deletions": 26,
+          "accepted_lines": 16
+        },
+        "scripts/check-layering.sh": {
+          "additions": 7,
+          "deletions": 3,
+          "accepted_lines": 4
+        },
+        "tests/unit/errors.test.ts": {
+          "additions": 36,
+          "deletions": 8,
+          "accepted_lines": 36
+        },
+        "src/worker/routes/automations.ts": {
+          "additions": 10,
+          "deletions": 22,
+          "accepted_lines": 10
+        },
+        "src/worker/services/approval-service.ts": {
+          "additions": 5,
+          "deletions": 6,
+          "accepted_lines": 5
+        },
+        "src/worker/services/automation-service.ts": {
+          "additions": 5,
+          "deletions": 6,
+          "accepted_lines": 5
+        },
+        "src/worker/routes/chat.ts": {
+          "additions": 3,
+          "deletions": 2,
+          "accepted_lines": 3
+        },
+        "src/worker/services/question-service.ts": {
+          "additions": 6,
+          "deletions": 7,
+          "accepted_lines": 6
+        },
+        "tests/unit/skill-hub-service.test.ts": {
+          "additions": 8,
+          "deletions": 7,
+          "accepted_lines": 8
+        },
+        "src/worker/services/skill-service.ts": {
+          "additions": 4,
+          "deletions": 8,
+          "accepted_lines": 4
+        }
+      }
+    }
+  }
+}
