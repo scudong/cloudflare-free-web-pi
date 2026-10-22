@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
 import { renderMarkdown } from "../lib/rich";
 import { Icon } from "./Icon";
+import { SkillHubPanel } from "./SkillHubPanel";
 import type { AutomationInfo, CustomToolInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
 
 /** 左栏面板头部（NERE-43 起导出复用）：标题 + 可选操作 / 计数 / 收起。 */
@@ -355,6 +356,8 @@ export function SkillPanel({
 	const [content, setContent] = useState("");
 	const [openName, setOpenName] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+	/** 「已安装 / Hub」视图切换（NERE-54）：默认停在已安装，Hub 只在切过去时取数。 */
+	const [view, setView] = useState<"installed" | "hub">("installed");
 
 	useEffect(() => {
 		let alive = true;
@@ -388,6 +391,27 @@ export function SkillPanel({
 	return (
 		<div className="flex h-full w-full flex-col bg-slate-900/60">
 			<PanelHeader title="技能" count={items.length} onCollapse={onCollapse} />
+			<div role="tablist" aria-label="技能视图" className="flex shrink-0 gap-1 border-b border-slate-800/70 px-2 py-1.5">
+				<button
+					type="button"
+					role="tab"
+					aria-selected={view === "installed"}
+					onClick={() => setView("installed")}
+					className={skillTabClass(view === "installed")}
+				>
+					已安装 <span className="tabular-nums text-slate-500">{items.length}</span>
+				</button>
+				<button
+					type="button"
+					role="tab"
+					aria-selected={view === "hub"}
+					onClick={() => setView("hub")}
+					className={skillTabClass(view === "hub")}
+				>
+					Hub
+				</button>
+			</div>
+			{view === "installed" ? (
 			<div className="min-h-0 flex-1 overflow-y-auto">
 				<div className="space-y-1.5 border-b border-slate-800/70 p-3">
 					<input
@@ -641,9 +665,18 @@ export function SkillPanel({
 					</ul>
 				</details>
 			</div>
+			) : (
+				<SkillHubPanel installed={items.map((skill) => skill.name)} onInstall={onImport} />
+			)}
 		</div>
 	);
 }
+
+/** 技能面板 Tab 样式（NERE-54）。 */
+const skillTabClass = (active: boolean) =>
+	`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
+		active ? "bg-slate-800 text-slate-100" : "text-slate-500 hover:bg-slate-800/60 hover:text-slate-300"
+	}`;
 
 /** 新增自定义工具的小表单（v0.36.0）。 */
 function CustomToolForm({ onAdd }: { onAdd: (name: string, description: string, parameters: string, code: string) => Promise<boolean> }) {

@@ -19,11 +19,12 @@ import type {
  * unknown shapes degrade to empty lists instead of crashing the UI.
  */
 
-function isObject(value: unknown): value is Record<string, unknown> {
+/** 供其它解析器复用（如 lib/skill-hub.ts）：宽容读取对象 / 字符串 / 列表包装。 */
+export function isObject(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function pickString(o: Record<string, unknown>, keys: string[]): string {
+export function pickString(o: Record<string, unknown>, keys: string[]): string {
 	for (const key of keys) {
 		const v = o[key];
 		if (typeof v === "string" && v.trim()) return v.trim();
@@ -40,7 +41,7 @@ function pickNumber(o: Record<string, unknown>, keys: string[]): number {
 	return 0;
 }
 
-function arrayOf(raw: unknown, wrapperKeys: string[]): unknown[] {
+export function arrayOf(raw: unknown, wrapperKeys: string[]): unknown[] {
 	if (Array.isArray(raw)) return raw;
 	if (isObject(raw)) {
 		for (const key of wrapperKeys) {

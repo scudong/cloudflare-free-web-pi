@@ -213,6 +213,42 @@ export interface SkillInfo {
 	content: string;
 }
 
+/** Skill Hub 审计结论（NERE-53 契约 §3）：pass 通过 / warn 有风险 / blocked 不可安装。 */
+export type SkillAuditStatus = "pass" | "warn" | "blocked";
+
+/** 审计时检测到的能力（NERE-53 契约 §3）：运行时、出站域名、依赖工具。 */
+export interface SkillAuditDetected {
+	runtime: string;
+	network: string[];
+	tools: string[];
+}
+
+/** 一条技能的审计报告（NERE-53 契约 §3）。 */
+export interface SkillAudit {
+	status: SkillAuditStatus;
+	reasons: string[];
+	detected: SkillAuditDetected;
+	auditedAt?: string;
+	/** 正文内容哈希。 */
+	hash?: string;
+}
+
+/** Skill Hub 市场条目（NERE-53 契约 §1 / §4）。 */
+export interface SkillHubEntry {
+	name: string;
+	version: string;
+	description: string;
+	author: string;
+	/** 来源标识（catalog / 仓库地址 / 社区名）。 */
+	source: string;
+	/** 运行时枚举：prompt / javascript / typescript 可安装；python / shell 等被审计挡下。 */
+	runtime: string;
+	tags: string[];
+	audit: SkillAudit;
+	/** 直接安装地址；缺省时回退 source（必须是 http(s) URL）。 */
+	installUrl?: string;
+}
+
 /** 全部文件总览条目（v0.45.0）：文件 + 所属会话。 */
 export interface AllFileInfo extends FileInfo {
 	sessionId: string;

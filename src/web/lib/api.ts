@@ -124,6 +124,39 @@ export interface SharesAllResponse {
 /** 分享清单默认只取有效链接（NERE-42）：服务端与前端默认值必须一致，只在这里写一次。 */
 export const SHARES_DEFAULT_STATUS = "active" as const;
 
+/** GET /api/skills/hub 的一条传输 DTO（NERE-53 契约 §4）；领域模型是 types.ts 的 SkillHubEntry。 */
+export interface SkillHubItemDto {
+	name?: string;
+	version?: string;
+	description?: string;
+	author?: string;
+	source?: string;
+	runtime?: string;
+	tags?: string[];
+	audit?: {
+		status?: string;
+		reasons?: string[];
+		detected?: { runtime?: string; network?: string[]; tools?: string[] };
+		auditedAt?: string;
+		hash?: string;
+	};
+	installUrl?: string;
+	/** 正文哈希（manifest 顶层字段的兼容位置）。 */
+	contentHash?: string;
+}
+
+export interface SkillHubResponse {
+	skills?: SkillHubItemDto[];
+}
+
+/** 市场筛选维度（NERE-53 契约 §6）：source 仅前端过滤，其余三个进查询串。 */
+export interface SkillHubQuery {
+	q?: string;
+	runtime?: string;
+	tag?: string;
+	audit?: string;
+}
+
 /** 邀请用户（v0.43.0）。 */
 export interface UserInfo {
 	id: string;
@@ -419,6 +452,17 @@ export const api = {
 
 	importSkill: (url: string) =>
 		requestJson<{ ok?: boolean; name?: string; error?: string }>("/api/skills/import", jsonPost({ url })),
+
+	/** Skill Hub 市场列表（NERE-53 契约 §4）：筛选参数空值由 withQuery 省略。 */
+	skillHub: (params: SkillHubQuery = {}) =>
+		requestJson<SkillHubResponse>(
+			withQuery("/api/skills/hub", {
+				q: params.q ?? "",
+				runtime: params.runtime ?? "",
+				tag: params.tag ?? "",
+				audit: params.audit ?? "",
+			}),
+		),
 
 	addSkill: (name: string, description: string, content: string) =>
 		requestJson<{ ok?: boolean }>("/api/skills", jsonPost({ name, description, content })),
