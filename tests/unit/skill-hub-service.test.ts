@@ -58,7 +58,7 @@ function catalogEntry(overrides: Partial<CatalogEntry> & { name: string; content
 				reasons: [{ rule: "M3", level: "blocked", message: `运行时 ${runtime} 不受支持` }],
 				hash: overrides.contentHash,
 			};
-	return {
+	const entry: CatalogEntry = {
 		schemaVersion: 1,
 		name: overrides.name,
 		version: "1.0.0",
@@ -72,8 +72,8 @@ function catalogEntry(overrides: Partial<CatalogEntry> & { name: string; content
 		contentUrl: `https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/${overrides.name}/SKILL.md`,
 		contentHash: overrides.contentHash,
 		audit,
-		...overrides,
 	};
+	return { ...entry, ...overrides };
 }
 
 afterEach(() => {

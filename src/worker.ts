@@ -768,7 +768,9 @@ export class SpikeAgent extends DurableObject {
 			const chat = this.chatService(deps);
 			await runDueAutomations(due, now, automations, {
 				hasActive: (sessionId) => chat.hasActive(sessionId),
-				run: (job) => chat.chat({ message: job.prompt, sessionId: job.session_id || undefined }),
+				run: async (job) => {
+					await chat.chat({ message: job.prompt, sessionId: job.session_id || undefined });
+				},
 				recover: () => this.recoverSession(),
 			});
 			if (due.length) automations.rescheduleOverdue(now);

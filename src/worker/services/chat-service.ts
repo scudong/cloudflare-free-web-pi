@@ -18,6 +18,7 @@ import {
 	readGoal,
 	writeGoal,
 	type GoalRow,
+	type GoalStatus,
 } from "./goal-service";
 import { readPending as readPendingQuestion } from "./question-service";
 
@@ -176,7 +177,7 @@ export function createChatService({ sql, runtime }: ChatServiceDeps): ChatServic
 			writeGoal(sql, sessionId, { baseline_tokens: baseline, tokens_used: used, turns });
 			return { ...row, baseline_tokens: baseline, tokens_used: used, turns };
 		}
-		let status = row.status;
+		let status: GoalStatus = row.status;
 		if (used >= row.token_budget || turns >= row.max_turns) status = "exhausted";
 		const nextRunAt = status === "active" ? row.next_run_at : 0;
 		writeGoal(sql, sessionId, { baseline_tokens: baseline, tokens_used: used, turns, status, next_run_at: nextRunAt });
@@ -425,7 +426,7 @@ export function createChatService({ sql, runtime }: ChatServiceDeps): ChatServic
 				await service.chat({ message: goalContinuePrompt(row), sessionId });
 				const updated = await syncGoalProgress(conversation, sessionId, true);
 				if (updated?.status === "active") {
-					writeGoal(sessionId, { next_run_at: Date.now() + 15_000 });
+					writeGoal(sql, sessionId, { next_run_at: Date.now() + 15_000 });
 				}
 			} finally {
 				gate.exit(sessionId);
