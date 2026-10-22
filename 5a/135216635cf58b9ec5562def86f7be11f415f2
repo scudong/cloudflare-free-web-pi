@@ -1,0 +1,203 @@
+tests/unit/automation-last-run.test.tsx
+  def3fbf2514ceb7e 3
+tests/unit/railSelect.test.ts
+  def3fbf2514ceb7e 3,56-76
+src/web/hooks/useSettingsData.ts
+  def3fbf2514ceb7e 1-382
+src/web/components/SettingsDialog.tsx
+  def3fbf2514ceb7e 2,4,90-91,110,183-207,326,458,665,751
+docs/ui-modal-contract.md
+  def3fbf2514ceb7e 72,305
+src/web/vite.config.mts
+  def3fbf2514ceb7e 16-17
+src/web/components/PanelDialogs.tsx
+  def3fbf2514ceb7e 1-9
+src/web/components/McpPanel.tsx
+  def3fbf2514ceb7e 1-118
+src/web/components/SkillPanel.tsx
+  def3fbf2514ceb7e 1-532
+tests/unit/modal.test.tsx
+  def3fbf2514ceb7e 4-5
+src/web/components/AutomationPanel.tsx
+  def3fbf2514ceb7e 1-241
+tests/unit/kbRefs.test.tsx
+  def3fbf2514ceb7e 5,81-83,89,96,104-123
+src/web/components/PanelHeader.tsx
+  def3fbf2514ceb7e 1-40
+tests/unit/frontend-p2.test.ts
+  def3fbf2514ceb7e 1-98
+src/web/lib/provider.ts
+  def3fbf2514ceb7e 1-12
+src/web/lib/layout.ts
+  def3fbf2514ceb7e 1-2,22-38
+docs/frontend-contract-w3.md
+  def3fbf2514ceb7e 279
+src/web/App.tsx
+  def3fbf2514ceb7e 1,9,29-30,35-48,111-117,214,1107-1108,1423,1581,1689-1732,1736-1738,1741-1750,1753-1774
+docs/frontend-map.md
+  def3fbf2514ceb7e 28,31,58,64,103,114-115,125,132-134,160
+src/web/components/SharesPanel.tsx
+  def3fbf2514ceb7e 4
+tests/unit/automation-edit.test.tsx
+  def3fbf2514ceb7e 4
+src/web/lib/panels.ts
+  def3fbf2514ceb7e 5,7-8,14-15,17,22-26,29-32,41,53-59,62-63,65
+README.zh-CN.md
+  def3fbf2514ceb7e 210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "5a135216635cf58b9ec5562def86f7be11f415f2",
+  "prompts": {
+    "def3fbf2514ceb7e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9be19253-b8ea-41e1-8699-583ea39103c5",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 2132,
+      "total_deletions": 507,
+      "accepted_lines": 2082,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/provider.ts": {
+          "additions": 12,
+          "accepted_lines": 12
+        },
+        "src/worker/services/chat-service.ts": {
+          "additions": 42,
+          "deletions": 28,
+          "accepted_lines": 42
+        },
+        "src/web/vite.config.mts": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/components/PanelDialogs.tsx": {
+          "additions": 9,
+          "accepted_lines": 9
+        },
+        "src/web/lib/panels.ts": {
+          "additions": 29,
+          "deletions": 7,
+          "accepted_lines": 29
+        },
+        "tests/unit/automation-last-run.test.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "tests/unit/skill-projection.test.ts": {
+          "additions": 116,
+          "deletions": 2,
+          "accepted_lines": 114
+        },
+        "tests/unit/kbRefs.test.tsx": {
+          "additions": 26,
+          "deletions": 6,
+          "accepted_lines": 26
+        },
+        "src/web/components/SkillPanel.tsx": {
+          "additions": 532,
+          "accepted_lines": 532
+        },
+        "src/web/components/SharesPanel.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/lib/layout.ts": {
+          "additions": 20,
+          "accepted_lines": 20
+        },
+        "tests/unit/kb-service.test.ts": {
+          "additions": 29,
+          "deletions": 4,
+          "accepted_lines": 28
+        },
+        "docs/frontend-map.md": {
+          "additions": 12,
+          "deletions": 8,
+          "accepted_lines": 12
+        },
+        "src/web/App.tsx": {
+          "additions": 152,
+          "deletions": 129,
+          "accepted_lines": 110
+        },
+        "src/worker/http/context.ts": {
+          "additions": 48,
+          "deletions": 6,
+          "accepted_lines": 44
+        },
+        "tests/unit/railSelect.test.ts": {
+          "additions": 24,
+          "deletions": 1,
+          "accepted_lines": 24
+        },
+        "tests/unit/frontend-p2.test.ts": {
+          "additions": 99,
+          "deletions": 1,
+          "accepted_lines": 98
+        },
+        "src/web/components/McpPanel.tsx": {
+          "additions": 118,
+          "accepted_lines": 118
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 34,
+          "deletions": 307,
+          "accepted_lines": 34
+        },
+        "README.zh-CN.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "tests/unit/modal.test.tsx": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "tests/unit/chat-gate.test.ts": {
+          "additions": 136,
+          "accepted_lines": 136
+        },
+        "tests/unit/automation-last-status.test.ts": {
+          "additions": 20,
+          "accepted_lines": 20
+        },
+        "docs/frontend-contract-w3.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/components/PanelHeader.tsx": {
+          "additions": 40,
+          "accepted_lines": 40
+        },
+        "docs/ui-modal-contract.md": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/hooks/useSettingsData.ts": {
+          "additions": 382,
+          "accepted_lines": 382
+        },
+        "tests/unit/automation-edit.test.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/components/AutomationPanel.tsx": {
+          "additions": 241,
+          "accepted_lines": 241
+        }
+      }
+    }
+  }
+}
