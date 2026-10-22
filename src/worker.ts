@@ -2473,6 +2473,37 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:1.4rem 1rem 2
 .expired{max-width:520px;margin:14vh auto;text-align:center;padding:2rem}
 .expired h1{font-size:1.3rem;margin:0 0 .6rem;border:0}
 .expired p{color:var(--muted)}
+.print-btn{margin-left:auto;flex:none;font:inherit;font-size:12px;line-height:1.4;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-border);border-radius:6px;padding:3px 10px;cursor:pointer;white-space:nowrap}
+.print-btn:hover{background:var(--accent);color:var(--panel);border-color:var(--accent)}
+/* 打印 / 存为 PDF（NERE-39）：只在打印时改写版式，屏幕样式保持原样 */
+@media print{
+@page{margin:14mm 12mm}
+:root{color-scheme:light;--bg:#fff;--panel:#fff;--panel-alt:#f5f6f7;--border:#c9cdd4;--fg:#1d2129;--muted:#4e5969;--accent:#165dff;--accent-soft:#f2f6ff;--accent-border:#bed0f7;--user-bg:#f7f8fa;--user-border:#e5e6eb}
+html{scroll-behavior:auto}
+body{background:#fff;color:var(--fg);font-size:12pt}
+header{position:static;display:block;padding:0 0 .6rem;background:transparent}
+header .badge{display:none}
+header h1{font-size:15pt;overflow:visible;white-space:normal;text-overflow:clip}
+.print-btn{display:none}
+main,main.with-toc{display:block;max-width:none;margin:0;padding:0}
+.toc{position:static;max-height:none;overflow:visible;margin:1rem 0 1.2rem;padding:.6rem .8rem;border-radius:8px;break-inside:avoid;page-break-inside:avoid}
+.toc a{color:var(--fg)}
+article.article{background:transparent;border:0;border-radius:0;padding:0}
+.msg{background:transparent;border:0;border-radius:0;margin:.8rem 0;padding:.2rem 0}
+.msg.user{border-left:3px solid var(--border);padding-left:.9rem}
+a{color:var(--fg);text-decoration:underline}
+h1,h2,h3,h4{break-after:avoid;page-break-after:avoid}
+p,blockquote,ul,ol,pre{break-inside:avoid;page-break-inside:avoid}
+blockquote{background:transparent;border-left:2px solid var(--border)}
+table{display:table;width:100%;overflow:visible;break-inside:avoid;page-break-inside:avoid}
+thead{display:table-header-group}
+tr,th,td{break-inside:avoid;page-break-inside:avoid}
+th{background:#f2f3f5!important;color:var(--fg)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+tr:nth-child(even) td{background:transparent}
+pre{white-space:pre-wrap;word-break:break-word}
+img{break-inside:avoid;page-break-inside:avoid}
+footer{break-inside:avoid;page-break-inside:avoid;border-top:1px solid var(--border);padding:.8rem 0 0}
+}
 `;
 }
 
@@ -2512,7 +2543,7 @@ function sharePage(
 	const generated = new Date(meta.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
 	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · 分享</title>
 <style>${shareCss(theme)}</style></head><body>
-<header><span class="badge">只读分享</span><h1>${escapeHtml(title)}</h1></header>
+<header><span class="badge">只读分享</span><h1>${escapeHtml(title)}</h1><button class="print-btn" type="button" onclick="window.print()">打印 / 存为 PDF</button></header>
 <main class="${toc ? "with-toc" : "single"}">${toc}${body}</main>
 <footer>由 ${escapeHtml(meta.author)} 分享 · 生成于 ${escapeHtml(generated)} · 只读视图${escapeHtml(until)}</footer>
 </body></html>`;

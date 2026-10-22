@@ -597,6 +597,37 @@ describe("文件分享", () => {
 		expect(await (await fetch(single.json.url)).text()).not.toContain('class="toc"');
 	});
 
+	it("分享页带打印按钮与打印样式（NERE-39）", async () => {
+		const created = await post("/api/share", {
+			sessionId: "1",
+			kind: "file",
+			name: "share-toc.md",
+			ttlSeconds: 3600,
+			theme: "dark",
+		});
+		const html = await (await fetch(created.json.url)).text();
+
+		// 页头按钮走浏览器原生打印
+		expect(html).toContain('class="print-btn"');
+		expect(html).toContain('onclick="window.print()"');
+		expect(html).toContain("打印 / 存为 PDF");
+
+		// 打印预览隐藏按钮，目录与页脚保留
+		expect(html).toContain("@media print");
+		expect(html).toContain(".print-btn{display:none}");
+		expect(html).toContain('class="toc"');
+		expect(html).toContain("<footer>");
+
+		// 表格不拦腰切断，长表格跨页时重复表头
+		expect(html).toContain("table{display:table");
+		expect(html).toContain("break-inside:avoid");
+		expect(html).toContain("thead{display:table-header-group}");
+
+		// 屏幕样式仍在 @media 之外，未被打印规则改写
+		expect(html).toContain("--bg:#17171a");
+		expect(html).toContain("header{position:sticky");
+	});
+
 	it("已生成的链接可复用", async () => {
 		const created = await post("/api/share", {
 			sessionId: "1",
