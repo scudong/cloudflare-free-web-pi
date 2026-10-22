@@ -2,6 +2,39 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## v1.0.0（2026-10-22）
+
+首个稳定版本。基线 `main@36ada72`：49 个 issue 关闭、8/8 架构阶段合并、12 条可安装技能、515 个测试（514 通过 / 1 跳过，`npm test`）。生产实例：<https://pi-harness-gw.pages.dev>。
+
+### 产品能力
+
+- **Skill Hub 上线**：`skills/catalog.json` 收录 12 条纯提示词技能（6 条内置 + 6 条外部），左栏市场支持筛选、审计详情与一键安装；安装结果就地反馈，「试用」把 `/技能名 ` 写进输入框但不自动发送。接口 `GET /api/skills/hub`、`POST /api/skills/import`（#40、#43、#46、#47、#49、#53、#64）。
+- **分享即产出**：`share_file` / `share_conversation` 让模型直接生成只读链接，同一文件复用未过期 token；分享页带目录、四套主题、打印 / 存为 PDF、页脚部署出口与演示页只读横条；左栏「分享」面板可看打开次数与全量清单，撤销后原链接立即 404。接口 `POST /api/share`、`GET /api/shares/all`、`DELETE /api/shares/<token>`（#11、#27、#29、#30、#45）。
+- **知识库闭环**：支持文件（PDF / DOCX / MD / TXT）与网页导入，按 source + 正文去重、正文变化原地替换；命中片段随 assistant entry 落库（`kbRefs`）并在消息下方展示「参考资料」。接口 `POST /api/kb/ingest`、`GET /api/kb/prefetch`（#10、#14、#31、#33、#38）。
+- **定时任务可编辑**：`PATCH /api/automations` 支持改名称 / 提示词 / 调度 / 会话；每行展示上次运行时间与 `ok` / `failed` / `deferred` 状态，可跳转产出（#60、#61、#62、#65、#66）。
+- **前端一次取数**：`GET /api/bootstrap` 把 17 个只读面板聚合成 1 个请求，首屏请求从 18 个降到 2 个（bootstrap + auth）；知识库 / MCP / 技能改为互斥弹窗，≤720px 为全屏 sheet（#17、#20、#56）。
+- **上手路径**：空会话 3 张起步卡 + 设置内「部署自检」（模型密钥、供应商、知识库检索、分享域名、构建号）；登录页可选「看一个真实对话」演示入口（#3、#9、#16）。
+
+### 架构
+
+- **8/8 阶段合并**：阶段 0a 版本化迁移器（#21）、0b `routes/` + `RequestContext` + `AppError`（#23）、阶段 1 会话 / 文件域（#24）、阶段 2 知识库域（#28）、阶段 3 分享域且 `/s/*` 零 Harness（#41）、阶段 4 设置 / 供应商 / MCP / 自动化 / 审批 / 问答 + R5 模块级状态收口（#51）、阶段 5 `/chat` 与 `/chat/stream` 合并提交路径（#54）、阶段 6 删除 `sqlFacade` / `ensureTables` 兼容层（#57）。
+- **`src/worker.ts` 只留组合根**：鉴权、`SpikeAgent` / `UserRegistry`、Harness 生命周期与 `alarm`；业务按 `routes/` → `services/` → `repo/` 分层，路由层零 SQL（#24、#28、#41、#51、#54、#57）。
+- **迁移可重试**：DDL 只出现在 `db/migrations.ts`，`worker.ts` 禁止 `CREATE TABLE` / `ALTER TABLE`；schema 到 v8（`automations.last_status`）（#21、#57、#65）。
+- **文档同步**：架构地图、ADR-0001、前端契约与 Skill Hub 契约随阶段更新（#13、#18、#25、#36、#50）。
+
+### 安全与门禁
+
+- **技能先审计再入库**：`lib/skill-audit.ts` 按 M/L/C/I/S/X 规则扫描，prompt / JS / TS 通过；Python、shell、二进制、宿主 API 与未声明网络调用在写库前拦截，`blocked` 返回 422 且不落库；模型侧 `list_skills` / `load_skill` / `/技能名` 只接受非 blocked 技能（#36、#49）。
+- **目录与分层是 CI 硬门禁**：`npm run catalog:check` 校验 catalog 无 blocked、sha256 与正文一致；`scripts/check-layering.sh` 禁止 `worker.ts` 出现 DDL、`src/worker/**` 出现 `sqlFacade` / `ensureTables` / `scope(`；PR 跑构建 + 全量测试（#4、#23、#49、#57）。
+- **吊销与删除分离**：`DELETE /api/users?id=` 立即失效登录态与该用户全部分享链接，数据默认保留并返回保留规模；`GET /api/users/export?id=` 可先留档，`DELETE /api/users/data?id=&confirm=` 才不可逆清空；删除会话级联清理分享 / 文件 / 计划 / 审批 / 问题 / KB 旁路（#59）。
+- **分享入口能力门禁**：接口未上线时左栏不渲染分享入口，避免点了才 404（#42）。
+
+### 修复
+
+- 长会话 `/api/entries` 500：`entry_kb_refs.getMany` 改用 `BETWEEN` 恒定 3 个绑定参数，不再撞 DO SQLite 每查询 100 参数上限；补 120 条单测与 101 轮对话回归（#44）。
+- 知识库重建向量索引失败：`markVectorized` / `chunksByIds` 的 `IN` 列表按 90 个 id 分批，500 条与默认 200 条重建用例通过（#63）。
+- 本机 `.dev.vars` 让 KB 引用测试 401：`tests/api/kb-refs.test.ts` 启动时固定 `ACCESS_PASSWORD` 为空（#67）。
+
 ## 2026-10-22
 
 ### 定时任务上次运行结果落库：`last_status`（NERE-68 2b）
