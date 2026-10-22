@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import type { ChatMessage, FileInfo, KbRef, PlanStep } from "../types";
-import { renderMarkdown, renderRichText } from "../lib/rich";
+import { renderMarkdownCached, renderRichText } from "../lib/rich";
 import { ToolBar } from "./ToolBar";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { PlanCard } from "./PlanCard";
@@ -11,7 +11,11 @@ import { Icon } from "./Icon";
 
 const AUTO_SCROLL_THRESHOLD = 80;
 
-function UserBubble({
+/**
+ * 气泡按 `message` 引用 memo（NERE-75 P1-2）：流式时只有当前气泡对象会换新引用，
+ * 历史消息保持同一对象，父组件因 elapsed 每秒重渲染时不会重复解析它们的 Markdown。
+ */
+const UserBubble = memo(function UserBubble({
 	message,
 	onBranch,
 }: {
@@ -53,9 +57,9 @@ function UserBubble({
 			)}
 		</div>
 	);
-}
+});
 
-function AssistantBubble({
+const AssistantBubble = memo(function AssistantBubble({
 	message,
 	streaming,
 	onOpenFile,
@@ -94,17 +98,17 @@ function AssistantBubble({
 							: "border-slate-700/60 bg-slate-800/80 text-slate-100"
 					}`}
 				>
-					{renderMarkdown(message.text)}
+					{renderMarkdownCached(message.text)}
 				</div>
 			)}
 			<KbRefsBar refs={message.kbRefs ?? []} onOpen={onOpenKbRef} />
 		</div>
 	);
-}
+});
 
-function NoticeBubble({ text }: { text: string }) {
+const NoticeBubble = memo(function NoticeBubble({ text }: { text: string }) {
 	return <div className="self-center rounded-full bg-slate-800/60 px-3.5 py-1 text-xs text-slate-400">{text}</div>;
-}
+});
 
 function PendingBubble({ elapsed, phase }: { elapsed: number; phase: "thinking" | "working" }) {
 	return (

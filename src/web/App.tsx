@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { TopBar } from "./components/TopBar";
 import { ChatHeader } from "./components/ChatHeader";
 import { MessageList } from "./components/MessageList";
@@ -28,13 +28,14 @@ import { unreadScope } from "./lib/unread";
 import { shareUrlFor } from "./lib/format";
 import { parseEntries, parseKbRefs, truncateOneLine } from "./lib/entries";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
+import { LEFT_OPEN_KEY, selectRailView } from "./lib/layout";
+import { PANEL_IDLE, reducePanel } from "./lib/panels";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { ApprovalInfo, AskQuestion, AutomationInfo, AutomationPatch, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, KbFocus, KbRef, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLink, SkillInfo, SkillInstallOutcome, ToolCallInfo } from "./types";
+import type { ApprovalInfo, AskQuestion, AutomationInfo, AutomationPatch, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, KbRef, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLink, SkillInfo, SkillInstallOutcome, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
-const LEFT_OPEN_KEY = "pi-harness.left-open";
 const RIGHT_OPEN_KEY = "pi-harness.right-open";
 
 /** 工具结果 details → 分享链接卡数据（v0.55.0）。宽容解析，缺字段就返回 null。 */
@@ -92,10 +93,11 @@ export default function App() {
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	// 左侧 Rail 当前展示的面板（v0.21.0）：会话 / 定时 / 用户等左栏内容
 	const [railView, setRailView] = useState<RailView>("sessions");
-	// 知识库 / MCP / 技能三个弹窗（NERE-62）：同一时刻最多一个，互斥由单值保证
-	const [activePanel, setActivePanel] = useState<RailPanel | null>(null);
-	// 从消息里的参考资料跳到知识库（NERE-41）：nonce 让「重复点同一篇」也能再次触发
-	const [kbFocus, setKbFocus] = useState<KbFocus | null>(null);
+	// 知识库 / MCP / 技能三个弹窗（NERE-62）+ 知识库定位（NERE-41）。
+	// 状态机保证定位请求只属于这一次打开：关闭 / 重开都会清空，不会重放上一篇（NERE-75 P1-1）。
+	const [panel, dispatchPanel] = useReducer(reducePanel, PANEL_IDLE);
+	const activePanel = panel.active;
+	const kbFocus = panel.kbFocus;
 	const kbFocusSeq = useRef(0);
 	// 右栏宽度（v0.16.0）：可拖拽分隔条、打开文档时自动加宽、可最大化阅读
 	const [rightWidth, setRightWidth] = useState(() => {
@@ -855,7 +857,7 @@ export default function App() {
 	 */
 	const handleTrySkill = useCallback(
 		(name: string) => {
-			setActivePanel(null);
+			dispatchPanel({ type: "close" });
 			applyComposerDraft(`/${name} `);
 			if (!isDesktop) {
 				setDrawerOpen(false);
@@ -1079,26 +1081,31 @@ export default function App() {
 	/** 打开 / 关闭面板弹窗；同一入口再点一次 = 关闭。移动端先收起抽屉，避免两层遮罩（契约 §5）。 */
 	const togglePanel = useCallback(
 		(panel: RailPanel) => {
-			setActivePanel((prev) => (prev === panel ? null : panel));
+			dispatchPanel({ type: "toggle", panel });
 			// 面板弹窗与设置弹窗互斥（契约 §1.4）
 			setSettingsOpen(false);
 			if (!isDesktop) setDrawerOpen(false);
 		},
 		[isDesktop],
 	);
-	const closePanel = useCallback(() => setActivePanel(null), []);
+	const closePanel = useCallback(() => dispatchPanel({ type: "close" }), []);
 	const openSettings = useCallback(() => {
-		setActivePanel(null);
+		dispatchPanel({ type: "settings" });
 		setSettingsOpen(true);
 	}, []);
+
+	/** 知识库面板按定位请求打开过文档后调用：消费掉 nonce，重开弹窗不再重放（NERE-75 P1-1）。 */
+	const handleKbFocusConsumed = useCallback(() => dispatchPanel({ type: "kb-focus-consumed" }), []);
 
 	/** 从消息里的参考资料跳到知识库（NERE-41）：打开知识库弹窗并定位原文；手机端先收起抽屉。 */
 	const handleOpenKbRef = useCallback(
 		(ref: KbRef) => {
 			kbFocusSeq.current += 1;
-			setActivePanel("kb");
 			if (!isDesktop) setDrawerOpen(false);
-			setKbFocus({ docId: ref.docId, chunkSeq: ref.chunkSeq, nonce: kbFocusSeq.current });
+			dispatchPanel({
+				type: "kb-ref",
+				focus: { docId: ref.docId, chunkSeq: ref.chunkSeq, nonce: kbFocusSeq.current },
+			});
 		},
 		[isDesktop],
 	);
@@ -1515,11 +1522,23 @@ export default function App() {
 			<UsersPanel onCollapse={toggleLeft} />
 		);
 
+	/**
+	 * 点 Rail 的左栏内容入口（NERE-75 P1-3）：桌面端收起左栏后点「定时」等入口，
+	 * 必须重新展开左栏并写回偏好，否则点了没有任何反馈。
+	 */
+	const handleSelectRailView = useCallback(
+		(view: RailView) => {
+			setRailView(view);
+			selectRailView(isDesktop, setLeftOpen, saveBool);
+		},
+		[isDesktop],
+	);
+
 	const rail = (
 		<Rail
 			view={activeRailView}
 			panel={activePanel}
-			onSelectView={setRailView}
+			onSelectView={handleSelectRailView}
 			onTogglePanel={togglePanel}
 			onNewSession={handleNewSession}
 			newSessionDisabled={resetting}
@@ -1697,7 +1716,7 @@ export default function App() {
 
 			{/* 知识库 / MCP / 技能三个互斥弹窗（NERE-62）：外壳由 ModalShell 统一提供 */}
 			<ModalShell open={activePanel === "kb"} title="知识库" size="lg" onClose={closePanel} testId="kb-modal" triggerKey="kb">
-				<KnowledgePanel onClose={closePanel} focus={kbFocus} />
+				<KnowledgePanel onClose={closePanel} focus={kbFocus} onFocusConsumed={handleKbFocusConsumed} />
 			</ModalShell>
 			<ModalShell open={activePanel === "mcp"} title="连接 · MCP" size="md" onClose={closePanel} testId="mcp-modal" triggerKey="mcp">
 				<McpPanel

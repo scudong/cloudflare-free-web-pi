@@ -316,3 +316,45 @@ export function renderMarkdown(text: string): ReactNode[] {
 	flushAll();
 	return nodes;
 }
+
+/**
+ * Markdown 渲染缓存（NERE-75 P1-2）：长会话里同一段文本会被反复渲染——流式期间每个 delta
+ * 都会更新消息列表，`elapsed` 每秒还会再触发一次渲染；不缓存的话每条 assistant 消息都要
+ * 全量重解析 Markdown。按原文缓存渲染结果，文本没变就复用同一份 React 节点
+ * （元素不可变，可安全地在多次渲染 / 多个位置复用）。
+ */
+const MARKDOWN_CACHE_LIMIT = 1000;
+const markdownCache = new Map<string, ReactNode[]>();
+
+/** 测试用：实际解析次数与命中次数。 */
+export const markdownCacheStats = { parses: 0, hits: 0 };
+
+/** 测试用：清空缓存与计数。 */
+export function clearMarkdownCache(): void {
+	markdownCache.clear();
+	resetMarkdownCacheStats();
+}
+
+/** 测试用：只重置计数，保留已缓存的解析结果。 */
+export function resetMarkdownCacheStats(): void {
+	markdownCacheStats.parses = 0;
+	markdownCacheStats.hits = 0;
+}
+
+/** 带缓存的 renderMarkdown：同一段文本只解析一次。 */
+export function renderMarkdownCached(text: string): ReactNode[] {
+	const cached = markdownCache.get(text);
+	if (cached) {
+		markdownCacheStats.hits += 1;
+		return cached;
+	}
+	markdownCacheStats.parses += 1;
+	const nodes = renderMarkdown(text);
+	// 简单 FIFO 上限：长会话 + 流式增量不会无限吃内存。
+	if (markdownCache.size >= MARKDOWN_CACHE_LIMIT) {
+		const oldest = markdownCache.keys().next().value;
+		if (oldest !== undefined) markdownCache.delete(oldest);
+	}
+	markdownCache.set(text, nodes);
+	return nodes;
+}
