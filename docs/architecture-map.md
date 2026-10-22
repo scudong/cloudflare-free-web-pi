@@ -30,7 +30,7 @@ SpikeAgent DO（每用户一个；主人沿用 "spike"，邀请用户 "user:<id>
 
 ## 2. 模块清单
 
-阶段 6 收口后的最终布局（`src/worker.ts` 1165 行，只保留组合根）：
+阶段 6 收口后的最终布局（`src/worker.ts` 1172 行，只保留组合根）：
 
 ```text
 src/worker.ts                Worker 鉴权 + SpikeAgent / UserRegistry 组合根（open/alarm/端口装配）
@@ -189,11 +189,11 @@ CI：`.github/workflows/deploy.yml`（test → build → deploy）、`smoke.yml`
 
 > 执行状态（2026-10-22）：ADR-0001 已转 Accepted；阶段 0a（迁移器）与 0b（路由表）已合并。阶段 1（会话/文件）已收口：`routes/session|files.ts` → `services/session|file-service.ts` → `repo/sessions|files-repo.ts`，`sessions_meta`/`vfs_v2` 在路由与工具中零内联 SQL。阶段 2（知识库）已收口：`routes/kb.ts` → `services/kb-service.ts` → `repo/kb-repo.ts`，纯函数在 `lib/kb.ts`；AI / Vectorize / settings / 抓取经端口注入，路由与工具零内联 SQL；R4 由 0a 关闭，R1/R11 由阶段 1-5 逐步关闭。阶段 3（分享）已收口：`routes/share.ts` → `services/share-service.ts` → `repo/shares-repo.ts`，渲染纯函数在 `lib/share-render.ts`，`/s/*` 不再 `open()` Harness（R2 关闭）。阶段 4（设置/供应商/MCP/自动化/审批/问答）已收口（NERE-32）：`routes/settings|automations|approvals|capabilities.ts` → `services/settings|automation|goal|plan|approval|question|mcp|custom-tool|capability-service.ts` → 对应 `repo/*-repo.ts`；`alarm()` 只保留 DO 入口，调度判断进 `automation-service`；`customToolNames` 与 `mcpCache` 搬入 `SpikeAgent` 实例，R5 关闭；这些表的 SQL 在 `src/worker.ts` 与路由中归零（备份/恢复也走仓储）。阶段 5（对话，NERE-33）已收口：`routes/chat.ts` → `services/chat-service.ts`，`/chat` 与 `/chat/stream` 共用 `prepare → submit → finish`，SSE 只做事件泵；目标续转、并发闸门、反射节流与标题策略进 Service，R11 关闭。
 >
-> **阶段 6（NERE-34）已收口**：`handleLegacyFetch` / `RequestContext.legacy()` / `sqlFacade` / `scope()` 全部删除；`src/worker.ts` 2654 → 1165 行，只剩组合根与鉴权。12 个遗留路径拆到 `routes/system|data|prompts.ts`，工具扩展迁到 `tools/spike-tools.ts`（显式依赖、按请求构造）。`scripts/check-layering.sh` 新增「`worker.ts` 禁止 DDL」「`worker/**` 禁止 `sqlFacade`/`ensureTables`/`scope(`」。R1/R4/R5/R11 全部关闭。
+> **阶段 6（NERE-34）已收口**：`handleLegacyFetch` / `RequestContext.legacy()` / `sqlFacade` / `scope()` 全部删除；`src/worker.ts` 2654 → 1172 行，只剩组合根与鉴权。12 个遗留路径拆到 `routes/system|data|prompts.ts`，工具扩展迁到 `tools/spike-tools.ts`（显式依赖、按请求构造）。`scripts/check-layering.sh` 新增「`worker.ts` 禁止 DDL」「`worker/**` 禁止 `sqlFacade`/`ensureTables`/`scope(`」。R1/R4/R5/R11 全部关闭。
 
 | ID | 级别 | 问题 | 证据 | 影响 | 建议 |
 |---|---|---|---|---|---|
-| R1 | P0 | ~~单文件单体~~ **已关闭（阶段 1-6，NERE-21）** | `src/worker.ts` 1165 行（基线 5249 行）；`routes/` 14 个文件、`services/` 24 个、`repo/` 19 个、`tools/` 1 个；`scripts/check-layering.sh` 在 CI 中强制边界，`routes` 零 SQL | 原风险：无法单测业务、合并冲突、改动半径不可控 | 6 阶段全部合并；验证：`npm test` 414 passed + `check-layering` 退出 0（阶段 6，NERE-34） |
+| R1 | P0 | ~~单文件单体~~ **已关闭（阶段 1-6，NERE-21）** | `src/worker.ts` 1172 行（基线 5249 行）；`routes/` 14 个文件、`services/` 24 个、`repo/` 19 个、`tools/` 1 个；`scripts/check-layering.sh` 在 CI 中强制边界，`routes` 零 SQL | 原风险：无法单测业务、合并冲突、改动半径不可控 | 6 阶段全部合并；验证：`npm test` 414 passed + `check-layering` 退出 0（阶段 6，NERE-34） |
 | R2 | P1 | ~~公开分享页也会启动完整 Harness~~ **已关闭（阶段 3，NERE-31/NERE-22）** | `routes/share.ts`（`GET /s/` 标 `needsHarness: false`）；`services/share-service.ts` 的 `render()` 在 `shareRuntime.entries()` 之前处理 404/410/文件分支；DO 的 `harnessOpens` 计数只在 `open()` 成功时自增（`TEST_HARNESS_STATS=1` 暴露 `GET /debug/harness`） | 原风险：冷启动分享页要建扩展/MCP/Harness；MCP 不可用时分享也可能变慢/失败 | 验证：`tests/api/share-cold.test.ts` 在空 persist 上把首个 DO 请求打成 `GET /s/doesnotexist`，断言 404 且 `opens` 仍为 0；文件分享读页前后计数不变（同一用例先让 `/api/restore` 触发 `open()` 自证观测点）；会话分享仍渲染 `thread`。渲染契约由 `tests/unit/share-render.test.ts` 钉住（打印按钮/`@media print`、Deploy 出口、演示横条） |
 | R3 | P1 | 首屏 18 个 API 请求，全部进同一个单线程 DO；邀请用户每次再查一次全局 registry | `App.tsx:160-260, 638-1050`；`worker.ts:4637`、`4600-4613` | 首屏延迟 = 18 次串行 DO 往返；registry 成为全站串行点 | 已落地 `GET /api/bootstrap`（NERE-23）：后端只读面板合并为 1 个请求，registry 查询随面板数收敛为每请求一次；前端切换后首屏为 bootstrap + auth 两个请求 |
 | R4 | P1 | ~~schema bootstrap 顺序脆弱~~ **已关闭（阶段 0a/6）** | DDL 只在 `db/migrations.ts`：业务库 `migrate()`、注册表库 `migrateRegistry()`；`worker.ts` 无 `CREATE TABLE`/`ALTER TABLE` | 原风险：全新 DO 首次 `open()` 只有 4 列、请求路径重复建表 | 版本化迁移 + 空库首启测试：`tests/unit/migrations.test.ts`、`tests/api/api.test.ts`「空库首启」 |
