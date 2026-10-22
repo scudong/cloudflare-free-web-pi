@@ -42,21 +42,21 @@ export function PanelHeader({
 	);
 }
 
-/** 左栏「连接」：MCP 服务器管理（v0.21.0 从工作台移入左侧工具栏）。 */
+/** 左栏「连接」：MCP 服务器管理（v0.21.0 从工作台移入左侧工具栏；NERE-62 起为弹窗内容）。 */
 export function McpPanel({
 	servers,
 	loading,
 	error,
 	onAdd,
 	onDelete,
-	onCollapse,
 }: {
 	servers: McpServerInfo[];
 	loading: boolean;
 	error: string | null;
 	onAdd: (name: string, url: string, headers?: Record<string, string>) => Promise<boolean>;
 	onDelete: (id: string) => Promise<boolean>;
-	onCollapse?: () => void;
+	/** 弹窗关闭回调（外壳由 ModalShell 提供，面板本身不用）。 */
+	onClose: () => void;
 }) {
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
@@ -81,8 +81,7 @@ export function McpPanel({
 	};
 
 	return (
-		<div className="flex h-full w-full flex-col bg-slate-900/60">
-			<PanelHeader title="连接 · MCP" count={servers.length} onCollapse={onCollapse} />
+		<div className="flex min-h-0 flex-1 flex-col">
 			<div className="shrink-0 space-y-1.5 border-b border-slate-800/70 p-3">
 				<input
 					value={name}
@@ -123,7 +122,7 @@ export function McpPanel({
 					{busy ? "连接中…" : "添加 MCP 服务器"}
 				</button>
 			</div>
-			<div className="min-h-0 flex-1 overflow-y-auto p-2">
+			<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
 				{loading && servers.length === 0 && <p className="px-1 py-2 text-xs text-slate-500">正在加载…</p>}
 				{error && <p className="px-1 py-2 text-xs text-rose-300">{error}</p>}
 				{!loading && servers.length === 0 && !error && (
@@ -308,7 +307,10 @@ export function AutomationPanel({
 	);
 }
 
-/** 左栏「技能」：技能管理（v0.21.0 从工作台移入左侧工具栏；修复了导入区块重复渲染的问题）。 */
+/** 模块级 UI 记忆（契约 §6.3）：记住当前 tab；Hub 筛选词在 SkillHubPanel 内同样按模块级记忆保留。 */
+const skillViewMemory = { view: "installed" as "installed" | "hub" };
+
+/** 左栏「技能」：技能管理（v0.21.0 从工作台移入左侧工具栏；NERE-62 起为弹窗内容）。 */
 export function SkillPanel({
 	items,
 	loading,
@@ -327,7 +329,6 @@ export function SkillPanel({
 	customTools,
 	onAddCustomTool,
 	onDeleteCustomTool,
-	onCollapse,
 }: {
 	items: SkillInfo[];
 	loading: boolean;
@@ -349,7 +350,8 @@ export function SkillPanel({
 	customTools: CustomToolInfo[];
 	onAddCustomTool: (name: string, description: string, parameters: string, code: string) => Promise<boolean>;
 	onDeleteCustomTool: (name: string) => Promise<boolean>;
-	onCollapse?: () => void;
+	/** 弹窗关闭回调（外壳由 ModalShell 提供，面板本身不用）。 */
+	onClose: () => void;
 }) {
 	const [name, setName] = useState("");
 	const [importUrl, setImportUrl] = useState("");
@@ -360,7 +362,11 @@ export function SkillPanel({
 	const [openName, setOpenName] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	/** 「已安装 / Hub」视图切换（NERE-54）：默认停在已安装，Hub 只在切过去时取数。 */
-	const [view, setView] = useState<"installed" | "hub">("installed");
+	const [view, setViewState] = useState<"installed" | "hub">(skillViewMemory.view);
+	const setView = (next: "installed" | "hub") => {
+		skillViewMemory.view = next;
+		setViewState(next);
+	};
 
 	useEffect(() => {
 		let alive = true;
@@ -392,8 +398,7 @@ export function SkillPanel({
 	};
 
 	return (
-		<div className="flex h-full w-full flex-col bg-slate-900/60">
-			<PanelHeader title="技能" count={items.length} onCollapse={onCollapse} />
+		<div className="flex min-h-0 flex-1 flex-col">
 			<div role="tablist" aria-label="技能视图" className="flex shrink-0 gap-1 border-b border-slate-800/70 px-2 py-1.5">
 				<button
 					type="button"
@@ -415,7 +420,7 @@ export function SkillPanel({
 				</button>
 			</div>
 			{view === "installed" ? (
-			<div className="min-h-0 flex-1 overflow-y-auto">
+			<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
 				<div className="space-y-1.5 border-b border-slate-800/70 p-3">
 					<input
 						value={name}

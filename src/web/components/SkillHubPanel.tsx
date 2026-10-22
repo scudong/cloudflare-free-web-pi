@@ -6,7 +6,7 @@
  * - 三态：首次加载骨架 / 失败可重试 / 筛选后空态；旧数据在刷新失败时保留。
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSkillHub } from "../hooks/useSkillHub";
 import {
 	EMPTY_SKILL_HUB_FILTERS,
@@ -52,6 +52,9 @@ function FilterSelect({
 	);
 }
 
+/** 模块级 UI 记忆（契约 §6.3）：Hub 筛选词在弹窗关闭后保留；不做跨刷新持久化。 */
+const viewMemory = { filters: EMPTY_SKILL_HUB_FILTERS };
+
 export function SkillHubPanel({
 	installed,
 	onInstall,
@@ -61,7 +64,10 @@ export function SkillHubPanel({
 	/** 现有导入流（App.handleImportSkill），返回是否成功。 */
 	onInstall: (url: string) => Promise<boolean>;
 }) {
-	const [filters, setFilters] = useState<SkillHubFilters>(EMPTY_SKILL_HUB_FILTERS);
+	const [filters, setFilters] = useState<SkillHubFilters>(viewMemory.filters);
+	useEffect(() => {
+		viewMemory.filters = filters;
+	}, [filters]);
 	const { items, facets, catalogStale, status, error, rawCount, reload } = useSkillHub(filters);
 	const [openName, setOpenName] = useState<string | null>(null);
 	const [installing, setInstalling] = useState<string | null>(null);
@@ -116,7 +122,7 @@ export function SkillHubPanel({
 				</div>
 			</div>
 
-			<div className="min-h-0 flex-1 overflow-y-auto" aria-busy={loading || undefined}>
+			<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" aria-busy={loading || undefined}>
 				<p role="status" className="sr-only">
 					{loading ? "正在加载技能列表" : `共 ${items.length} 条技能`}
 				</p>

@@ -236,7 +236,9 @@ describe("分享入口能力门禁（NERE-56）", () => {
 		renderToStaticMarkup(
 			<Rail
 				view="sessions"
-				onViewChange={() => {}}
+				panel={null}
+				onSelectView={() => {}}
+				onTogglePanel={() => {}}
 				onNewSession={() => {}}
 				onOpenSettings={() => {}}
 				sharesAvailable={sharesAvailable}

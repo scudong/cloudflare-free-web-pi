@@ -8,15 +8,25 @@ import type { KbDocInfo, KbFocus, KbHit } from "../types";
 import { Icon } from "./Icon";
 import { KbImport, type IncomingDrop } from "./KbImport";
 
+/** 模块级 UI 记忆（契约 §6.3）：只保留检索词；搜索结果与草稿关闭即丢弃。 */
+const viewMemory = { query: "" };
+
 /**
- * 左栏「知识库」（v0.45.0）：每个用户一个独立库（后端按用户 DO 隔离）。
+ * 知识库面板（v0.45.0，NERE-62 起为弹窗内容）：每个用户一个独立库（后端按用户 DO 隔离）。
  * 支持检索、导入文件 / 链接、粘贴资料入库、查看与删除；模型侧对应 kb_search / kb_add。
+ *
+ * 外壳（标题 / 宽度 / 遮罩 / 关闭）由 ModalShell 提供；本组件只负责面板内容。
  */
-export function KnowledgePanel({ onCollapse, focus }: { onCollapse?: () => void; focus?: KbFocus | null }) {
+export function KnowledgePanel({ focus }: { onClose: () => void; focus?: KbFocus | null }) {
 	const [docs, setDocs] = useState<KbDocInfo[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [query, setQuery] = useState("");
+	const [query, setQueryState] = useState(viewMemory.query);
+	/** 检索词写回模块级记忆，重开弹窗时还在（结果不保留）。 */
+	const setQuery = (value: string) => {
+		viewMemory.query = value;
+		setQueryState(value);
+	};
 	const [hits, setHits] = useState<KbHit[] | null>(null);
 	const [searching, setSearching] = useState(false);
 	const [adding, setAdding] = useState(false);
@@ -183,7 +193,7 @@ export function KnowledgePanel({ onCollapse, focus }: { onCollapse?: () => void;
 	if (viewing) {
 		return (
 			<div
-				className="flex h-full w-full flex-col bg-slate-900/60"
+				className="flex min-h-0 flex-1 flex-col"
 				// 阅读文档时不接收导入，但也不能让浏览器把拖进来的文件当导航打开。
 				onDragOver={(event) => event.preventDefault()}
 				onDrop={(event) => event.preventDefault()}
@@ -207,7 +217,7 @@ export function KnowledgePanel({ onCollapse, focus }: { onCollapse?: () => void;
 						)}
 					</span>
 				</div>
-				<div className="min-h-0 flex-1 overflow-y-auto p-3">
+				<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
 					<article className="md-prose break-words text-[13px]">{renderMarkdown(viewing.content)}</article>
 				</div>
 			</div>
@@ -216,14 +226,14 @@ export function KnowledgePanel({ onCollapse, focus }: { onCollapse?: () => void;
 
 	return (
 		<div
-			className="relative flex h-full w-full flex-col bg-slate-900/60"
+			className="relative flex min-h-0 flex-1 flex-col"
 			onDragEnter={handleDragEnter}
 			onDragOver={handleDragOver}
 			onDragLeave={handleDragLeave}
 			onDrop={handleDrop}
 		>
 			<div className="flex shrink-0 items-center justify-between border-b border-slate-800/70 px-3 py-2">
-				<span className="text-[12.5px] font-medium text-slate-300">知识库 · 仅你可见</span>
+				<span className="text-[12.5px] font-medium text-slate-300">仅你可见</span>
 				<span className="flex items-center gap-1.5">
 					<span className="rounded-full bg-slate-700/80 px-1.5 text-[10px] tabular-nums text-slate-300">{docs.length}</span>
 					<button
@@ -236,17 +246,6 @@ export function KnowledgePanel({ onCollapse, focus }: { onCollapse?: () => void;
 					>
 						<Icon name={adding ? "close" : "plus"} className="h-4 w-4" />
 					</button>
-					{onCollapse && (
-						<button
-							type="button"
-							onClick={onCollapse}
-							title="收起左栏"
-							aria-label="收起左栏"
-							className="inline-flex items-center justify-center rounded p-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
-						>
-							<Icon name="chevronsLeft" className="h-4 w-4" />
-						</button>
-					)}
 				</span>
 			</div>
 
@@ -277,7 +276,7 @@ export function KnowledgePanel({ onCollapse, focus }: { onCollapse?: () => void;
 			</form>
 
 			{adding && (
-				<div className="max-h-[62vh] shrink-0 space-y-1.5 overflow-y-auto border-b border-slate-800/70 p-2.5">
+				<div className="max-h-[62vh] shrink-0 space-y-1.5 overflow-y-auto overscroll-contain border-b border-slate-800/70 p-2.5">
 					<KbImport
 						incoming={incomingDrop}
 						onIncomingConsumed={handleIncomingConsumed}
@@ -317,7 +316,7 @@ export function KnowledgePanel({ onCollapse, focus }: { onCollapse?: () => void;
 			{note && <p className="mx-2.5 mt-2 rounded-md bg-emerald-950/40 px-2 py-1 text-[11px] text-emerald-300">{note}</p>}
 			{error && <p className="mx-2.5 mt-2 rounded-md bg-rose-950/40 px-2 py-1 text-[11px] text-rose-300">{error}</p>}
 
-			<div className="min-h-0 flex-1 overflow-y-auto p-2">
+			<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
 				{loading && docs.length === 0 && <p className="px-1 py-2 text-xs text-slate-500">正在加载…</p>}
 
 				{hits !== null ? (
