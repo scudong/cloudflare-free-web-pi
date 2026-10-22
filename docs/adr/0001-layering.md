@@ -296,12 +296,25 @@ chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./servi
 | 7 | 5 chat 合并 | 4 或 0b（可与 2-4 并行，但同一 PR 只做这一域） | `runChat`（2702-2769）/`runChatStream`（3699-3875） |
 | 8 | 6 收口 | 全部 | 删除 `sqlFacade`/`ensureTables`/`scope()` |
 
+## 9.8 产品需求插入顺序（operator 2026-10-22）
+
+后端只有一名成员，同一时刻只允许一个改 `src/worker.ts` 的 run。分层阶段之间按下面顺序插入 W3 产品需求，派发前先查有没有未合并的 W3 后端 PR：
+
+| 插入点 | 产品需求 | 之后才启动 |
+|---|---|---|
+| 阶段 2 合并后 | NERE-40（W3-1 kbRefs，命中随消息落库） | 阶段 3（NERE-31 分享域） |
+| 阶段 3 合并后 | NERE-42（W3-3 分享打开计数/清单/撤销） | 阶段 4（NERE-32） |
+| 阶段 4-6 | 不再插入 | — |
+
+阶段 2 的关闭门禁：PR 合入 main 且 issue done 后，先确认 NERE-40 的 wakeup（condition `NERE-30 done`）已触发或已排队；未触发就手动拉起，等它合入后，才提升 NERE-31。
+
 ## 10. 执行状态
 
 - 2026-10-21：ADR 转 Accepted（PR #18）。NERE-21 子任务按 stage 排期：0a=NERE-27、0b=NERE-28、1=NERE-29、2=NERE-30、3=NERE-31（吸收 NERE-22）、4=NERE-32、5=NERE-33、6=NERE-34。
 - 2026-10-22：阶段 0a 合并（PR #21，`958c950`）：`src/worker/db/migrations.ts` 落地，`worker.ts` 内 `ensureTables` 计数 0，`open()` 走 `ensureMigrated()`。空的 `sessions_meta` 首启五列由 `tests/unit/migrations.test.ts` 与 `tests/api/api.test.ts` 空库用例守住。
 - 2026-10-22：阶段 0b 路由骨架（PR #23，基线 `1553908`）：`http/context|errors|router` + `routes/index` 落地，`handleFetch` 重命名为 `handleLegacyFetch` 并委托；`scripts/check-layering.sh` 接入 CI。`npm test` 212 passed，`check-layering` 退出 0；auth/version/sessions/bootstrap/chat/`/s/`/404 探针前后响应一致。
 - 2026-10-22：阶段 2 知识库（NERE-30，基线 `b071a7f`）：`routes/kb.ts`（9 个端点）→ `services/kb-service.ts` → `repo/kb-repo.ts`，纯函数迁入 `lib/kb.ts`；AI / Vectorize / settings / DeepSeek 抓取经端口注入，Service 不读 `scope()`。`RequestContext` 增加 `settings` 与 `webFetch` 端口。`/kb*` 从 `handleLegacyFetch` 删除，ingest 错误改抛 `KbIngestError`、响应体与状态码逐字不变。`npm test` 229 passed，`check-layering` 退出 0。
+- 2026-10-22：operator 追加产品插入顺序（§9.8）：阶段 2 后先 NERE-40，阶段 3 后先 NERE-42，阶段 4-6 不插入；阶段 2 关闭前须确认 NERE-40 的 wakeup 已触发/排队。
 - 后续每个阶段完成后在本节追加一行：阶段号、PR、验收命令结果。
 
 ## 后果
