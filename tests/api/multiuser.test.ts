@@ -159,3 +159,33 @@ describe("首屏聚合（邀请用户）", () => {
 		expect(after.json.lookups - before.json.lookups).toBe(1);
 	});
 });
+
+describe("阶段 4：设置 / 自定义工具按用户隔离（R5）", () => {
+	it("各自 DO 的设置与自定义工具名不互相覆盖", async () => {
+		await post("/api/settings", { displayName: "主人署名" });
+		const saved = await post("/api/custom-tools", { name: "owner_probe", description: "主人工具有效", code: "return 1" });
+		expect(saved.json.ok).toBe(true);
+
+		const created = await post("/api/users", { name: "阶段四用户" }, ownerCookie);
+		const login = await post("/api/login", { password: created.json.code as string }, "");
+		const cookie = login.cookie;
+		expect(cookie).toMatch(/^pi_access=u_/);
+
+		const userSettings = await call("/api/settings", {}, cookie);
+		expect(userSettings.json.displayName).toBe("");
+
+		const userTools = await call("/api/custom-tools", {}, cookie);
+		expect(userTools.json.tools.map((t: { name: string }) => t.name)).not.toContain("owner_probe");
+
+		const ownerTools = await call("/api/custom-tools", {}, ownerCookie);
+		expect(ownerTools.json.tools.map((t: { name: string }) => t.name)).toContain("owner_probe");
+
+		// /api/tools 的 category 读的是各自实例的 customToolNames 集合。
+		const userList = await call("/api/tools", {}, cookie);
+		expect(userList.status).toBe(200);
+		expect(userList.json.tools.some((t: { name: string }) => t.name === "owner_probe")).toBe(false);
+
+		const ownerList = await call("/api/tools", {}, ownerCookie);
+		expect(ownerList.json.tools.find((t: { name: string }) => t.name === "owner_probe")?.category).toBe("exec");
+	});
+});

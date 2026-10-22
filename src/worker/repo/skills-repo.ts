@@ -130,6 +130,13 @@ export function countSkills(sql: SqlHandle): number {
 	return Number((sql.exec("SELECT COUNT(*) AS n FROM skills").toArray() as { n: number }[])[0]?.n ?? 0);
 }
 
+/** 模型可见的技能数（`audit_status = 'blocked'` 不进入提示词索引，也不计入能力清单）。 */
+export function countVisibleSkills(sql: SqlHandle): number {
+	return Number(
+		(sql.exec("SELECT COUNT(*) AS n FROM skills WHERE audit_status != 'blocked'").toArray() as { n: number }[])[0]?.n ?? 0,
+	);
+}
+
 /* ---------------- 审计缓存 ---------------- */
 
 export type AuditCacheRow = { status: string; report: string; auditedAt: string };

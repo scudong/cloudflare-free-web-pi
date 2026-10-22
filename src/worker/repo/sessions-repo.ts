@@ -74,3 +74,25 @@ export function markDeleted(sql: SqlHandle, id: string, now: string): void {
 export function setModel(sql: SqlHandle, id: string, model: string): void {
 	sql.exec("UPDATE sessions_meta SET model = ? WHERE id = ?", model, id);
 }
+
+/** `POST /model`：会话行不存在时补建（旧端点行为，标题固定「新会话」）。 */
+export function upsertModel(sql: SqlHandle, id: string, model: string, now: string): void {
+	sql.exec(
+		"INSERT INTO sessions_meta (id, title, created_at, updated_at, model) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET model = excluded.model",
+		id,
+		"新会话",
+		now,
+		now,
+		model,
+	);
+}
+
+/** 子代理会话在侧栏不可见：审批闸门据此直接放行。 */
+export function isHidden(sql: SqlHandle, id: string): boolean {
+	try {
+		const rows = sql.exec("SELECT hidden FROM sessions_meta WHERE id = ?", id).toArray() as { hidden?: number }[];
+		return Number(rows[0]?.hidden ?? 0) === 1;
+	} catch {
+		return false;
+	}
+}
