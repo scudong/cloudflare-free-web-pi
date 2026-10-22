@@ -6,6 +6,7 @@
 
 分层与命名规则见 [`docs/adr/0002-frontend-layering.md`](./adr/0002-frontend-layering.md)。
 当前迭代的数据契约与组件落点见 [`docs/frontend-contract-w3.md`](./frontend-contract-w3.md)（NERE-44，W3 参考资料条 / 分享面板）。
+信息架构变更（知识库 / MCP / 技能三个左栏面板改为弹窗）见 [`docs/ui-modal-contract.md`](./ui-modal-contract.md)（NERE-62）。**该契约尚未实施**：本文 §2 组件树里这三个面板仍在左栏，实现合入后由实现方按契约 §9 第 11 条同步本文件。
 
 ## 1. 目录即分层
 
