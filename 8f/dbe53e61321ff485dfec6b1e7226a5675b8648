@@ -1,0 +1,64 @@
+CHANGELOG.md
+  32d9223cc94748ac 5-37
+README.md
+  32d9223cc94748ac 7,9,15,25-33,50-53,57,59-62,64,66-68,76-77,82,86,89,93-95,97,99-111,132,139-141,157,159
+README.zh-CN.md
+  32d9223cc94748ac 185,187,219,221
+docs/release-notes-v1.0.0.md
+  32d9223cc94748ac 1-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "8fdbe53e61321ff485dfec6b1e7226a5675b8648",
+  "prompts": {
+    "32d9223cc94748ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3efe4374-fb83-4df8-9e61-51c772309735",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 1521,
+      "total_deletions": 24,
+      "accepted_lines": 1523,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "docs/release-notes-v1.0.0.md": {
+          "additions": 34,
+          "accepted_lines": 34
+        },
+        "docs/assets/v1/skill-hub.png": {
+          "additions": 575,
+          "accepted_lines": 575
+        },
+        "docs/assets/v1/knowledge-base.png": {
+          "additions": 591,
+          "accepted_lines": 591
+        },
+        "README.zh-CN.md": {
+          "additions": 4,
+          "deletions": 4,
+          "accepted_lines": 4
+        },
+        "CHANGELOG.md": {
+          "additions": 33,
+          "accepted_lines": 33
+        },
+        "README.md": {
+          "additions": 57,
+          "deletions": 20,
+          "accepted_lines": 57
+        },
+        "docs/assets/v1/share-page.png": {
+          "additions": 227,
+          "accepted_lines": 227
+        },
+        "src/worker/tools/spike-tools.ts": {
+          "accepted_lines": 2
+        }
+      }
+    }
+  }
+}
