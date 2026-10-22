@@ -223,27 +223,44 @@ export interface SkillAuditDetected {
 	tools: string[];
 }
 
-/** 一条技能的审计报告（NERE-53 契约 §3）。 */
-export interface SkillAudit {
-	status: SkillAuditStatus;
-	reasons: string[];
-	detected: SkillAuditDetected;
-	auditedAt?: string;
-	/** 正文内容哈希。 */
-	hash?: string;
+/** 审计原因（NERE-53 契约 §4.4）：message 是唯一给用户看的解释；rule / evidence 便于定位。 */
+export interface SkillAuditReason {
+	rule?: string;
+	level?: SkillAuditStatus;
+	message: string;
+	evidence?: string;
 }
 
-/** Skill Hub 市场条目（NERE-53 契约 §1 / §4）。 */
+/** 一条技能的审计报告（NERE-53 契约 §4.4）。 */
+export interface SkillAudit {
+	status: SkillAuditStatus;
+	/** 兼容早期 `reasons: string[]`；解析后统一成结构化对象。 */
+	reasons: SkillAuditReason[];
+	detected: SkillAuditDetected;
+	auditedAt?: string;
+	/** 本次审计实际计算出的 contentHash。 */
+	hash?: string;
+	rulesVersion?: number;
+	auditSource?: "local" | "catalog";
+}
+
+/** Skill Hub 市场条目（NERE-53 契约 §5.2 的 HubSkill）。 */
 export interface SkillHubEntry {
 	name: string;
 	version: string;
 	description: string;
 	author: string;
-	/** 来源标识（catalog / 仓库地址 / 社区名）。 */
+	/** 来源 URL（存量技能为 "local"）。 */
 	source: string;
 	/** 运行时枚举：prompt / javascript / typescript 可安装；python / shell 等被审计挡下。 */
 	runtime: string;
 	tags: string[];
+	license: string;
+	contentHash: string;
+	/** 服务端计算的已安装状态（比页面级技能列表更权威）。 */
+	installed: boolean;
+	/** 同名已安装但内容不同：前端提示「可更新」。 */
+	installedHash?: string;
 	audit: SkillAudit;
 	/** 直接安装地址；缺省时回退 source（必须是 http(s) URL）。 */
 	installUrl?: string;

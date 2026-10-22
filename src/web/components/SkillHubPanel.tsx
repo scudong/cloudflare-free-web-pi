@@ -62,7 +62,7 @@ export function SkillHubPanel({
 	onInstall: (url: string) => Promise<boolean>;
 }) {
 	const [filters, setFilters] = useState<SkillHubFilters>(EMPTY_SKILL_HUB_FILTERS);
-	const { items, facets, status, error, rawCount, reload } = useSkillHub(filters);
+	const { items, facets, catalogStale, status, error, rawCount, reload } = useSkillHub(filters);
 	const [openName, setOpenName] = useState<string | null>(null);
 	const [installing, setInstalling] = useState<string | null>(null);
 	const installedSet = useMemo(() => new Set(installed), [installed]);
@@ -93,8 +93,9 @@ export function SkillHubPanel({
 				<input
 					value={filters.q}
 					onChange={(event) => patch("q", event.target.value)}
-					placeholder="搜索技能名称或描述"
+					placeholder="搜索技能名称、描述或标签"
 					aria-label="搜索 Skill Hub"
+					maxLength={100}
 					className={CONTROL}
 				/>
 				<div className="grid grid-cols-2 gap-1.5">
@@ -119,6 +120,15 @@ export function SkillHubPanel({
 				<p role="status" className="sr-only">
 					{loading ? "正在加载技能列表" : `共 ${items.length} 条技能`}
 				</p>
+
+				{catalogStale && (
+					<p
+						role="status"
+						className="mx-2 mt-2 rounded-md border border-amber-500/30 bg-amber-950/20 px-2 py-1.5 text-[11px] leading-relaxed text-amber-200"
+					>
+						目录可能过期：远程刷新失败，当前显示内置或上次快照；已安装技能仍可用。
+					</p>
+				)}
 
 				{error && (
 					<div

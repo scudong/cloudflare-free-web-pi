@@ -4,7 +4,7 @@
  * All list endpoints are parsed tolerantly on the caller side (see lib/collections.ts).
  */
 
-import type { GoalInfo } from "../types";
+import type { GoalInfo, SkillAuditStatus } from "../types";
 import { ingestNetworkFailure, parseIngestResponse, type IngestResult } from "./ingest";
 
 export type { GoalInfo };
@@ -124,37 +124,81 @@ export interface SharesAllResponse {
 /** 分享清单默认只取有效链接（NERE-42）：服务端与前端默认值必须一致，只在这里写一次。 */
 export const SHARES_DEFAULT_STATUS = "active" as const;
 
-/** GET /api/skills/hub 的一条传输 DTO（NERE-53 契约 §4）；领域模型是 types.ts 的 SkillHubEntry。 */
+/** GET /api/skills/hub 的一条传输 DTO（NERE-53 契约 §5.2）；领域模型是 types.ts 的 SkillHubEntry。 */
 export interface SkillHubItemDto {
 	name?: string;
 	version?: string;
 	description?: string;
 	author?: string;
+	/** 来源 URL；存量技能为 "local"。 */
 	source?: string;
 	runtime?: string;
 	tags?: string[];
+	license?: string;
+	requires?: { tools?: string[]; bindings?: string[]; network?: string[] };
 	audit?: {
 		status?: string;
-		reasons?: string[];
+		/** 契约是结构化对象；早期 `string[]` 仍兼容。 */
+		reasons?: (string | { rule?: string; level?: string; message?: string; evidence?: string })[];
 		detected?: { runtime?: string; network?: string[]; tools?: string[] };
 		auditedAt?: string;
 		hash?: string;
+		rulesVersion?: number;
+		auditSource?: string;
 	};
 	installUrl?: string;
-	/** 正文哈希（manifest 顶层字段的兼容位置）。 */
+	/** 正文哈希（manifest 顶层字段）。 */
 	contentHash?: string;
+	installed?: boolean;
+	/** 同名已安装但内容不同 → 前端提示「可更新」。 */
+	installedHash?: string;
 }
 
 export interface SkillHubResponse {
 	skills?: SkillHubItemDto[];
+	total?: number;
+	nextOffset?: number | null;
+	catalog?: {
+		source?: string;
+		fetchedAt?: string | null;
+		/** 远程刷新失败：列表仍可用，前端展示「目录可能过期」。 */
+		stale?: boolean;
+		count?: number;
+	};
+	filters?: {
+		runtimes?: string[];
+		tags?: string[];
+		/** host（不是完整 URL）。 */
+		sources?: string[];
+	};
 }
 
-/** 市场筛选维度（NERE-53 契约 §6）：source 仅前端过滤，其余三个进查询串。 */
+/** 市场筛选维度（NERE-53 契约 §5.2）：空值由 withQuery 省略。 */
 export interface SkillHubQuery {
 	q?: string;
 	runtime?: string;
 	tag?: string;
 	audit?: string;
+	/** host 子串。 */
+	source?: string;
+	origin?: "bundled" | "remote";
+	installed?: "0" | "1";
+	sort?: "audit" | "name" | "updated";
+	limit?: number;
+	offset?: number;
+}
+
+/** POST /api/skills/import 的归一化结果：422 audit_blocked 也要带出审计原因。 */
+export interface ImportSkillResult {
+	ok?: boolean;
+	name?: string;
+	error?: string;
+	installed?: boolean;
+	changed?: boolean;
+	code?: string;
+	auditStatus?: SkillAuditStatus;
+	/** 来自 `details.audit.reasons[].message`，已展平成用户可读文本。 */
+	reasons?: string[];
 }
 
 /** 邀请用户（v0.43.0）。 */
@@ -285,6 +329,78 @@ async function ingestUrlRequest(url: string): Promise<IngestResult> {
 		// 非 JSON 响应体由状态码兜底
 	}
 	return parseIngestResponse(data, res.status);
+}
+
+/* ---------------- 技能导入（NERE-53 / NERE-54） ---------------- */
+
+/** 422 `details.audit.reasons` 可能是对象数组，也可能是早期字符串数组；统一成文案。 */
+function importReasonTexts(value: unknown): string[] {
+	if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((item) => {
+		if (typeof item === "string") return item.trim() ? [item.trim()] : [];
+		if (item !== null && typeof item === "object") {
+			const message = (item as { message?: unknown }).message;
+			if (typeof message === "string" && message.trim()) return [message.trim()];
+		}
+		return [];
+	});
+}
+
+/**
+ * POST /api/skills/import。
+ * 不走 requestJson：422 的 `details.audit.reasons` 是安装失败的主要 UI 文案，不能被 HTTP 状态吞掉。
+ */
+async function importSkillRequest(url: string): Promise<ImportSkillResult> {
+	let res: Response;
+	try {
+		res = await fetch("/api/skills/import", jsonPost({ url }));
+	} catch (err) {
+		if (err instanceof DOMException && err.name === "AbortError") throw err;
+		throw new ApiError(0, "网络请求失败，请检查服务是否在运行。");
+	}
+	let data: unknown = null;
+	try {
+		data = await res.json();
+	} catch {
+		// 非 JSON 响应体由状态码兜底
+	}
+	const body = data !== null && typeof data === "object" ? (data as Record<string, unknown>) : {};
+	const details = body.details !== null && typeof body.details === "object" ? (body.details as Record<string, unknown>) : {};
+	const audit = details.audit !== null && typeof details.audit === "object" ? (details.audit as Record<string, unknown>) : {};
+	const error = typeof body.error === "string" ? body.error : "";
+	const statusRaw = typeof audit.status === "string" ? audit.status.toLowerCase() : "";
+	const auditStatus: SkillAuditStatus | undefined =
+		statusRaw === "pass"
+			? "pass"
+			: statusRaw === "warn" || statusRaw === "warning"
+				? "warn"
+				: statusRaw === "blocked" || statusRaw === "rejected"
+					? "blocked"
+					: undefined;
+	const reasons = importReasonTexts(audit.reasons);
+	const extras = {
+		...(auditStatus ? { auditStatus } : {}),
+		...(reasons.length > 0 ? { reasons } : {}),
+	};
+	if (res.status === 422) {
+		return {
+			ok: false,
+			installed: false,
+			code: typeof body.code === "string" ? body.code : "audit_blocked",
+			error: error || "审计未通过，技能未安装",
+			...extras,
+		};
+	}
+	if (!res.ok) throw new ApiError(res.status, error || `请求失败（HTTP ${res.status}）`);
+	return {
+		ok: typeof body.ok === "boolean" ? body.ok : true,
+		...(typeof body.name === "string" ? { name: body.name } : {}),
+		...(typeof body.installed === "boolean" ? { installed: body.installed } : {}),
+		...(typeof body.changed === "boolean" ? { changed: body.changed } : {}),
+		...(error ? { error } : {}),
+		...extras,
+	};
 }
 
 export const api = {
@@ -450,10 +566,9 @@ export const api = {
 			"/api/skills/community",
 		),
 
-	importSkill: (url: string) =>
-		requestJson<{ ok?: boolean; name?: string; error?: string }>("/api/skills/import", jsonPost({ url })),
+	importSkill: (url: string) => importSkillRequest(url),
 
-	/** Skill Hub 市场列表（NERE-53 契约 §4）：筛选参数空值由 withQuery 省略。 */
+	/** Skill Hub 市场列表（NERE-53 契约 §5.2）：筛选参数空值由 withQuery 省略。 */
 	skillHub: (params: SkillHubQuery = {}) =>
 		requestJson<SkillHubResponse>(
 			withQuery("/api/skills/hub", {
@@ -461,6 +576,12 @@ export const api = {
 				runtime: params.runtime ?? "",
 				tag: params.tag ?? "",
 				audit: params.audit ?? "",
+				source: params.source ?? "",
+				origin: params.origin ?? "",
+				installed: params.installed ?? "",
+				sort: params.sort ?? "",
+				limit: params.limit ? String(params.limit) : "",
+				offset: params.offset ? String(params.offset) : "",
 			}),
 		),
 
