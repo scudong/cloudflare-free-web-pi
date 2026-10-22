@@ -1,0 +1,81 @@
+src/web/App.tsx
+  71214b5de1168fc5 22,26,88-90,493-494,506,991-1002,1399,1500
+src/web/types.ts
+  71214b5de1168fc5 41-58,74-75
+src/web/lib/entries.ts
+  71214b5de1168fc5 1,151-177,234,243
+tests/unit/kbRefs.test.tsx
+  71214b5de1168fc5 1-73
+src/web/components/KbRefsBar.tsx
+  71214b5de1168fc5 1-100
+src/web/components/MessageList.tsx
+  71214b5de1168fc5 2,9,62,67-68,100,195-196,219,306
+src/web/components/KnowledgePanel.tsx
+  71214b5de1168fc5 7,15,29-30,113-115,119,123,126-135,201-207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "09e87d0fc873752bf722fa30e47001b662ca13fa",
+  "prompts": {
+    "71214b5de1168fc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3bd3d96e-2529-479f-a812-883d16a65a83",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 17548,
+      "total_deletions": 18,
+      "accepted_lines": 17548,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/KbRefsBar.tsx": {
+          "additions": 100,
+          "accepted_lines": 100
+        },
+        "src/web/types.ts": {
+          "additions": 20,
+          "accepted_lines": 20
+        },
+        "src/web/components/KnowledgePanel.tsx": {
+          "additions": 26,
+          "deletions": 12,
+          "accepted_lines": 26
+        },
+        "src/web/components/MessageList.tsx": {
+          "additions": 10,
+          "deletions": 2,
+          "accepted_lines": 10
+        },
+        "src/web/lib/entries.ts": {
+          "additions": 31,
+          "deletions": 1,
+          "accepted_lines": 31
+        },
+        "tests/unit/kbRefs.test.tsx": {
+          "additions": 73,
+          "accepted_lines": 73
+        },
+        ".tmp-fixture/main.tsx": {
+          "additions": 49,
+          "accepted_lines": 49
+        },
+        ".tmp-fixture/bundle.js": {
+          "additions": 17216,
+          "accepted_lines": 17216
+        },
+        ".tmp-fixture/index.html": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "src/web/App.tsx": {
+          "additions": 22,
+          "deletions": 3,
+          "accepted_lines": 22
+        }
+      }
+    }
+  }
+}
