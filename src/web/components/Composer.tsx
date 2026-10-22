@@ -25,8 +25,10 @@ interface ComposerProps {
 	onThinkingLevelChange: (level: string) => void;
 	/** 每轮结束 +1，触发上下文占用刷新。 */
 	contextTick: number;
-	/** 由空会话起步卡预填的草稿；预填不触发发送。 */
+	/** 由空会话起步卡 / 「试用」预填的草稿；预填不触发发送。 */
 	draft?: string | null;
+	/** 每次 +1 都重新写入 draft（NERE-59：连点同一个技能也要把光标移回末尾）。 */
+	draftNonce?: number;
 }
 
 const MAX_IMAGES = 4;
@@ -120,6 +122,7 @@ export function Composer({
 	onThinkingLevelChange,
 	contextTick,
 	draft,
+	draftNonce = 0,
 }: ComposerProps) {
 	const [text, setText] = useState("");
 	const [images, setImages] = useState<string[]>([]);
@@ -148,8 +151,13 @@ export function Composer({
 		setText(draft);
 		setImages([]);
 		setNotice(null);
-		window.requestAnimationFrame(() => textareaRef.current?.focus());
-	}, [draft]);
+		window.requestAnimationFrame(() => {
+			const el = textareaRef.current;
+			el?.focus();
+			// 预填后光标落在末尾，用户直接接着输入（验收 2）。
+			el?.setSelectionRange(draft.length, draft.length);
+		});
+	}, [draft, draftNonce]);
 
 	useEffect(() => {
 		// NERE-26：首屏请求只保留 /api/bootstrap，上下文占用推迟到切换会话、

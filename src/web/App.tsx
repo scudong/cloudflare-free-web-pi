@@ -181,8 +181,10 @@ export default function App() {
 
 	// Chat state
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
-	/** 空会话起步卡写入 Composer 的草稿。 */
+	/** 空会话起步卡 / 「试用」写入 Composer 的草稿。 */
 	const [starterDraft, setStarterDraft] = useState<string | null>(null);
+	/** 每次写草稿 +1：连点同一个技能也要重新写入并把光标移到末尾（NERE-59）。 */
+	const [draftNonce, setDraftNonce] = useState(0);
 	const [pending, setPending] = useState(false);
 	const [elapsed, setElapsed] = useState(0);
 	const [online, setOnline] = useState(true);
@@ -802,6 +804,27 @@ export default function App() {
 			return false;
 		}
 	}, [nextId]);
+
+	/** 起步卡与「试用」共用：写草稿 + 递增 nonce，让重复点同一个技能也会重新聚焦。 */
+	const applyComposerDraft = useCallback((text: string) => {
+		setStarterDraft(text);
+		setDraftNonce((nonce) => nonce + 1);
+	}, []);
+
+	/**
+	 * 「试用」（NERE-59）：把 `/技能名 ` 写进输入框并聚焦，不自动发送。
+	 * 手机端左栏是抽屉，点完要回到聊天页才看得到输入框。
+	 */
+	const handleTrySkill = useCallback(
+		(name: string) => {
+			applyComposerDraft(`/${name} `);
+			if (!isDesktop) {
+				setDrawerOpen(false);
+				setMobileTab("chat");
+			}
+		},
+		[applyComposerDraft, isDesktop],
+	);
 
 	const handleAddPrompt = useCallback(async (name: string, description: string, content: string) => {
 		try {
@@ -1430,6 +1453,7 @@ export default function App() {
 				onAdd={handleAddSkill}
 				onDelete={handleDeleteSkill}
 				onImport={handleImportSkill}
+				onTry={handleTrySkill}
 				prompts={prompts}
 				rules={rules}
 				onAddPrompt={handleAddPrompt}
@@ -1510,7 +1534,7 @@ export default function App() {
 							onOpenFile={handleOpenFileFromChat}
 							onBranch={handleBranch}
 							onOpenKbRef={handleOpenKbRef}
-							onStartPrompt={setStarterDraft}
+							onStartPrompt={applyComposerDraft}
 						/>
 						{goal && <GoalBar goal={goal} onStop={() => void handleStopGoal()} onNew={() => setGoalDialogOpen(true)} />}
 						<ApprovalBar approvals={approvals} busy={approvalBusy || pending} onDecide={handleDecideApproval} />
@@ -1532,6 +1556,7 @@ export default function App() {
 							onThinkingLevelChange={handleChangeThinkingLevel}
 							contextTick={contextTick}
 							draft={starterDraft}
+							draftNonce={draftNonce}
 						/>
 					</section>
 				)}

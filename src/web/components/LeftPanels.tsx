@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
-import { renderMarkdown } from "../lib/rich";
 import { Icon } from "./Icon";
+import { SkillCard } from "./SkillCard";
 import { SkillHubPanel } from "./SkillHubPanel";
 import type { AutomationInfo, CustomToolInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
 
@@ -316,6 +316,7 @@ export function SkillPanel({
 	onAdd,
 	onDelete,
 	onImport,
+	onTry,
 	prompts,
 	rules,
 	onAddPrompt,
@@ -334,6 +335,8 @@ export function SkillPanel({
 	onAdd: (name: string, description: string, content: string) => Promise<boolean>;
 	onDelete: (name: string) => Promise<boolean>;
 	onImport: (url: string) => Promise<boolean>;
+	/** 「试用」（NERE-59）：把 `/技能名 ` 写进输入框并聚焦，不自动发送。 */
+	onTry: (name: string) => void;
 	/** 提示模板与规则（v0.31.0）。 */
 	prompts: PromptInfo[];
 	rules: RuleInfo[];
@@ -517,39 +520,14 @@ export function SkillPanel({
 					)}
 					<ul className="space-y-1">
 						{items.map((skill) => (
-							<li key={skill.name} className="rounded-lg bg-slate-800/50 px-2.5 py-2">
-								<div className="flex items-center gap-2">
-									<button
-										type="button"
-										onClick={() => setOpenName(openName === skill.name ? null : skill.name)}
-										aria-expanded={openName === skill.name}
-										className="flex min-w-0 flex-1 items-center gap-1 truncate text-left text-[13px] text-slate-100"
-									>
-										<Icon
-											name={openName === skill.name ? "chevronDown" : "chevronRight"}
-											className="h-3.5 w-3.5 shrink-0 text-slate-400"
-										/>
-										<span className="truncate">{skill.name}</span>
-									</button>
-									<button
-										type="button"
-										title="删除"
-										aria-label={`删除 ${skill.name}`}
-										onClick={() => {
-											if (window.confirm(`删除技能「${skill.name}」？`)) void onDelete(skill.name);
-										}}
-										className="rounded p-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
-									>
-										<Icon name="trash" className="h-3.5 w-3.5" />
-									</button>
-								</div>
-								{skill.description && <p className="mt-0.5 text-[11px] text-slate-500">{skill.description}</p>}
-								{openName === skill.name && (
-									<div className="md-prose mt-1 max-h-64 overflow-y-auto rounded-md border border-slate-700 bg-slate-950/50 p-2 text-[12px]">
-										{renderMarkdown(skill.content)}
-									</div>
-								)}
-							</li>
+							<SkillCard
+								key={skill.name}
+								skill={skill}
+								expanded={openName === skill.name}
+								onToggle={(name) => setOpenName(openName === name ? null : name)}
+								onDelete={onDelete}
+								onTry={onTry}
+							/>
 						))}
 					</ul>
 				</div>
