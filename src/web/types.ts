@@ -137,6 +137,9 @@ export interface AutomationSchedule {
 	minutes?: number;
 }
 
+/** 上次运行结果（NERE-68 2b）：成功 / 失败 / 会话忙顺延。 */
+export type AutomationRunStatus = "ok" | "failed" | "deferred";
+
 /** A scheduled prompt that runs on its own (v0.8.0). */
 export interface AutomationInfo {
 	id: string;
@@ -152,6 +155,8 @@ export interface AutomationInfo {
 	sessionId?: string;
 	/** 上次执行时间（毫秒）；后端写成功也写失败（NERE-68 2a 只展示，不判断成败）。缺失 / null 不渲染。 */
 	lastRunAt?: number;
+	/** 上次运行结果（NERE-68 2b）；NULL / 未知值解析为 undefined（不渲染徽标）。 */
+	lastStatus?: AutomationRunStatus;
 }
 
 /** PATCH /api/automations 的请求体（NERE-64 契约；enabled 原样带回，编辑不改启停）。 */

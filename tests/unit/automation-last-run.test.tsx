@@ -45,6 +45,20 @@ describe("parseAutomations · 上次运行", () => {
 		});
 		expect(job.lastRunAt).toBe(1761111000000);
 	});
+
+	it("解析 last_status 三值；NULL / 未知 / 缺失一律 undefined（不猜状态）", () => {
+		const jobs = parseAutomations({
+			automations: [
+				{ id: "a1", last_status: "ok" },
+				{ id: "a2", last_status: "failed" },
+				{ id: "a3", last_status: "deferred" },
+				{ id: "a4", last_status: null },
+				{ id: "a5", last_status: "weird" },
+				{ id: "a6" },
+			],
+		});
+		expect(jobs.map((job) => job.lastStatus)).toEqual(["ok", "failed", "deferred", undefined, undefined, undefined]);
+	});
 });
 
 describe("formatLastRunAt", () => {
@@ -104,6 +118,40 @@ describe("AutomationPanel · 上次运行行", () => {
 	it("没有跳转回调时不渲染「查看产出」", () => {
 		const html = render([job({ id: "a1", name: "早报", lastRunAt: LAST_RUN, sessionId: "42" })]);
 		expect(html).toContain("上次 10-22 09:00");
+		expect(html).not.toContain("查看产出");
+	});
+
+	it("三种 last_status 的徽标文案与色板各不相同", () => {
+		const ok = render([job({ id: "a1", name: "早报", lastRunAt: LAST_RUN, lastStatus: "ok" })]);
+		const failed = render([job({ id: "a1", name: "早报", lastRunAt: LAST_RUN, lastStatus: "failed" })]);
+		const deferred = render([job({ id: "a1", name: "早报", lastRunAt: LAST_RUN, lastStatus: "deferred" })]);
+		expect(ok).toContain("成功");
+		expect(ok).toContain("text-emerald-300");
+		expect(failed).toContain("失败");
+		expect(failed).toContain("text-rose-300");
+		expect(deferred).toContain("顺延");
+		expect(deferred).toContain("text-amber-300");
+		expect(new Set([ok, failed, deferred]).size).toBe(3);
+	});
+
+	it("last_status 缺失 / 未知：不渲染徽标", () => {
+		const html = render([job({ id: "a1", name: "早报", lastRunAt: LAST_RUN })]);
+		expect(html).not.toContain("成功");
+		expect(html).not.toContain("失败");
+		expect(html).not.toContain("顺延");
+	});
+
+	it("顺延不改 last_run_at：显示上一次时间 + 顺延徽标", () => {
+		const html = render([job({ id: "a1", name: "早报", lastRunAt: LAST_RUN, lastStatus: "deferred", sessionId: "42" })], () => {});
+		expect(html).toContain("上次 10-22 09:00");
+		expect(html).toContain("顺延");
+		expect(html).toContain("查看产出");
+	});
+
+	it("尚未运行但本轮顺延：没有时间也渲染顺延徽标", () => {
+		const html = render([job({ id: "a1", name: "早报", lastStatus: "deferred", sessionId: "42" })], () => {});
+		expect(html).toContain("上次运行");
+		expect(html).toContain("顺延");
 		expect(html).not.toContain("查看产出");
 	});
 });

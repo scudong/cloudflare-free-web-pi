@@ -35,7 +35,7 @@ App（页面层，1736 行）
 │  ├─ Sidebar          会话列表 + 搜索 + 重命名/删除
 │  ├─ FilesPanel       全库文件（自取数）
 │  ├─ SharesPanel      分享清单（NERE-56 能力门禁）
-│  ├─ AutomationPanel  定时任务（行内「编辑」→ AutomationEditDialog / ModalShell md，NERE-65；行内「上次 / 查看产出」跳转，NERE-68）
+│  ├─ AutomationPanel  定时任务（行内「编辑」→ AutomationEditDialog / ModalShell md，NERE-65；行内「上次 / 状态徽标 / 查看产出」跳转，NERE-68）
 │  └─ UsersPanel       用户管理（owner 可见，自取数）
 ├─ TopBar              在线状态 / 会话名 / 打开设置 / 移动端抽屉
 ├─ 聊天栏
@@ -83,7 +83,7 @@ App（页面层，1736 行）
 | 消息流 | `messages` | 流式事件 + bootstrap `entries` 回放 |
 | 文件（当前会话 / 全库） | `files`, `filesState` | bootstrap（`panelTick` 重取） |
 | 记忆 | `memories`, `memoriesState` | bootstrap（`panelTick` 重取） |
-| 技能 / 模板 / 规则 / 自定义工具 / MCP / 定时任务 | `skills`, `prompts`, `rules`, `customTools`, `mcpServers`, `automations` | bootstrap（`panelTick` 重取）；技能行额外带 `runtime` / `auditStatus` / `lastInvokedAt`（NERE-59）；定时任务编辑用 PATCH 返回值就地合并（NERE-65），不整表重取；定时任务行读 `last_run_at` / `session_id` 渲染「上次」并可跳转会话（NERE-68） |
+| 技能 / 模板 / 规则 / 自定义工具 / MCP / 定时任务 | `skills`, `prompts`, `rules`, `customTools`, `mcpServers`, `automations` | bootstrap（`panelTick` 重取）；技能行额外带 `runtime` / `auditStatus` / `lastInvokedAt`（NERE-59）；定时任务编辑用 PATCH 返回值就地合并（NERE-65），不整表重取；定时任务行读 `last_run_at` / `session_id` / `last_status` 渲染「上次」、成功/失败/顺延徽标并可跳转会话（NERE-68） |
 | 技能 Hub 列表（NERE-54） | `useSkillHub`（SkillHubPanel 内） | 切到 Hub 视图时取 `GET /api/skills/hub`；筛选变化带查询串重取（q 防抖），失败保留旧数据并可重试 |
 | 全局设置 | `thinkingLevel`, `compaction`, `approvalSettings`, `webSearch`, `kbPrefetch`, `kbRetrieval`, `model`, `theme` | bootstrap `settings` + 局部回写 |
 | 计划 / 目标 / 审批 / 提问 | `plan`, `goal`, `approvals`, `askQuestions` | bootstrap + 每轮 `done` / `tool_end` 后增量刷新 |

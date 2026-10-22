@@ -5,7 +5,7 @@ import { AutomationEditDialog } from "./AutomationEditDialog";
 import { Icon } from "./Icon";
 import { SkillCard } from "./SkillCard";
 import { SkillHubPanel } from "./SkillHubPanel";
-import type { AutomationInfo, AutomationPatch, CustomToolInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
+import type { AutomationInfo, AutomationPatch, AutomationRunStatus, CustomToolInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
 
 /** 左栏面板头部（NERE-43 起导出复用）：标题 + 可选操作 / 计数 / 收起。 */
 export function PanelHeader({
@@ -159,9 +159,28 @@ export function McpPanel({
 	);
 }
 
+/** 上次运行结果徽标（NERE-68 2b）：三种状态文案 / 色板各不相同，未知状态不渲染。 */
+const RUN_STATUS_META: Record<AutomationRunStatus, { label: string; className: string }> = {
+	ok: { label: "成功", className: "bg-emerald-500/10 text-emerald-300" },
+	failed: { label: "失败", className: "bg-rose-500/10 text-rose-300" },
+	deferred: { label: "顺延", className: "bg-amber-500/10 text-amber-300" },
+};
+
+function AutomationStatusBadge({ status }: { status: AutomationRunStatus }) {
+	const meta = RUN_STATUS_META[status];
+	return (
+		<span
+			className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] leading-none ${meta.className}`}
+			title={`上次运行：${meta.label}`}
+		>
+			{meta.label}
+		</span>
+	);
+}
+
 /**
- * 定时任务的上次运行（NERE-68）：没有 `last_run_at` 时整行不渲染，
- * 有归属会话时附「查看产出」跳转入口（缺回调则只显示时间）。
+ * 定时任务的上次运行（NERE-68）：没有 `last_run_at` 与 `last_status` 时整行不渲染；
+ * 有状态就渲染徽标（失败 / 顺延警示色），有归属会话时附「查看产出」跳转入口。
  */
 function AutomationLastRun({
 	job,
@@ -171,12 +190,14 @@ function AutomationLastRun({
 	onOpenSession?: (sessionId: string) => void;
 }) {
 	const lastRunLabel = formatLastRunAt(job.lastRunAt);
-	if (!lastRunLabel) return null;
+	const status = job.lastStatus;
+	if (!lastRunLabel && !status) return null;
 	const sessionId = job.sessionId;
 	return (
 		<p className="mt-0.5 text-[11px] text-slate-600">
-			{`上次 ${lastRunLabel}`}
-			{sessionId && onOpenSession && (
+			{lastRunLabel ? `上次 ${lastRunLabel}` : "上次运行"}
+			{status && <AutomationStatusBadge status={status} />}
+			{lastRunLabel && sessionId && onOpenSession && (
 				<>
 					{" · "}
 					<button
