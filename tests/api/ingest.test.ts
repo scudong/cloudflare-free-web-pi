@@ -131,7 +131,7 @@ afterAll(async () => {
 	await stopServer(proc, STATE);
 	if (stub) {
 		const closed = Promise.withResolvers<void>();
-		stub.close(closed.resolve);
+		stub.close(() => closed.resolve());
 		await closed.promise;
 	}
 });

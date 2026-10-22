@@ -24,6 +24,8 @@ jobs:
       - run: bash scripts/check-layering.sh
       # Skill Hub 目录门禁：catalog 出现 blocked、sha256 漂移或 audit.hash 不一致即失败（NERE-55）
       - run: npm run catalog:check
+      # 类型检查（NERE-76）：vitest 用 esbuild 不做类型检查，tsc 才能拦住调用签名错误
+      - run: npx tsc --noEmit -p tsconfig.ci.json
       - run: npm test
 
   deploy:

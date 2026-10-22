@@ -18,6 +18,7 @@ import {
 	slugifySkillName,
 	stripFrontmatter,
 	type SkillManifest,
+	type AuditReport,
 } from "../../src/worker/lib/skill-audit";
 
 const ROOT = join(__dirname, "../..");
@@ -38,7 +39,7 @@ type StoredEntry = {
 	requires: { tools: string[]; bindings: string[]; network: string[] };
 	contentUrl: string;
 	contentHash: string;
-	audit?: { status: string; hash: string; [key: string]: unknown };
+	audit?: AuditReport;
 };
 
 type StoredCatalog = { schemaVersion: number; generatedAt: string; entries: StoredEntry[] };

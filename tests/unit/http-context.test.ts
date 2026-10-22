@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Harness } from "@earendil-works/pi-durable";
 import type { SqlHandle } from "../../src/worker/db/migrations";
-import { buildContext, type AppEnv } from "../../src/worker/http/context";
+import { buildContext, type AppEnv, type BuildContextInput } from "../../src/worker/http/context";
 import { AppError } from "../../src/worker/http/errors";
 import { dispatch } from "../../src/worker/routes";
 import type { Route } from "../../src/worker/http/router";
@@ -55,7 +55,7 @@ function context(overrides: Partial<Parameters<typeof buildContext>[0]> = {}) {
 		customToolsRuntime,
 		webFetch: async () => ({ ok: false, kind: "error", message: "stub" }),
 		...overrides,
-	});
+	} as BuildContextInput);
 }
 
 describe("buildContext", () => {
