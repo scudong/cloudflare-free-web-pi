@@ -32,3 +32,25 @@ export type ShareRuntime = {
 	/** 会话条目；会话不存在时返回空数组（与旧 renderShare 一致）。 */
 	entries(sessionId: string): Promise<readonly unknown[]>;
 };
+
+/* ---------------- 阶段 4：设置 / 自动化 / 上下文 / 能力 / MCP ---------------- */
+
+/** 设置域：压缩策略或当前供应商变更后重建 Harness（先写库后重建）。 */
+export type SettingsRuntime = { recover(): Promise<void> };
+
+/** 自动化域：`/automations`、`/goal` 改变调度后重排 alarm。 */
+export type AlarmRuntime = { schedule(): Promise<void> };
+
+export type ContextUsage = { usedTokens: number; contextWindow: number; percent: number; approximate: boolean };
+
+/** 上下文用量端口：`GET /context` 需要 Harness 条目，留在 DO。 */
+export type ContextRuntime = { usage(sessionId?: string): Promise<ContextUsage> };
+
+/** 目标域：建立目标前需要会话累计 token 基线（Harness 用量快照）。 */
+export type GoalRuntime = { baselineTokens(sessionId: string): Promise<number> };
+
+/** 能力域：`/tools` 需要当前已安装扩展的工具名，自定义工具集合来自 DO 实例（R5）。 */
+export type ToolRuntime = { names(): string[]; customNames(): string[] };
+
+/** MCP 域：配置变更后清空本 DO 的连接缓存并重建扩展，返回最新工具数。 */
+export type McpRuntime = { rebuild(): Promise<number> };
