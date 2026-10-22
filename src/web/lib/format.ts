@@ -35,6 +35,15 @@ export function formatOpenedAt(lastOpenedAt: number): string {
 }
 
 /**
+ * 定时任务的下次执行时间（NERE-65）：0 / 非法值不显示。
+ * 列表与 PATCH 返回值共用，避免两处 toLocaleString 文案漂移。
+ */
+export function formatNextRunAt(next: number | undefined): string | undefined {
+	if (typeof next !== "number" || !Number.isFinite(next) || next <= 0) return undefined;
+	return new Date(next).toLocaleString("zh-CN", { hour12: false });
+}
+
+/**
  * 分享链接归一化：只保留路径，域名换成当前页面的 origin。
  * pages.dev 反代到 Worker 时，服务端 request.url 是 workers.dev 地址，
  * 直接使用它拼链接在国内打不开（v0.38.1）。

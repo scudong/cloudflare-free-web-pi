@@ -130,6 +130,13 @@ export interface McpServerInfo {
 	created_at?: string;
 }
 
+/** 定时任务的调度（NERE-65）：daily 用 time，interval 用 minutes。 */
+export interface AutomationSchedule {
+	kind: "daily" | "interval";
+	time?: string;
+	minutes?: number;
+}
+
 /** A scheduled prompt that runs on its own (v0.8.0). */
 export interface AutomationInfo {
 	id: string;
@@ -138,6 +145,20 @@ export interface AutomationInfo {
 	/** 人类可读的调度说明，由解析器生成。 */
 	scheduleLabel: string;
 	nextLabel?: string;
+	enabled: boolean;
+	/** 原始调度，供编辑弹窗回填（NERE-65）；解析失败时由解析器给默认值。 */
+	schedule?: AutomationSchedule;
+	/** 归属会话，供编辑弹窗回填（NERE-65）。 */
+	sessionId?: string;
+}
+
+/** PATCH /api/automations 的请求体（NERE-64 契约；enabled 原样带回，编辑不改启停）。 */
+export interface AutomationPatch {
+	id: string;
+	name: string;
+	prompt: string;
+	schedule: AutomationSchedule;
+	sessionId: string;
 	enabled: boolean;
 }
 

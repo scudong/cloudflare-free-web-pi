@@ -4,7 +4,7 @@
  * All list endpoints are parsed tolerantly on the caller side (see lib/collections.ts).
  */
 
-import type { GoalInfo, SkillAuditStatus } from "../types";
+import type { AutomationPatch, GoalInfo, SkillAuditStatus } from "../types";
 import { ingestNetworkFailure, parseIngestResponse, type IngestResult } from "./ingest";
 
 export type { GoalInfo };
@@ -731,6 +731,14 @@ export const api = {
 			method: "PATCH",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ id, enabled }),
+		}),
+
+	/** 编辑任务（NERE-65 / NERE-64）：返回更新后的任务，调用方合并进列表。 */
+	updateAutomation: (patch: AutomationPatch) =>
+		requestJson<{ ok?: boolean; automation?: unknown }>("/api/automations", {
+			method: "PATCH",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(patch),
 		}),
 
 	deleteAutomation: (id: string) => requestJson<{ ok?: boolean }>(withQuery("/api/automations", { id }), { method: "DELETE" }),

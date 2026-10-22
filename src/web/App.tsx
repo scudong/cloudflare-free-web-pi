@@ -18,7 +18,8 @@ import { KnowledgePanel } from "./components/KnowledgePanel";
 import { SharesPanel } from "./components/SharesPanel";
 import { LoginGate } from "./components/LoginGate";
 import { Icon } from "./components/Icon";
-import { api, type BootstrapKey } from "./lib/api";
+import { api, ApiError, type BootstrapKey } from "./lib/api";
+import { mergeAutomationUpdate, parseAutomationUpdate } from "./lib/automation-edit";
 import { useBootstrap } from "./hooks/useBootstrap";
 import { useSharesAvailable } from "./hooks/useShares";
 import { shareUrlFor } from "./lib/format";
@@ -26,7 +27,7 @@ import { parseEntries, parseKbRefs, truncateOneLine } from "./lib/entries";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { ApprovalInfo, AskQuestion, AutomationInfo, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, KbFocus, KbRef, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLink, SkillInfo, ToolCallInfo } from "./types";
+import type { ApprovalInfo, AskQuestion, AutomationInfo, AutomationPatch, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, KbFocus, KbRef, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLink, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -923,6 +924,24 @@ export default function App() {
 		}
 	}, []);
 
+	/** 编辑保存（NERE-65）：按 NERE-64 契约，返回值含更新后字段与 next_run_at，就地更新列表。 */
+	const handleUpdateAutomation = useCallback(async (patch: AutomationPatch) => {
+		try {
+			const data = await api.updateAutomation(patch);
+			const update = parseAutomationUpdate(data.automation) ?? {
+				id: patch.id,
+				name: patch.name,
+				prompt: patch.prompt,
+				schedule: patch.schedule,
+				sessionId: patch.sessionId,
+			};
+			setAutomations((prev) => mergeAutomationUpdate(prev, update));
+			return { ok: true };
+		} catch (err) {
+			return { ok: false, error: err instanceof ApiError ? err.message : "保存失败，请重试。" };
+		}
+	}, []);
+
 	const handleAddMcp = useCallback(async (name: string, url: string, headers?: Record<string, string>) => {
 		try {
 			const result = await api.addMcp(name, url, headers);
@@ -1455,6 +1474,8 @@ export default function App() {
 				onAdd={handleAddAutomation}
 				onToggle={handleToggleAutomation}
 				onDelete={handleDeleteAutomation}
+				onUpdate={handleUpdateAutomation}
+				defaultSessionId={sessionId}
 				onCollapse={toggleLeft}
 			/>
 		) : (
