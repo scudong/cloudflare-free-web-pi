@@ -1,0 +1,80 @@
+tests/unit/unread-badges.test.tsx
+  32d9223cc94748ac 1-234
+src/web/hooks/useShares.ts
+  32d9223cc94748ac 8,86-146
+src/web/hooks/useUnreadBadges.ts
+  32d9223cc94748ac 1-122
+src/web/App.tsx
+  32d9223cc94748ac 25-27,122-125,191-224,1500,1529-1530
+src/web/lib/unread.ts
+  32d9223cc94748ac 1-121
+src/web/components/Rail.tsx
+  32d9223cc94748ac 22-25,32-59,97,99
+docs/frontend-map.md
+  32d9223cc94748ac 33,87-88
+src/web/components/SharesPanel.tsx
+  32d9223cc94748ac 1,6,14,16-22,26-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "f4040f10050e86494f42c0021334480dbf320c45",
+  "prompts": {
+    "32d9223cc94748ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3efe4374-fb83-4df8-9e61-51c772309735",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 713,
+      "total_deletions": 46,
+      "accepted_lines": 636,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/unit/zz-preview.test.tsx": {
+          "additions": 73,
+          "deletions": 15
+        },
+        "src/web/components/Rail.tsx": {
+          "additions": 34,
+          "deletions": 16,
+          "accepted_lines": 34
+        },
+        "src/web/lib/unread.ts": {
+          "additions": 121,
+          "accepted_lines": 121
+        },
+        "src/web/hooks/useUnreadBadges.ts": {
+          "additions": 122,
+          "accepted_lines": 122
+        },
+        "tests/unit/unread-badges.test.tsx": {
+          "additions": 234,
+          "accepted_lines": 234
+        },
+        "docs/frontend-map.md": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 3
+        },
+        "src/web/components/SharesPanel.tsx": {
+          "additions": 14,
+          "deletions": 1,
+          "accepted_lines": 14
+        },
+        "src/web/App.tsx": {
+          "additions": 47,
+          "deletions": 10,
+          "accepted_lines": 44
+        },
+        "src/web/hooks/useShares.ts": {
+          "additions": 65,
+          "deletions": 3,
+          "accepted_lines": 64
+        }
+      }
+    }
+  }
+}

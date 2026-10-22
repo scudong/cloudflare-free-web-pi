@@ -1,0 +1,67 @@
+src/web/types.ts
+  0f6a3f8dd9d0d59b 140-142,158-159
+src/web/components/LeftPanels.tsx
+  0f6a3f8dd9d0d59b 8,162-180,182-183,193-194,198-200
+tests/unit/automation-last-run.test.tsx
+  0f6a3f8dd9d0d59b 48-61,123-156
+src/web/lib/collections.ts
+  0f6a3f8dd9d0d59b 4,113,118-121
+docs/frontend-map.md
+  0f6a3f8dd9d0d59b 38,86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "037d4643d790ca1bee2f416d099202b352f819b5",
+  "prompts": {
+    "0f6a3f8dd9d0d59b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a6e583e4-c858-43d4-9df2-d12a4a524f25",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 474,
+      "total_deletions": 102,
+      "accepted_lines": 380,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/collections.ts": {
+          "additions": 8,
+          "accepted_lines": 8
+        },
+        "src/web/types.ts": {
+          "additions": 5,
+          "accepted_lines": 5
+        },
+        "src/web/preview-nere68b.html": {
+          "additions": 12,
+          "deletions": 12
+        },
+        "docs/nere-68-last-status.png": {
+          "additions": 290,
+          "accepted_lines": 290
+        },
+        "docs/frontend-map.md": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 27,
+          "deletions": 6,
+          "accepted_lines": 27
+        },
+        "tests/unit/automation-last-run.test.tsx": {
+          "additions": 48,
+          "accepted_lines": 48
+        },
+        "src/web/preview-nere68b.tsx": {
+          "additions": 82,
+          "deletions": 82
+        }
+      }
+    }
+  }
+}
