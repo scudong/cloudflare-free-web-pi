@@ -22,6 +22,8 @@
 - Harness 的 `pi.assistant` entry 不承载自定义字段，命中落在旁路表 `entry_kb_refs(conversation_id, entry_id, refs, created_at)`；迁移 v3 建表，读路径在 session-service 合并，老会话无行时响应与迁移前一致
 - 流式 `done` 事件透传同一份 `kbRefs`（仅命中时），前端无需刷新即可渲染「参考资料」
 - 单测覆盖：命中/未命中/多文档去重/老会话兼容/坏 JSON 容错；API 金标新增「久期」命中与「今天天气」未命中的端到端验收
+- 修复长会话 500：`entry-kb-refs-repo.getMany` 改用 `entry_id BETWEEN ? AND ?`（恒定 3 个绑定参数），不再因 `/entries` 页内 ≥100 条 assistant entry 撞 DO SQLite 每查询 100 参数上限；新增 120 条单测与 101 轮对话的 API 回归（旧实现复现 500）
+- 删除会话时一并清理该会话的 `entry_kb_refs` 行；goal 续转复用同一份 `kbRefs` 的语义补注释
 
 ## 2026-10-21（公开发布准备）
 
