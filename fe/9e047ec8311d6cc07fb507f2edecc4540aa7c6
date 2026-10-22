@@ -1,18 +1,18 @@
+docs/launch/v1.0/repo-metadata.md
+  f07b4d16bec2e100 1-79
+docs/launch/v1.0/juejin.md
+  f07b4d16bec2e100 1-118
+docs/launch/v1.0/x-thread.md
+  f07b4d16bec2e100 1-115
 docs/launch/v1.0/xiaohongshu.md
   f07b4d16bec2e100 1-61
 docs/launch/v1.0/github-release.md
   f07b4d16bec2e100 1-35
-docs/launch/v1.0/repo-metadata.md
-  f07b4d16bec2e100 1-79
-docs/launch/v1.0/x-thread.md
-  f07b4d16bec2e100 1-115
-docs/launch/v1.0/juejin.md
-  f07b4d16bec2e100 1-118
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.2.8-ntes.9",
-  "base_commit_sha": "d3e72b6a72029b10ae6a64cd5ed067f55ea35db6",
+  "base_commit_sha": "fe9e047ec8311d6cc07fb507f2edecc4540aa7c6",
   "prompts": {
     "f07b4d16bec2e100": {
       "agent_id": {
@@ -27,6 +27,15 @@ docs/launch/v1.0/juejin.md
       "accepted_lines": 408,
       "overriden_lines": 0,
       "per_file_stats": {
+        "docs/launch/v1.0/juejin.md": {
+          "additions": 118,
+          "accepted_lines": 118
+        },
+        "docs/launch/v1.0/repo-metadata.md": {
+          "additions": 83,
+          "deletions": 4,
+          "accepted_lines": 79
+        },
         "docs/launch/v1.0/xiaohongshu.md": {
           "additions": 61,
           "accepted_lines": 61
@@ -40,15 +49,6 @@ docs/launch/v1.0/juejin.md
           "additions": 50,
           "deletions": 15,
           "accepted_lines": 35
-        },
-        "docs/launch/v1.0/juejin.md": {
-          "additions": 118,
-          "accepted_lines": 118
-        },
-        "docs/launch/v1.0/repo-metadata.md": {
-          "additions": 83,
-          "deletions": 4,
-          "accepted_lines": 79
         }
       }
     }
