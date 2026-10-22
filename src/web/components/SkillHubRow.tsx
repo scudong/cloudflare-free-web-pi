@@ -9,7 +9,9 @@ import {
 	SKILL_AUDIT_STYLES,
 	canInstallHubEntry,
 	hubEntryInstallUrl,
+	isHubEntryUpdatable,
 	runtimeLabel,
+	sourceHost,
 } from "../lib/skill-hub";
 import type { SkillHubEntry } from "../types";
 import { Icon } from "./Icon";
@@ -20,9 +22,10 @@ function AuditBadge({ status }: { status: SkillHubEntry["audit"]["status"] }) {
 	return <span className={`${CHIP} ${SKILL_AUDIT_STYLES[status]}`}>{SKILL_AUDIT_LABELS[status]}</span>;
 }
 
-/** 审计详情：reasons、detected（runtime / network / tools）、hash、来源。 */
+/** 审计详情：reasons（message / evidence / rule）、detected（runtime / network / tools）、hash、来源。 */
 function AuditDetail({ entry }: { entry: SkillHubEntry }) {
 	const { audit } = entry;
+	const hash = audit.hash || entry.contentHash;
 	return (
 		<dl className="space-y-1 rounded-md border border-slate-700/60 bg-slate-950/40 px-2 py-1.5 text-[11px] text-slate-400">
 			<div className="flex gap-2">
@@ -30,6 +33,7 @@ function AuditDetail({ entry }: { entry: SkillHubEntry }) {
 				<dd className="flex min-w-0 flex-wrap items-center gap-1">
 					<AuditBadge status={audit.status} />
 					{audit.auditedAt && <span className="text-slate-500">{audit.auditedAt}</span>}
+					{audit.rulesVersion !== undefined && <span className="text-slate-600">规则 v{audit.rulesVersion}</span>}
 				</dd>
 			</div>
 			<div className="flex gap-2">
@@ -48,10 +52,16 @@ function AuditDetail({ entry }: { entry: SkillHubEntry }) {
 				<dt className="w-16 shrink-0 text-slate-500">来源</dt>
 				<dd className="min-w-0 break-all">{entry.source || "未知"}</dd>
 			</div>
-			{audit.hash && (
+			{entry.license && (
+				<div className="flex gap-2">
+					<dt className="w-16 shrink-0 text-slate-500">许可证</dt>
+					<dd className="min-w-0 break-all">{entry.license}</dd>
+				</div>
+			)}
+			{hash && (
 				<div className="flex gap-2">
 					<dt className="w-16 shrink-0 text-slate-500">哈希</dt>
-					<dd className="min-w-0 break-all font-mono text-[10px] text-slate-500">{audit.hash}</dd>
+					<dd className="min-w-0 break-all font-mono text-[10px] text-slate-500">{hash}</dd>
 				</div>
 			)}
 			<div className="flex gap-2">
@@ -60,7 +70,20 @@ function AuditDetail({ entry }: { entry: SkillHubEntry }) {
 					{audit.reasons.length > 0 ? (
 						<ul className="list-disc space-y-0.5 pl-4">
 							{audit.reasons.map((reason, index) => (
-								<li key={`${index}-${reason}`}>{reason}</li>
+								<li key={`${index}-${reason.rule ?? ""}-${reason.message}`}>
+									{reason.level && (
+										<span className={`${CHIP} mr-1 align-middle ${SKILL_AUDIT_STYLES[reason.level]}`}>
+											{SKILL_AUDIT_LABELS[reason.level]}
+										</span>
+									)}
+									{reason.rule && <span className="mr-1 font-mono text-[10px] text-slate-500">[{reason.rule}]</span>}
+									{reason.message}
+									{reason.evidence && (
+										<span className="mt-0.5 block break-all font-mono text-[10px] text-slate-600">
+											依据：{reason.evidence}
+										</span>
+									)}
+								</li>
 							))}
 						</ul>
 					) : (
@@ -90,6 +113,9 @@ export function SkillHubRow({
 	const blocked = entry.audit.status === "blocked";
 	const installUrl = hubEntryInstallUrl(entry);
 	const installable = canInstallHubEntry(entry);
+	const isInstalled = installed || entry.installed;
+	const updatable = isHubEntryUpdatable(entry);
+	const actionLabel = blocked ? "不可安装" : installing ? "安装中…" : updatable ? "更新" : isInstalled ? "重新安装" : "安装";
 
 	return (
 		<li className="rounded-lg bg-slate-800/50">
@@ -106,7 +132,11 @@ export function SkillHubRow({
 						{entry.version && (
 							<span className="shrink-0 text-[10px] tabular-nums text-slate-500">v{entry.version.replace(/^v/i, "")}</span>
 						)}
-						{installed && <span className={`${CHIP} shrink-0 bg-sky-500/15 text-sky-300`}>已安装</span>}
+						{updatable ? (
+							<span className={`${CHIP} shrink-0 bg-amber-500/15 text-amber-300`}>可更新</span>
+						) : (
+							isInstalled && <span className={`${CHIP} shrink-0 bg-sky-500/15 text-sky-300`}>已安装</span>
+						)}
 					</span>
 					<span className="mt-0.5 block line-clamp-2 text-[11px] leading-relaxed text-slate-500">
 						{entry.description || "（无描述）"}
@@ -119,7 +149,11 @@ export function SkillHubRow({
 								{tag}
 							</span>
 						))}
-						{entry.source && <span className="min-w-0 truncate text-[10px] text-slate-600">来源 {entry.source}</span>}
+						{entry.source && (
+							<span title={entry.source} className="min-w-0 truncate text-[10px] text-slate-600">
+								来源 {sourceHost(entry.source)}
+							</span>
+						)}
 					</span>
 				</span>
 			</button>
@@ -132,7 +166,7 @@ export function SkillHubRow({
 							{BLOCKED_HINT}
 						</p>
 					)}
-					{!blocked && !installUrl && (
+					{!blocked && !installUrl && !isInstalled && (
 						<p role="note" className="rounded-md border border-amber-500/30 bg-amber-950/20 px-2 py-1.5 text-[11px] text-amber-200">
 							这条技能没有安装地址（source 不是 http(s) 链接），暂时无法从这里安装。
 						</p>
@@ -143,10 +177,10 @@ export function SkillHubRow({
 						onClick={() => {
 							if (installable) onInstall(entry);
 						}}
-						aria-label={`${blocked ? "不可安装" : installed ? "重新安装" : "安装"}技能 ${entry.name}`}
+						aria-label={`${blocked ? "不可安装" : updatable ? "更新" : isInstalled ? "重新安装" : "安装"}技能 ${entry.name}`}
 						className="w-full rounded-md bg-sky-600 px-2 py-1.5 text-xs font-medium text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
 					>
-						{blocked ? "不可安装" : installing ? "安装中…" : installed ? "重新安装" : "安装"}
+						{actionLabel}
 					</button>
 					{blocked && (
 						<p className="text-[10px] leading-relaxed text-slate-500">

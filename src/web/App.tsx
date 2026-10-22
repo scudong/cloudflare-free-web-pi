@@ -790,7 +790,11 @@ export default function App() {
 				setPanelTick((tick) => tick + 1);
 				return true;
 			}
-			setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `安装失败：${result.error ?? "未知错误"}` }]);
+			const reasonText = result.reasons && result.reasons.length > 0 ? `：${result.reasons.join("；")}` : "";
+			setMessages((prev) => [
+				...prev,
+				{ id: nextId(), role: "notice", text: `安装失败：${result.error ?? "未知错误"}${reasonText}` },
+			]);
 			return false;
 		} catch (err) {
 			const detail = err instanceof Error ? err.message : String(err);
