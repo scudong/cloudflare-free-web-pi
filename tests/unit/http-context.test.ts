@@ -2,13 +2,24 @@ import { describe, expect, it, vi } from "vitest";
 import type { Harness } from "@earendil-works/pi-durable";
 import type { SqlHandle } from "../../src/worker/db/migrations";
 import { buildContext, type AppEnv } from "../../src/worker/http/context";
+import { AppError } from "../../src/worker/http/errors";
 import { dispatch } from "../../src/worker/routes";
 import type { Route } from "../../src/worker/http/router";
+import type { SessionRuntime } from "../../src/worker/services/session-service";
 
 const sql: SqlHandle = { exec: () => ({ toArray: () => [] }) };
 const env = {} as AppEnv;
 /** 只为类型占位：buildContext 不触碰 Harness 成员。 */
 const harness = {} as Harness;
+const sessionRuntime: SessionRuntime = {
+	entries: async () => [],
+	createConversation: async () => "1",
+	forkBefore: async () => ({ id: "2", parentId: "1", at: 1 }),
+	rootId: async () => "1",
+	scanConversationIds: async () => [],
+	modelFor: () => "deepseek-flash",
+	pauseGoal: () => {},
+};
 
 function context(overrides: Partial<Parameters<typeof buildContext>[0]> = {}) {
 	return buildContext({
@@ -21,6 +32,7 @@ function context(overrides: Partial<Parameters<typeof buildContext>[0]> = {}) {
 		ensureMigrated: async () => {},
 		open: async () => harness,
 		legacy: async () => new Response("legacy"),
+		sessionRuntime,
 		...overrides,
 	});
 }
@@ -95,5 +107,27 @@ describe("dispatch", () => {
 		const ctx = context({ open });
 		await dispatch(ctx, [route({ needsHarness: false })]);
 		expect(open).not.toHaveBeenCalled();
+	});
+
+	it("AppError 走映射，未知异常保持 500 截断", async () => {
+		const bad = await dispatch(context(), [
+			route({
+				handle: async () => {
+					throw new AppError("bad_request", 400, "参数错误");
+				},
+			}),
+		]);
+		expect(bad.status).toBe(400);
+		expect(await bad.json()).toEqual({ error: "参数错误" });
+
+		const unknown = await dispatch(context(), [
+			route({
+				handle: async () => {
+					throw new Error("boom");
+				},
+			}),
+		]);
+		expect(unknown.status).toBe(500);
+		expect(await unknown.json()).toEqual({ error: "Error: boom" });
 	});
 });

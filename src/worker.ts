@@ -25,6 +25,9 @@ import packageJson from "../package.json";
 import { collectBootstrap } from "./worker/bootstrap";
 import { migrate, type SqlHandle } from "./worker/db/migrations";
 import { buildContext, type AppEnv } from "./worker/http/context";
+import { getModel } from "./worker/repo/sessions-repo";
+import { createFileService } from "./worker/services/file-service";
+import { createSessionService, type SessionRuntime } from "./worker/services/session-service";
 import { dispatch } from "./worker/routes";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -62,6 +65,8 @@ const sqlFacade = new Proxy({} as SqlHandle, {
 		return typeof value === "function" ? value.bind(db) : value;
 	},
 });
+/** 工具与首屏聚合共用文件域服务；服务只捕获代理，真实 SQL 仍按请求作用域解析。 */
+const fileStore = createFileService({ sql: sqlFacade });
 /** DEEPSEEK_API_KEY / Harness 都从当前请求作用域读取（多 DO 共 isolate 时不能放全局）。 */
 
 /** 全局设置读写（app_settings 表）：目前只有网页搜索开关 web_search。 */
@@ -523,12 +528,6 @@ function listPrompts(): { name: string; description: string; content: string }[]
 }
 
 /* ---------------- 只读面板（NERE-23）：单端点与 /bootstrap 共用同一实现 ---------------- */
-
-function listFiles(sessionId: string) {
-	return sqlFacade!
-		.exec("SELECT name, length(content) AS size, updated_at FROM vfs_v2 WHERE conversation_id = ? ORDER BY updated_at DESC", sessionId)
-		.toArray();
-}
 
 function listMemories() {
 	return sqlFacade!.exec("SELECT id, content, created_at, source FROM pi_mem ORDER BY id DESC LIMIT 200").toArray();
@@ -1752,7 +1751,7 @@ const baseSpikeExtension = defineExtension({
 				const name = String(a.name ?? "").trim().replace(/^[/.]+/, "").slice(0, 120);
 				if (!name) return { output: [{ type: "text", text: "文件名不能为空。" }] };
 				const content = String(a.content ?? "");
-				sqlFacade!.exec("INSERT INTO vfs_v2 (conversation_id, name, content, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(conversation_id, name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at", String(api.conversationId), name, content, new Date().toISOString());
+				fileStore.write(String(api.conversationId), name, content);
 				return { output: [{ type: "text", text: `已写入 ${name}（${content.length} 字符）。` }] };
 			},
 		}),
@@ -1762,8 +1761,8 @@ const baseSpikeExtension = defineExtension({
 			parameters: Type.Object({ name: Type.String({ description: "文件名" }) }),
 			execute: async (args, api) => {
 				const name = String((args as { name?: unknown }).name ?? "").replace(/^[/.]+/, "");
-				const rows = sqlFacade!.exec("SELECT content FROM vfs_v2 WHERE conversation_id = ? AND name = ?", String(api.conversationId), name).toArray() as { content: string }[];
-				return { output: [{ type: "text", text: rows[0]?.content ?? `文件 ${name} 不存在。` }] };
+				const rows = fileStore.read(String(api.conversationId), name);
+				return { output: [{ type: "text", text: rows?.content ?? `文件 ${name} 不存在。` }] };
 			},
 		}),
 		defineTool({
@@ -1771,7 +1770,7 @@ const baseSpikeExtension = defineExtension({
 			description: "列出工作台全部文件",
 			parameters: Type.Object({}),
 			execute: async (_args, api) => {
-				const rows = sqlFacade!.exec("SELECT name, length(content) AS size, updated_at FROM vfs_v2 WHERE conversation_id = ? ORDER BY updated_at DESC", String(api.conversationId)).toArray() as { name: string; size: number; updated_at: string }[];
+				const rows = fileStore.list(String(api.conversationId));
 				const text = rows.length ? rows.map((r) => `${r.name} · ${r.size} 字符 · ${r.updated_at.slice(0, 16).replace("T", " ")}`).join("\n") : "工作台还没有文件。";
 				return { output: [{ type: "text", text }] };
 			},
@@ -2785,14 +2784,6 @@ export class SpikeAgent extends DurableObject {
 		return { answer: text || "(empty)", tools: tools.slice(-6) };
 	}
 
-	async entries(sessionId?: string): Promise<unknown> {
-		const harness = await this.open();
-		const conversation = await this.conversationFor(harness, sessionId);
-		const page = await conversation.entries({}, 200, undefined, ctx);
-		return page.items;
-	}
-
-	/** 取会话：有 id 用 id（不存在则退根会话），无 id 用根会话；并维护 sessions_meta。 */
 	/** 会话当前模型（未设置时用默认）。 */
 	private providerId(): string {
 		return activeProviderId() || DEFAULT_PROVIDER.id;
@@ -2807,8 +2798,7 @@ export class SpikeAgent extends DurableObject {
 		const available = activeModelIds();
 		if (!sessionId) return available[0] ?? DEFAULT_MODEL_ID;
 		try {
-			const row = sqlFacade!.exec("SELECT model FROM sessions_meta WHERE id = ?", sessionId).toArray() as { model?: string }[];
-			const model = row[0]?.model;
+			const model = getModel(this.ctx.storage.sql as unknown as SqlHandle, sessionId);
 			return model && available.includes(model) ? model : (available[0] ?? DEFAULT_MODEL_ID);
 		} catch {
 			return available[0] ?? DEFAULT_MODEL_ID;
@@ -2855,84 +2845,75 @@ export class SpikeAgent extends DurableObject {
 		return harness.root(ctx, { agent: agentChange });
 	}
 
-	/** 新建会话，返回 id。 */
-	async newSession(): Promise<{ id: string; title: string }> {
-		const harness = await this.open();
-		const conversation = await this.retryOnSessionError(harness, (h) =>
-			h.createConversation(
-				{
-					ownership: { kind: "ownerless" },
-					agent: { model: { provider: this.providerId(), modelId: this.defaultModelId() }, extensions: this.agentExtensions() as never },
-				},
-				ctx,
-			),
-		);
-		const now = new Date().toISOString();
-		sqlFacade!.exec(
-			"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
-			String(conversation.id), "新会话", now, now,
-		);
-		return { id: String(conversation.id), title: "新会话" };
-	}
-
-	/**
-	 * 会话分支（v0.32.0）：在指定消息**之前**分叉出一个新会话。
-	 * pi-durable 的 fork 共享分叉点之前的历史，之后各自追加，互不影响。
-	 * 取「这条消息之前的最新一条」作为分叉点，这样新会话的历史停在上一条，用户可以直接问别的。
-	 */
-	async forkSession(sessionId: string, entryId: number, title?: string): Promise<{ id: string; title: string }> {
-		const harness = await this.open();
-		const parent = await this.conversationFor(harness, sessionId);
-		const typed = parent as unknown as {
-			id: number;
-			entries(q: object, limit: number, cursor: undefined, c: unknown): Promise<{ items: readonly { id?: unknown }[] }>;
-			fork(at: number, options: { ownership: { kind: string } }, c: unknown): Promise<{ id: unknown }>;
+	/** 会话域的 Harness 端口：open/重试/模型与扩展配置留在 DO，Service 只做编排。 */
+	private sessionRuntime(): SessionRuntime {
+		return {
+			entries: async (sessionId) => {
+				const harness = await this.open();
+				const conversation = await this.conversationFor(harness, sessionId);
+				const page = await conversation.entries({}, 200, undefined, ctx);
+				return page.items;
+			},
+			createConversation: async () => {
+				const harness = await this.open();
+				const conversation = await this.retryOnSessionError(harness, (h) =>
+					h.createConversation(
+						{
+							ownership: { kind: "ownerless" },
+							agent: {
+								model: { provider: this.providerId(), modelId: this.defaultModelId() },
+								extensions: this.agentExtensions() as never,
+							},
+						},
+						ctx,
+					),
+				);
+				return String(conversation.id);
+			},
+			forkBefore: async (sessionId, entryId) => {
+				const harness = await this.open();
+				const parent = await this.conversationFor(harness, sessionId);
+				const typed = parent as unknown as {
+					id: number;
+					entries(q: object, limit: number, cursor: undefined, c: unknown): Promise<{ items: readonly { id?: unknown }[] }>;
+					fork(at: number, options: { ownership: { kind: string } }, c: unknown): Promise<{ id: unknown }>;
+				};
+				// 取「这条消息之前的最新一条」作为分叉点，新会话历史停在上一条（v0.32.0）。
+				const before = await typed.entries({ maxEntryId: entryId - 1 }, 1, undefined, ctx);
+				const at = Number((before.items[0] as { id?: unknown } | undefined)?.id);
+				if (!Number.isFinite(at) || at <= 0) throw new Error("这条消息之前没有历史，无法分叉");
+				const fork = await typed.fork(at, { ownership: { kind: "ownerless" } }, ctx);
+				return { id: String(fork.id), parentId: String(typed.id), at };
+			},
+			rootId: async () => {
+				const harness = await this.open();
+				const root = await this.retryOnSessionError(harness, (h) => h.root(ctx));
+				return String(root.id);
+			},
+			scanConversationIds: async () => {
+				await this.open();
+				const scan = (await this.storageRef!.scanConversations({}, 100, undefined, ctx)) as {
+					items: readonly { id: unknown }[];
+				};
+				return scan.items.map((item) => String(item.id));
+			},
+			modelFor: (sessionId) => this.modelFor(sessionId),
+			pauseGoal: (sessionId) => {
+				try {
+					writeGoal(sessionId, { status: "paused", next_run_at: 0 });
+				} catch {
+					// 没有目标时忽略
+				}
+			},
 		};
-		const before = await typed.entries({ maxEntryId: entryId - 1 }, 1, undefined, ctx);
-		const at = Number((before.items[0] as { id?: unknown } | undefined)?.id);
-		if (!Number.isFinite(at) || at <= 0) throw new Error("这条消息之前没有历史，无法分叉");
-		const fork = await typed.fork(at, { ownership: { kind: "ownerless" } }, ctx);
-		const parentRow = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", String(typed.id)).toArray() as { title?: string }[];
-		const now = new Date().toISOString();
-		const fallback = `⑂ ${parentRow[0]?.title || `会话 ${typed.id}`}`;
-		const finalTitle = (title ?? "").trim().slice(0, 60) || fallback;
-		sqlFacade!.exec(
-			`INSERT INTO sessions_meta (id, title, created_at, updated_at, model, parent_id, fork_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(id) DO UPDATE SET title = excluded.title, parent_id = excluded.parent_id, fork_at = excluded.fork_at, updated_at = excluded.updated_at`,
-			String(fork.id), finalTitle, now, now, this.modelFor(sessionId), String(typed.id), at,
-		);
-		return { id: String(fork.id), title: finalTitle };
 	}
 
-	/** 会话列表：元数据表为准，缺失的从存储枚举补齐（含根会话）。 */
-	async listSessions(): Promise<{
-		sessions: { id: string; title: string; created_at: string; updated_at: string; model?: string; parent_id?: string | null; fork_at?: number | null }[];
-	}> {
-		const harness = await this.open();
-		const root = await this.retryOnSessionError(harness, (h) => h.root(ctx));
-		const rows = sqlFacade!.exec(
-			"SELECT id, title, created_at, updated_at, model, parent_id, fork_at FROM sessions_meta WHERE deleted = 0 AND hidden = 0 ORDER BY updated_at DESC",
-		).toArray() as {
-			id: string; title: string; created_at: string; updated_at: string; model?: string; parent_id?: string | null; fork_at?: number | null;
-		}[];
-		const known = new Set(rows.map((r) => r.id));
-		// 存储里存在但元数据缺失的会话（例如根会话）补一条。
-		const scan = (await this.storageRef!.scanConversations({}, 100, undefined, ctx)) as { items: readonly { id: unknown }[] };
-		const now = new Date().toISOString();
-		for (const c of scan.items) {
-			const id = String(c.id);
-			if (known.has(id)) continue;
-			// 已删除的会话不重新出现（元数据表里仍留一行 deleted=1）。
-			const tomb = sqlFacade!.exec("SELECT id FROM sessions_meta WHERE id = ?", id).toArray();
-			if (tomb.length) continue;
-			sqlFacade!.exec(
-				"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
-				id, id === String(root.id) ? "默认会话" : `会话 ${id}`, now, now,
-			);
-			rows.push({ id, title: id === String(root.id) ? "默认会话" : `会话 ${id}`, created_at: now, updated_at: now });
-		}
-		return { sessions: rows };
+	private sessionService() {
+		return createSessionService({ sql: this.ctx.storage.sql as unknown as SqlHandle, runtime: this.sessionRuntime() });
+	}
+
+	private fileService() {
+		return createFileService({ sql: this.ctx.storage.sql as unknown as SqlHandle });
 	}
 
 	/**
@@ -2942,9 +2923,9 @@ export class SpikeAgent extends DurableObject {
 	private async readBootstrap(sessionId: string) {
 		return collectBootstrap({
 			session: () => ({ ok: true, name: "pi-harness-spike" }),
-			entries: () => this.entries(sessionId),
-			sessions: async () => (await this.listSessions()).sessions,
-			files: () => listFiles(sessionId),
+			entries: () => this.sessionService().entries(sessionId),
+			sessions: async () => (await this.sessionService().list()).sessions,
+			files: () => this.fileService().list(sessionId),
 			memories: () => listMemories(),
 			approvals: () => listPendingApprovals(sessionId),
 			settings: () => settingsView(),
@@ -3980,6 +3961,7 @@ export class SpikeAgent extends DurableObject {
 					ensureMigrated: () => this.ensureMigrated(),
 					open: () => this.open(),
 					legacy: () => this.handleLegacyFetch(request),
+					sessionRuntime: this.sessionRuntime(),
 				});
 				return dispatch(context);
 			},
@@ -4047,76 +4029,6 @@ export class SpikeAgent extends DurableObject {
 					return Response.json({ error: "sessionId 必须是正整数" }, { status: 400 });
 				}
 				return Response.json(await this.readBootstrap(sessionId));
-			}
-			if (request.method === "GET" && url.pathname === "/sessions") {
-				return Response.json(await this.listSessions());
-			}
-			if (request.method === "POST" && url.pathname === "/sessions") {
-				return Response.json(await this.newSession());
-			}
-			/* ---- 会话分支（v0.32.0）：从某条历史消息分叉 ---- */
-			if (request.method === "POST" && url.pathname === "/branches") {
-				const body = (await request.json().catch(() => ({}))) as { sessionId?: string; entryId?: number; title?: string };
-				const entryId = Math.floor(Number(body.entryId));
-				if (!Number.isFinite(entryId) || entryId <= 0) {
-					return Response.json({ error: "缺少有效的 entryId" }, { status: 400 });
-				}
-				try {
-					const created = await this.forkSession(String(body.sessionId ?? "1"), entryId, body.title);
-					return Response.json({ ok: true, ...created });
-				} catch (err) {
-					return Response.json({ error: `分支创建失败：${String(err).slice(0, 200)}` }, { status: 400 });
-				}
-			}
-			if (request.method === "PATCH" && url.pathname === "/sessions") {
-				const { id, title } = (await request.json()) as { id?: string; title?: string };
-				if (!id || !title?.trim()) return Response.json({ error: "缺少 id 或标题" }, { status: 400 });
-				sqlFacade!.exec("UPDATE sessions_meta SET title = ?, updated_at = ? WHERE id = ?", title.trim().slice(0, 60), new Date().toISOString(), id);
-				return Response.json({ ok: true });
-			}
-			if (request.method === "DELETE" && url.pathname === "/sessions") {
-				const id = url.searchParams.get("id") ?? "";
-				if (!id) return Response.json({ error: "缺少 id" }, { status: 400 });
-				sqlFacade!.exec("UPDATE sessions_meta SET deleted = 1, updated_at = ? WHERE id = ?", new Date().toISOString(), id);
-				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ?", id);
-				// 目标随会话一起停止，避免继续消耗 token（v0.31.0）
-				try {
-					writeGoal(id, { status: "paused", next_run_at: 0 });
-				} catch {
-					// 没有目标时忽略
-				}
-				return Response.json({ ok: true });
-			}
-			if (url.pathname === "/files" && request.method === "GET") {
-				const sid = url.searchParams.get("sessionId") ?? "1";
-				return Response.json({ files: listFiles(sid) });
-			}
-			if (url.pathname === "/files/content" && request.method === "GET") {
-				const name = url.searchParams.get("name") ?? "";
-				const sid = url.searchParams.get("sessionId") ?? "1";
-				const rows = sqlFacade!.exec("SELECT name, content FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, name).toArray() as { name: string; content: string }[];
-				if (!rows[0]) return Response.json({ error: "文件不存在" }, { status: 404 });
-				return Response.json(rows[0]);
-			}
-			if (url.pathname === "/files" && request.method === "DELETE") {
-				const sid = url.searchParams.get("sessionId") ?? "1";
-				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sid, url.searchParams.get("name") ?? "");
-				return Response.json({ ok: true });
-			}
-			// 全部文件（v0.45.0）：当前用户 DO 内所有会话的产物，带会话标题
-			if (url.pathname === "/files/all" && request.method === "GET") {
-				const q = (url.searchParams.get("q") ?? "").trim().slice(0, 100).toLowerCase();
-				const rows = sqlFacade!
-					.exec(
-						`SELECT v.conversation_id AS sessionId, v.name AS name, length(v.content) AS size, v.updated_at AS updatedAt,
-							COALESCE(s.title, '') AS sessionTitle
-						FROM vfs_v2 v LEFT JOIN sessions_meta s ON s.id = v.conversation_id
-						WHERE (? = '' OR lower(v.name) LIKE ? OR lower(COALESCE(s.title, '')) LIKE ?)
-						ORDER BY v.updated_at DESC LIMIT 500`,
-						q, `%${q}%`, `%${q}%`,
-					)
-					.toArray();
-				return Response.json({ files: rows });
 			}
 			// 用户知识库（v0.45.0）：每人独立 DO，天然隔离
 			if (url.pathname === "/kb" && request.method === "GET") {
@@ -4932,12 +4844,6 @@ export class SpikeAgent extends DurableObject {
 			}
 			if (request.method === "GET" && url.pathname === "/version") {
 				return Response.json({ build: (this.env as { BUILD?: string }).BUILD ?? "dev", images: true, search: true });
-			}
-			if (request.method === "GET" && url.pathname === "/session") {
-				return Response.json({ ok: true, name: "pi-harness-spike" });
-			}
-			if (request.method === "GET" && url.pathname === "/entries") {
-				return Response.json(await this.entries(url.searchParams.get("sessionId") ?? undefined));
 			}
 			if (request.method === "POST" && url.pathname === "/reset") {
 				const body = (await request.json().catch(() => ({}))) as { sessionId?: string };

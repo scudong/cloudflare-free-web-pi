@@ -40,7 +40,7 @@ SpikeAgent DO（每用户一个；主人沿用 "spike"，邀请用户 "user:<id>
 | SpikeAgent DO | `class SpikeAgent`（`2639-4949`） | 用户状态所有者、RPC 入口、Harness 生命周期、alarm | pi-durable、DO SQLite | 全部用户数据 |
 | HTTP 路由层 | `handleFetch`（`3903-4948`） | 81 个分支：解析、校验、状态码、**内联 SQL** | DO 方法、模块级 helper | 直接读写 15+ 张表 |
 | Agent 运行时 | `spikeExtension`（`1969`）、`buildInstructions`（`2940`）、`runChat`（`2702-2769`）、`runChatStream`（`3699-3875`） | 工具定义、系统提示、chat / SSE 流、技能注入 | Harness、LLM、MCP、AI | Harness 表 |
-| 会话与文件 | `newSession`/`forkSession`/`listSessions`（`2841-2940`）、`write_file`/`read_file`/`list_files` 工具（`~1770-1810`）、路由 `3955-4029` | 会话列表/新建/分支/删除、工作台文件 | Harness、`sessions_meta`、`vfs_v2` | `sessions_meta`、`vfs_v2` |
+| 会话与文件 | 路由 `routes/session.ts`、`routes/files.ts`；用例 `services/session-service.ts`、`services/file-service.ts`；SQL `repo/sessions-repo.ts`、`repo/files-repo.ts`；工具 `write_file`/`read_file`/`list_files`（`~1770-1810`） | 会话列表/新建/分支/删除、工作台文件；路由层零 SQL，Harness 协调留在 DO 的 `sessionRuntime()` 端口 | 服务/仓储、Harness | `sessions_meta`、`vfs_v2` |
 | 知识库 | `kbTokens`→`kbPrefetchBlock`（`774-1290`）、路由 `4031-4152` | 分块、FTS5、向量索引、混合检索、预检索、ingest | `kb_*`、AI、Vectorize | `kb_docs/kb_chunks/kb_fts` |
 | 分享 | `sharePage`（`2498`）、`createShare`（`3321`）、`listShares`（`3343`）、路由 `4219-4279` | token 生成、SSR 分享页、主题/目录、过期 | `shares`、`vfs_v2`、Harness | `shares` |
 | 定时任务与目标 | 调度 helper（`196-300`）、`alarm`（`3006-3019`）、`goalTick`（`3667`）、路由 `4280-4326`、`4756-4786` | alarm 调度、token 预算、自动续转 | `automations`、`goals` | `automations`、`goals` |
@@ -57,9 +57,9 @@ Worker 剥掉 `/api` 或 `/agent` 前缀后转发给 DO（`src/worker.ts:5211-52
 | 域 | 端点 | 备注 |
 |---|---|---|
 | 对话 | `POST /chat`、`POST /chat/stream`、`POST /interject`、`POST /abort`、`POST /reset`、`POST /compact` | 前端只用 SSE |
-| 会话 | `GET/POST/PATCH/DELETE /sessions`、`POST /branches`、`GET /entries`、`GET /session` | `sessions_meta` 与 Harness 双写 |
+| 会话 | `GET/POST/PATCH/DELETE /sessions`、`POST /branches`、`GET /entries`、`GET /session` | 阶段 1 已离开 legacy：`routes/session.ts` → `session-service` → `sessions-repo`；`sessions_meta` 与 Harness 双写 |
 | 首屏 | `GET /bootstrap` | 17 个只读面板聚合，单字段故障隔离 |
-| 文件 | `GET/DELETE /files`、`GET /files/content`、`GET /files/all` | `vfs_v2` |
+| 文件 | `GET/DELETE /files`、`GET /files/content`、`GET /files/all` | 阶段 1 已离开 legacy：`routes/files.ts` → `file-service` → `files-repo` |
 | 知识库 | `GET/POST/DELETE /kb`、`/kb/doc`、`/kb/search`、`/kb/prefetch`、`/kb/status`、`/kb/reindex` | FTS / vector / hybrid |
 | 分享 | `POST /share`、`GET /shares`、`GET /s/<token>` | `/s/` 公开 |
 | 自动化 / 目标 | `GET/POST/PATCH/DELETE /automations`、`GET/POST/DELETE /goal` | alarm |
@@ -103,8 +103,8 @@ DO            ──→ Harness / MCP / Vectorize / LLM
 
 | 表 | 责任域 | 主要写入点 | 备份 |
 |---|---|---|---|
-| `sessions_meta` | 会话 | `runChat/runChatStream` 标题、新建、分支、改名、删除 | 是（不含 `deleted/hidden`） |
-| `vfs_v2` | 工作台文件 | 工具 `write_file`、恢复 | 是（含全文） |
+| `sessions_meta` | 会话 | `session-service`（新建、分支、改名、删除）、`runChat/runChatStream` 标题 | 是（不含 `deleted/hidden`） |
+| `vfs_v2` | 工作台文件 | `file-service`（工具 `write_file`、`/files` 删除、会话删除）、恢复 | 是（含全文） |
 | `pi_mem` / `reflect_state` | 记忆 / 反思游标 | `remember`、`reflect` | `pi_mem` 是；`reflect_state` 否 |
 | `skills` / `prompts` / `rules` | 用户资产 | API 与工具 | 是 |
 | `app_settings` | 全局设置 | `/settings` | 是 |
@@ -177,7 +177,7 @@ CI：`.github/workflows/deploy.yml`（test → build → deploy）、`smoke.yml`
 
 > 行号口径：R1/R4/R5/R11 已按 `ce75bce` 刷新；R2/R3/R6-R15 的证据行号仍是 `64c9515` 基线，在其所属域迁移时重锚（阶段 3/4 顺手更新）。引用风险时优先用符号名。
 
-> 执行状态（2026-10-21）：ADR-0001 已转 Accepted；阶段 0a（迁移器）派给 后端-bei，0b（路由表）等 PR #17（`/api/bootstrap`）合并后开。R4 由 0a 关闭，R1/R11 由阶段 1-5 逐步关闭。
+> 执行状态（2026-10-22）：ADR-0001 已转 Accepted；阶段 0a（迁移器）与 0b（路由表）已合并。阶段 1（会话/文件）已收口：`routes/session|files.ts` → `services/session|file-service.ts` → `repo/sessions|files-repo.ts`，`sessions_meta`/`vfs_v2` 在路由与工具中零内联 SQL；R4 由 0a 关闭，R1/R11 由阶段 1-5 逐步关闭。
 
 | ID | 级别 | 问题 | 证据 | 影响 | 建议 |
 |---|---|---|---|---|---|
