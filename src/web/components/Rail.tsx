@@ -10,13 +10,15 @@ interface RailProps {
 	onOpenSettings: () => void;
 	/** 只有主人能看到用户管理（v0.43.0）。 */
 	isOwner?: boolean;
+	/** 分享清单接口是否已上线（NERE-56）：未上线时不渲染入口。 */
+	sharesAvailable?: boolean;
 }
 
 const railButton =
 	"flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 aria-pressed:bg-sky-500/15 aria-pressed:text-sky-300";
 
 /** 最左侧固定工具栏（v0.21.0）：新会话 + 会话/连接/定时/技能切换 + 设置。 */
-export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onOpenSettings, isOwner }: RailProps) {
+export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onOpenSettings, isOwner, sharesAvailable }: RailProps) {
 	const item = (value: RailView, label: string, icon: IconName) => (
 		<button
 			key={value}
@@ -49,7 +51,7 @@ export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onO
 			{item("sessions", "会话", "sessions")}
 			{item("files", "全部文件", "folder")}
 			{item("kb", "知识库", "kb")}
-			{item("shares", "分享", "share")}
+			{sharesAvailable && item("shares", "分享", "share")}
 			{item("mcp", "连接", "connection")}
 			{item("automations", "定时", "clock")}
 			{item("skills", "能力", "skills")}

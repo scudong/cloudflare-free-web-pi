@@ -4,6 +4,7 @@
  * - 挂载时只发一次 `api.sharesAll()`；切换会话、panelTick 变化都不重取，只有 reload() 再发。
  * - 撤销是乐观更新：先移出清单，失败按原索引插回；404 视为成功，403 / 网络错误给行级文案。
  * - 不做轮询：打开次数是快照，刷新由面板头部的手动按钮触发。
+ * - 能力门禁（NERE-56）：useSharesAvailable 探测 `/api/shares/all`，失败即视为未上线，入口不渲染。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -41,6 +42,44 @@ export function isAlreadyRevoked(err: unknown): boolean {
 /** 按原索引插回一行（撤销失败回滚）：索引越界时落在末尾。 */
 export function insertAt<T>(list: readonly T[], index: number, item: T): T[] {
 	return [...list.slice(0, index), item, ...list.slice(index)];
+}
+
+/**
+ * 分享能力探测（NERE-56）：`/api/shares/all` 成功（含空清单）才算已上线。
+ * 404 / 非 JSON / 网络错误一律返回 false —— 这类失败是「能力还没发布」，不是清单加载失败，
+ * 不能走到面板的 error 态文案。
+ */
+export async function probeSharesAvailability(load: () => Promise<unknown> = () => api.sharesAll()): Promise<boolean> {
+	try {
+		await load();
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * 分享入口的能力门禁（NERE-56）：只探测一次，结果落地前保持 false（入口不渲染）。
+ * enabled 用来等登录态确定后再发请求；StrictMode 重跑 effect 也复用同一次探测。
+ */
+export function useSharesAvailable(enabled: boolean): boolean {
+	const [available, setAvailable] = useState(false);
+	/** 探测 promise：同一挂载周期只发一次请求。 */
+	const probeRef = useRef<Promise<boolean> | null>(null);
+
+	useEffect(() => {
+		if (!enabled) return;
+		let live = true;
+		probeRef.current ??= probeSharesAvailability();
+		void probeRef.current.then((ok) => {
+			if (live) setAvailable(ok);
+		});
+		return () => {
+			live = false;
+		};
+	}, [enabled]);
+
+	return available;
 }
 
 export function useShares(): SharesState {
