@@ -1045,6 +1045,15 @@ describe("定时任务编辑（NERE-64）", () => {
 		});
 	});
 
+	it("GET 列表与 PATCH 返回体带 last_status，新任务为空（NERE-68）", async () => {
+		const id = await create({ kind: "interval", minutes: 20 });
+		expect(await row(id)).toMatchObject({ last_run_at: null, last_status: null });
+
+		const res = await patch("/api/automations", { id, name: "带状态" });
+		expect(res.status).toBe(200);
+		expect(res.json.automation).toMatchObject({ last_run_at: null, last_status: null });
+	});
+
 	it("改 daily 08:03 → next_run_at 为下一个 08:03（UTC+8）", async () => {
 		const id = await create({ kind: "interval", minutes: 30 });
 		const res = await patch("/api/automations", { id, schedule: { kind: "daily", time: "08:03" }, enabled: true });

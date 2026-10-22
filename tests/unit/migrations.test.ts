@@ -285,4 +285,31 @@ describe("migrate", () => {
 			db.close();
 		}
 	});
+
+	it("v8 给老库 automations 补 last_status，旧行为 NULL 且重跑幂等", () => {
+		const db = new DatabaseSync(":memory:");
+		try {
+			// 补列前的 automations 形状
+			db.exec(
+				"CREATE TABLE automations (id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_run_at INTEGER, next_run_at INTEGER NOT NULL)",
+			);
+			db.exec(
+				`INSERT INTO automations (id, name, prompt, schedule, created_at, last_run_at, next_run_at) VALUES ('old', '早报', '跑', '{"kind":"daily","time":"09:00"}', '2026-01-01T00:00:00Z', 100, 200)`,
+			);
+			const sql = sqlHandle(db);
+			migrate(sql);
+			expect(columnsOf(db, "automations")).toEqual(expect.arrayContaining(["last_status"]));
+			expect(db.prepare("SELECT last_status, last_run_at FROM automations WHERE id = 'old'").all()).toEqual([
+				{ last_status: null, last_run_at: 100 },
+			]);
+
+			// 账本丢失 / 重跑：ensureColumn 幂等
+			expect(migrate(sql)).toBe(0);
+			db.exec("DELETE FROM schema_migrations WHERE version = 8");
+			expect(migrate(sql)).toBe(1);
+		} finally {
+			db.close();
+		}
+	});
+
 });

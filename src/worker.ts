@@ -36,7 +36,7 @@ import { getModel } from "./worker/repo/sessions-repo";
 import * as providersRepo from "./worker/repo/providers-repo";
 import * as sessionsRepo from "./worker/repo/sessions-repo";
 import * as settingsRepo from "./worker/repo/settings-repo";
-import { createAutomationService, type AutomationService } from "./worker/services/automation-service";
+import { createAutomationService, runDueAutomations, type AutomationService } from "./worker/services/automation-service";
 import { createChatService, type ChatService } from "./worker/services/chat-service";
 import { createContextService } from "./worker/services/context-service";
 import {
@@ -766,20 +766,11 @@ export class SpikeAgent extends DurableObject {
 			const automations = this.automationService();
 			const due = automations.due(now);
 			const chat = this.chatService(deps);
-			for (const job of due) {
-				try {
-					// 会话正忙时跳过这一轮，避免并发 submit 破坏会话状态（v0.17.1）
-					if (chat.hasActive(job.session_id || "1")) {
-						automations.defer(job.id, now);
-						continue;
-					}
-					await chat.chat({ message: job.prompt, sessionId: job.session_id || undefined });
-				} catch (err) {
-					console.warn(`automation ${job.id} failed`, String(err).slice(0, 200));
-					await this.recoverSession();
-				}
-				automations.markRun(job, now);
-			}
+			await runDueAutomations(due, now, automations, {
+				hasActive: (sessionId) => chat.hasActive(sessionId),
+				run: (job) => chat.chat({ message: job.prompt, sessionId: job.session_id || undefined }),
+				recover: () => this.recoverSession(),
+			});
 			if (due.length) automations.rescheduleOverdue(now);
 
 			// 目标自动续转（v0.31.0）：到点的目标推进一轮

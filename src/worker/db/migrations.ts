@@ -189,6 +189,18 @@ const skillEvents: Migration = {
 	},
 };
 
+/**
+ * v8：定时任务上次运行结果（NERE-68）。`ok|failed|deferred`；老数据为 NULL。
+ * 顺延只写 `deferred`，不动 `last_run_at`——顺延不算一次已执行。
+ */
+const automationLastStatus: Migration = {
+	version: 8,
+	name: "automation-last-status",
+	up(sql) {
+		ensureColumn(sql, "automations", "last_status TEXT");
+	},
+};
+
 export const MIGRATIONS: readonly Migration[] = [
 	initialSchema,
 	vfsRootConversation,
@@ -197,6 +209,7 @@ export const MIGRATIONS: readonly Migration[] = [
 	shareOpenTracking,
 	skillHubColumns,
 	skillEvents,
+	automationLastStatus,
 ];
 
 // 版本号是账本的唯一真源：重复或乱序会被 INSERT OR IGNORE 静默跳过，模块加载时就暴露。
