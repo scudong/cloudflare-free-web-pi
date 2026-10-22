@@ -66,6 +66,9 @@ function withSkillInstructions(base: string, sql: SqlHandle, settings: SettingsP
 	// 分享（v0.55.0）：模型能直接生成链接，不能把用户推给配置项
 	out +=
 		"\n用户说「分享 / 发我个链接 / 转给同事 / 生成公开链接」时，直接调用 share_file（工作台文件）或 share_conversation（当前对话），并把返回的完整 URL 原样写进回复；不要回答「做不到」，也不要让用户去别处配置。";
+	// 产出即给链接（NERE-73）：可交付文档收尾时问一句，别自动分享
+	out +=
+		"\n产出是可交付文档（报告、周报、清单等）时，在回复结尾用一句话问是否需要分享链接；用户确认后再调用 share_file，不要自动分享。";
 	return out;
 }
 
