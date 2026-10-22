@@ -1,0 +1,104 @@
+src/web/components/LeftPanels.tsx
+  f6a9a7b9eb7c113b 3,7,169-170,179-182,191-192,287-293,324-332
+src/web/lib/api.ts
+  f6a9a7b9eb7c113b 7,736-743
+src/web/lib/automation-edit.ts
+  f6a9a7b9eb7c113b 1-168
+src/web/lib/format.ts
+  f6a9a7b9eb7c113b 38-45
+src/web/components/AutomationEditDialog.tsx
+  f6a9a7b9eb7c113b 1-205
+src/web/types.ts
+  f6a9a7b9eb7c113b 133-139,149-161
+src/web/lib/collections.ts
+  f6a9a7b9eb7c113b 15-16,99-100,106-107,109-110
+src/web/lib/automation-schedule.ts
+  f6a9a7b9eb7c113b 1-58
+src/web/App.tsx
+  f6a9a7b9eb7c113b 21-22,30,927-944,1477-1478
+tests/unit/automation-edit.test.tsx
+  f6a9a7b9eb7c113b 1-322
+docs/frontend-map.md
+  f6a9a7b9eb7c113b 38,86,121,131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "f2b32c3c36fd2eee34f8ec8c9131845b81923017",
+  "prompts": {
+    "f6a9a7b9eb7c113b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9175d564-2324-4fee-a15c-f5d293b5da5d",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 3088,
+      "total_deletions": 50,
+      "accepted_lines": 3061,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/App.tsx": {
+          "additions": 25,
+          "deletions": 4,
+          "accepted_lines": 23
+        },
+        "docs/frontend-map.md": {
+          "additions": 4,
+          "deletions": 4,
+          "accepted_lines": 4
+        },
+        "docs/nere-65-list.png": {
+          "additions": 1355,
+          "accepted_lines": 1355
+        },
+        "src/web/types.ts": {
+          "additions": 21,
+          "accepted_lines": 21
+        },
+        "src/web/lib/format.ts": {
+          "additions": 9,
+          "accepted_lines": 9
+        },
+        "docs/nere-65-edit.png": {
+          "additions": 851,
+          "accepted_lines": 851
+        },
+        "src/web/lib/automation-edit.ts": {
+          "additions": 190,
+          "deletions": 22,
+          "accepted_lines": 168
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 28,
+          "deletions": 1,
+          "accepted_lines": 28
+        },
+        "src/web/components/AutomationEditDialog.tsx": {
+          "additions": 208,
+          "deletions": 3,
+          "accepted_lines": 205
+        },
+        "src/web/lib/automation-schedule.ts": {
+          "additions": 58,
+          "accepted_lines": 58
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 8,
+          "deletions": 15,
+          "accepted_lines": 8
+        },
+        "tests/unit/automation-edit.test.tsx": {
+          "additions": 322,
+          "accepted_lines": 322
+        },
+        "src/web/lib/api.ts": {
+          "additions": 9,
+          "deletions": 1,
+          "accepted_lines": 9
+        }
+      }
+    }
+  }
+}
