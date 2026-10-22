@@ -71,7 +71,7 @@ v1 只支持**单文件技能**（沙箱没有模块加载，多文件代码无�
 | `version` | 是 | SemVer 2.0，≤32 字符 | `1.2.3` / `1.2.3-beta.1` |
 | `description` | 是 | 1–200 字符 | 与现有导入的 200 字符截断一致 |
 | `author` | 是 | 1–80 字符 | 展示名或 `Name <email>` |
-| `source` | 是 | 绝对 `https://` URL，≤512 字符 | 发布来源；用于筛选与溯源 |
+| `source` | 是 | 绝对 `https://` URL，≤512 字符；存量/手工技能为 `local` | 发布来源；用于筛选与溯源 |
 | `license` | 是 | SPDX 表达式或 `UNLICENSED`，≤64 字符 | 只做展示与合规提示 |
 | `runtime` | 是 | `prompt` \| `javascript` \| `typescript` \| `python` \| `shell` \| `binary` \| `other` | 后四类恒 `blocked`；未知字面量按 `other` 处理（fail closed） |
 | `tags` | 是 | 0–8 个，`^[a-z0-9][a-z0-9-]{0,23}$`，去重 | 前端 tag/category 筛选 |
@@ -135,7 +135,8 @@ MCP 工具（`mcp__*`）与用户自定义工具名**不可声明**：每个用�
 - 无 `skill.json`、内容以 `---` frontmatter 开头 → 合成 manifest：
   `runtime="prompt"`、`version="0.0.0"`、`license="UNLICENSED"`、`author=""`、`source=<导入 URL>`、`tags=[]`、`requires={tools:[],bindings:[],network:[]}`。
 - 合成 manifest 必然触发 `I3`（version/license/author 缺失）→ `warn`，可安装。
-- 现有 `skills` 表的存量行按同一规则视为 `prompt` / `0.0.0`，`content_hash` 首次读取时惰性计算并回填缓存。
+- **存量 `skills` 行豁免 I3**：迁移时回填 `runtime='prompt'`、`audit_status='pass'`、`source='local'`、`version='0.0.0'`，视为已验收的历史内容；`content_hash` 首次读取时惰性计算并回填。只有**新导入**的 legacy 内容才产生 `I3 warn`。
+- 无 manifest 时的 runtime 启发式只看 fenced code block 的 language tag、首行 shebang、入口扩展名，**不按正文裸词**判定（避免把「Python 不受支持」判成 Python 技能）。
 
 ## 3. Cloudflare Worker 能力矩阵（审计依据，写死）
 
@@ -223,7 +224,7 @@ MCP 工具（`mcp__*`）与用户自定义工具名**不可声明**：每个用�
 | **C5** | 使用未声明的工具 | warn | 代码里 `tools.<name>()` 或说明里反引号工具名不在 `requires.tools`（白名单内） |
 | **C6** | 使用禁用工具 | blocked | 调用 §2.3 禁用工具 |
 | **C7** | 声明但未使用的工具（仅 js/ts） | warn | 入口代码中没有 `tools.<name>(` 引用；prompt 技能不做此判定（正文用法无法可靠识别） |
-| **I1** | 哈希缺失/不匹配 | blocked / warn | 目录条目缺哈希或安装时与目录不一致 → blocked；直接导入无 `expectedHash` → 仅计算并返回（warn 由 I3 覆盖） |
+| **I1** | 哈希缺失/不匹配 | blocked / warn | 目录条目缺哈希、安装时哈希不一致 → blocked；导入 manifest 缺 `contentHash` 且无 `expectedHash` → warn（服务端已计算）；存量行豁免 |
 | **I2** | 签名问题 | blocked / warn | 结构非法 → blocked；结构合法但未验证 → warn（`signature.unverified`） |
 | **I3** | 元数据缺失 | warn | `version=0.0.0`、`license=UNLICENSED`、`author` 为空、`source` 为空（legacy 合成 manifest 必中） |
 | **S1** | prompt 含非 JS 代码块 | blocked | ` ```python `/` ```bash `/` ```sh `/` ```shell `/` ```zsh `/` ```powershell ` |
@@ -411,7 +412,7 @@ interface HubSkill {
   - `url` 指向 `skill.json`：按该 manifest 的 `entry` 解析相对地址并抓取内容（最多 2 次内容抓取，重定向计入）。
   - `url` 指向 `SKILL.md` 或任意文本：按 §2.6 合成 legacy `prompt` manifest；若目录里已有同名条目且带 `contentHash`，用 `expectedHash` 校验。
   - `expectedHash` 始终与 §2.5 的规范化结果比较（prompt 为去 frontmatter 后的正文，不是原始文件字节）。
-- B 形态：`content` 是 entry 或 SKILL.md 正文；manifest 的 `contentHash` 由服务端重算并覆盖，不接受客户端自证。
+- B 形态：`content` 是 entry 或 SKILL.md 正文；manifest 的 `contentHash` 由服务端重算并覆盖，不接受客户端自证；manifest 缺 `contentHash` 且无 `expectedHash` → `I1 warn`（可安装）。
 - 内容上限：256 KiB（UTF-8 字节）；manifest 16 KiB；超过 → 413。
 - 幂等：同一 `(name, contentHash)` 重复导入 → 200 `{installed:true, changed:false}`，不重复写。
 - 同名不同哈希：默认 409 `name_conflict`；`overwrite:true` 才覆盖（覆盖前仍审计）。
@@ -446,34 +447,43 @@ interface HubSkill {
 
 新功能只走新路径；旧端点不因 Hub 上线改变状态码或字段语义。
 
+**准入**：`buildInstructions` 的技能索引与显式 `load_skill` 只接受 `audit_status != 'blocked'` 的技能；blocked 行即使因历史原因存在也不可见、不可加载。旧 `/skills` GET 不过滤（保持兼容），但 Hub 与模型侧工具走过滤后的视图。
+
 ### 5.6 数据模型（NERE-55 实现，本文不建表）
 
-迁移 `v3`（在 `src/worker/db/migrations.ts` 递增）：
+迁移 `v3`（在 `src/worker/db/migrations.ts` 递增，`ensureColumn` 幂等）：
 
 ```sql
-ALTER TABLE skills ADD COLUMN runtime TEXT NOT NULL DEFAULT 'prompt';
 ALTER TABLE skills ADD COLUMN version TEXT NOT NULL DEFAULT '0.0.0';
-ALTER TABLE skills ADD COLUMN source TEXT NOT NULL DEFAULT '';
+ALTER TABLE skills ADD COLUMN source TEXT NOT NULL DEFAULT 'local';
 ALTER TABLE skills ADD COLUMN author TEXT NOT NULL DEFAULT '';
 ALTER TABLE skills ADD COLUMN license TEXT NOT NULL DEFAULT 'UNLICENSED';
-ALTER TABLE skills ADD COLUMN manifest TEXT;
+ALTER TABLE skills ADD COLUMN runtime TEXT NOT NULL DEFAULT 'prompt';
+ALTER TABLE skills ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';           -- JSON string[]
 ALTER TABLE skills ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
-ALTER TABLE skills ADD COLUMN installed_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE skills ADD COLUMN audit_status TEXT NOT NULL DEFAULT 'pass'; -- pass|warn|blocked
+ALTER TABLE skills ADD COLUMN audit_report TEXT NOT NULL DEFAULT '{}';   -- AuditReport JSON
+ALTER TABLE skills ADD COLUMN manifest TEXT;                             -- 原始 skill.json，≤16 KiB
+ALTER TABLE skills ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+UPDATE skills SET updated_at = created_at WHERE updated_at = '';
 
-CREATE TABLE IF NOT EXISTS skill_audits (
-  hash TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS skill_audits (          -- 可选缓存，NERE-55 可省
+  hash TEXT NOT NULL,
+  rules_version INTEGER NOT NULL,
   status TEXT NOT NULL,
   report TEXT NOT NULL,
-  audited_at TEXT NOT NULL
+  audited_at TEXT NOT NULL,
+  PRIMARY KEY (hash, rules_version)
 );
 ```
 
-- `manifest` 存原始 JSON（≤16 KiB），用于详情页展示与重审计；`content` 仍是唯一执行/注入内容。
-- 存量行：`runtime='prompt'`、`version='0.0.0'`、`content_hash=''`；首次读取时惰性计算并更新。
-- 不给 `skill_audits` 建额外索引：查询只按主键。表行数 ≈ 内容哈希数 × 用户，远低于 DO 限额。
+- NERE-55 列出的 9 个字段（`version/source/author/runtime/tags/content_hash/audit_status/audit_report/updated_at`）全部包含；`license` 与 `manifest` 是契约追加的两列，用于详情页与重审计，同一迁移加、无额外表。
+- 存量行：默认值即完成回填（`prompt` / `pass` / `local` / `0.0.0`），只需补 `updated_at`；**不重写 `content`、不改 `audit_status`**，保证升级后仍可调用。
+- `audit_status` 是准入的唯一判据（构建 instructions 的技能索引、显式 `load_skill` 都只看它）；`audit_report` 是详情页与 `/audit` 的数据源。
+- `skill_audits` 只做重复审计缓存；查询按 `(hash, rules_version)` 主键，不建额外索引。表行数 ≈ 内容哈希数 × 用户，远低于 DO 限额。
 - 目录缓存（仅远程启用时）：`app_settings` 键 `skill_catalog_url`、`skill_catalog_cache`（`{etag, fetchedAt, catalog}`，序列化 ≤256 KiB）。默认空 = 只用内置目录，零存储、零 subrequest。
 
-分层（ADR-0001）：`routes/skills.ts`（HTTP）→ `services/skill-hub-service.ts`（编排：目录装载、合并、分页、导入）→ `repo/skills-repo.ts`（SQL）；`lib/skill-audit.ts` 是纯函数（输入 manifest+content，输出报告）。路由层零 SQL；审计不依赖 DO 上下文，必须能单测。
+分层（ADR-0001）：`routes/skills.ts`（HTTP）→ `services/skill-service.ts`（编排：目录装载、合并、分页、导入）→ `repo/skills-repo.ts`（SQL）；`lib/skill-audit.ts` 是纯函数（输入 manifest+content，输出报告）。路由层零 SQL；审计不依赖 DO 上下文，必须能单测。
 
 ## 6. 目录源
 
