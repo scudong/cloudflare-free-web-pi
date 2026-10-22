@@ -1,0 +1,34 @@
+src/worker.ts
+  11af3904682db59f 1479-1480
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "74169ad72a0394229208f66aece35a9f763fb12c",
+  "prompts": {
+    "11af3904682db59f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf189bc7-fd7a-46be-a52d-d9e53cf2448f",
+        "model": "deepseek-flash"
+      },
+      "human_author": "scudong",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 15,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "docs/frontend-map.md": {
+          "accepted_lines": 2
+        },
+        "CHANGELOG.md": {
+          "accepted_lines": 7
+        },
+        "src/worker.ts": {
+          "accepted_lines": 6
+        }
+      }
+    }
+  }
+}
