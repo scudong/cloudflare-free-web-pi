@@ -1,0 +1,38 @@
+tests/api/api.test.ts
+  7c3cf012d2155818 47,63-67
+scripts/create-demo-share.mjs
+  7c3cf012d2155818 1-131
+tests/unit/loginGate.test.tsx
+  7c3cf012d2155818 1-23
+src/web/App.tsx
+  7c3cf012d2155818 17
+src/web/components/LoginGate.tsx
+  7c3cf012d2155818 1-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "c6b1f91d4c7f8b3ef883f66e1d2e2790430cb0a2",
+  "prompts": {
+    "7c3cf012d2155818": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28d4b333-925b-4539-9236-01fb4d90af48",
+        "model": "deepseek-flash"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 15,
+      "total_deletions": 4,
+      "accepted_lines": 251,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "docs/pr-nere13/demo-share-desktop.png": {
+          "additions": 15,
+          "deletions": 4,
+          "accepted_lines": 15
+        }
+      }
+    }
+  }
+}
