@@ -610,7 +610,8 @@ export function createAgentExtensions(deps: SpikeToolDeps): AgentExtensions {
 			}),
 			defineTool({
 				name: "write_file",
-				description: "把内容写入工作台文件（覆盖同名）；适合报告、笔记、代码、数据。文件会出现在右侧工作台面板",
+				description:
+					"把内容写入工作台文件（覆盖同名）；适合报告、笔记、代码、数据。文件会出现在右侧工作台面板，需要发给他人时可用 share_file 生成分享链接",
 				parameters: Type.Object({
 					name: Type.String({ description: "文件名，如 report.md / notes.txt / main.js" }),
 					content: Type.String({ description: "完整文件内容" }),
@@ -621,7 +622,9 @@ export function createAgentExtensions(deps: SpikeToolDeps): AgentExtensions {
 					if (!name) return { output: [{ type: "text", text: "文件名不能为空。" }] };
 					const content = String(a.content ?? "");
 					files.write(String(api.conversationId), name, content);
-					return { output: [{ type: "text", text: `已写入 ${name}（${content.length} 字符）。` }] };
+					return {
+						output: [{ type: "text", text: `已写入 ${name}（${content.length} 字符）。需要发给他人时可用 share_file 生成分享链接。` }],
+					};
 				},
 			}),
 			defineTool({

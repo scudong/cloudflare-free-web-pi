@@ -176,6 +176,36 @@ afterAll(async () => {
 describe("分享工具（端到端，假模型）", () => {
 	const STARTER_PROMPT = "请根据我接下来提供的内容写一份本周周报，并生成一个可分享的链接。";
 
+	it("只说写周报时，instructions 要求收尾询问是否分享且不自动分享", async () => {
+		const dbg = await api(`/api/debug/agent?sessionId=1&message=${encodeURIComponent("写一份这周的周报")}`);
+		const instructions = str(obj(dbg.json)?.instructions);
+		expect(instructions).toContain("可交付文档");
+		expect(instructions).toContain("是否需要分享链接");
+		expect(instructions).toContain("不要自动分享");
+	});
+
+	it("未说分享：write_file 结果提示可用 share_file，追问后才生成链接", async () => {
+		fake.setSteps([
+			{ tool: { name: "write_file", args: { name: "weekly-ask.md", content: "# 本周周报\n\n- 完成分享提示" } } },
+			{ text: "周报写好了，要我生成分享链接吗？" },
+		]);
+		const sid = await newSession();
+		const events = await chat(sid, "写一份这周的周报");
+
+		const writeEnd = events.find((item) => item.event === "tool_end" && item.data.name === "write_file");
+		expect(str(writeEnd?.data.summary)).toContain("share_file");
+		expect(str(events.find((item) => item.event === "done")?.data.answer)).toContain("要我生成分享链接吗");
+		expect(shareEnds(events)).toHaveLength(0);
+
+		fake.setSteps([
+			{ tool: { name: "share_file", args: { name: "weekly-ask.md" } } },
+			{ text: "链接好了。" },
+		]);
+		const shares = shareEnds(await chat(sid, "要"));
+		expect(shares).toHaveLength(1);
+		expect(shares[0]!.share).toMatchObject({ name: "weekly-ask.md", kind: "file" });
+	});
+
 	it("起步卡第 1 张：一条消息内产出文件 + 链接卡，重复分享复用 token", async () => {
 		fake.setSteps([
 			{ tool: { name: "write_file", args: { name: "weekly.md", content: "# 本周周报\n\n- 完成分享工具" } } },
