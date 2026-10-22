@@ -152,7 +152,7 @@ npx wrangler deploy
 | GET | `/api/files/content?sessionId=&name=` | 文件内容 |
 | GET | `/api/files/all?q=` | 当前用户所有会话的文件（跨会话总览） |
 | GET / POST / DELETE | `/api/kb` | 用户知识库：文档列表 / 入库 / 删除 |
-| POST | `/api/kb/ingest` | 导入文件（`multipart/form-data` 的 `file`：PDF / DOCX / MD / TXT）或网页（JSON `{url}`），服务端解析后入库 |
+| POST | `/api/kb/ingest` | 导入文件（`multipart/form-data` 的 `file`：PDF / DOCX / MD / TXT）或网页（JSON `{url}`），服务端解析后入库；同 source 同正文返回 `updated:false` 不重复入库，正文变化则原地替换并返回 `updated:true` |
 | GET | `/api/kb/doc?id=` · `/api/kb/search?q=` | 知识库文档全文 / 检索片段 |
 | GET | `/api/kb/prefetch?q=` | 本轮会自动注入的知识库参考资料（调试 / 排查用） |
 | GET / POST / DELETE | `/api/skills` | 技能增删查 |

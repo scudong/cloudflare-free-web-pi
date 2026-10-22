@@ -65,7 +65,7 @@ kb_fts    FTS5(title_tokens, body_tokens)   -- rowid = kb_chunks.id
   MD / TXT 直接读文本；PDF / DOCX 走 Workers AI 的 `toMarkdown()`（不需要额外解析库，也不需要 R2）。
 - 链接：`application/json`，`{"url":"https://..."}`。复用 DeepSeek Fetch API 抓正文，标题取页面 `<title>`，失败时回落到域名。
 
-成功返回 `{ ok: true, docId, title, chunks, chars }`。失败统一返回 `{ ok: false, code, message }`：
+成功返回 `{ ok: true, docId, title, chunks, chars, updated }`。失败统一返回 `{ ok: false, code, message }`：
 
 | HTTP | code | 含义 |
 |---|---|---|
@@ -77,6 +77,20 @@ kb_fts    FTS5(title_tokens, body_tokens)   -- rowid = kb_chunks.id
 | 502 | `fetch_failed` | 抓取服务不可用或页面抓取失败 |
 
 粘贴正文的 `POST /api/kb` 保持原样，仍然是最低依赖的入口。
+
+## 重复导入与版本替换（NERE-47）
+
+非空 `source`（导入文件名 / 网页 URL）是文档身份。入库前按「来源 + 正文」查重：
+
+| 情况 | 行为 |
+|---|---|
+| 同 source、正文相同 | 不写库，复用原 `docId`，`chunks` 不变，返回 `updated:false`。同一份 PDF 导两次不会产生第二篇文档，也不重复计费向量 |
+| 同 source、正文不同 | 原地替换：保留 `docId` 与 `created_at`，删除旧分块、FTS 行与向量后按新正文重建，返回 `updated:true`，`updated_at` 刷新 |
+| source 为空（粘贴正文 / 工具未带 source） | 没有稳定身份，每次按新文档插入，不做覆盖 |
+
+替换是同步完成查重与 DB 写入的：向量删除是唯一的外部调用，完成后再同步查一次并替换，避免同一个 DO 里的并发导入各写一篇。历史遗留的同来源重复文档不做破坏性清理，重新导入该来源时会收敛到最近更新的一篇。
+
+`GET /api/kb` 返回的每篇文档都带 `updatedAt`，前端列表用它标示版本更新时间。`POST /api/kb` 与 `kb_add` 复用同一套去重语义，响应同样带 `updated`。
 
 ## 限制
 

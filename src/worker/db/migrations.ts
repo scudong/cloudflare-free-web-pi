@@ -104,7 +104,19 @@ const entryKbRefs: Migration = {
 	},
 };
 
-export const MIGRATIONS: readonly Migration[] = [initialSchema, vfsRootConversation, entryKbRefs];
+/**
+ * v4：知识库导入按 source 查重（NERE-47）。只给来源列建索引，
+ * 不新增表、不改现有行；历史重复文档不做破坏性清理。
+ */
+const kbSourceIndex: Migration = {
+	version: 4,
+	name: "kb-docs-source-index",
+	up(sql) {
+		sql.exec(`CREATE INDEX IF NOT EXISTS kb_docs_source ON kb_docs(source)`);
+	},
+};
+
+export const MIGRATIONS: readonly Migration[] = [initialSchema, vfsRootConversation, entryKbRefs, kbSourceIndex];
 
 // 版本号是账本的唯一真源：重复或乱序会被 INSERT OR IGNORE 静默跳过，模块加载时就暴露。
 const migrationVersions = MIGRATIONS.map((migration) => migration.version);
