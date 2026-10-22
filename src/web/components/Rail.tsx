@@ -1,10 +1,17 @@
 import { Icon, type IconName } from "./Icon";
 
-export type RailView = "sessions" | "files" | "kb" | "shares" | "mcp" | "automations" | "skills" | "users";
+/** 左栏内容（不是弹窗）。 */
+export type RailView = "sessions" | "files" | "shares" | "automations" | "users";
+/** 走弹窗的三个入口（NERE-62）。与 RailView 不是同一维度，不要合并。 */
+export type RailPanel = "kb" | "mcp" | "skills";
 
 interface RailProps {
 	view: RailView;
-	onViewChange: (view: RailView) => void;
+	/** 当前打开的弹窗；同一时刻最多一个。 */
+	panel: RailPanel | null;
+	onSelectView: (view: RailView) => void;
+	/** 再点一次同一入口 = 关闭（幂等）。 */
+	onTogglePanel: (panel: RailPanel) => void;
 	onNewSession: () => void;
 	newSessionDisabled?: boolean;
 	onOpenSettings: () => void;
@@ -15,15 +22,15 @@ interface RailProps {
 }
 
 const railButton =
-	"flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 aria-pressed:bg-sky-500/15 aria-pressed:text-sky-300";
+	"flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 aria-pressed:bg-sky-500/15 aria-pressed:text-sky-300 aria-expanded:bg-sky-500/15 aria-expanded:text-sky-300";
 
-/** 最左侧固定工具栏（v0.21.0）：新会话 + 会话/连接/定时/技能切换 + 设置。 */
-export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onOpenSettings, isOwner, sharesAvailable }: RailProps) {
+/** 最左侧固定工具栏（v0.21.0）：新会话 + 会话/文件/分享/定时/用户 + 三个弹窗入口 + 设置。 */
+export function Rail({ view, panel, onSelectView, onTogglePanel, onNewSession, newSessionDisabled, onOpenSettings, isOwner, sharesAvailable }: RailProps) {
 	const item = (value: RailView, label: string, icon: IconName) => (
 		<button
 			key={value}
 			type="button"
-			onClick={() => onViewChange(value)}
+			onClick={() => onSelectView(value)}
 			aria-pressed={view === value}
 			title={label}
 			aria-label={label}
@@ -32,6 +39,24 @@ export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onO
 			<Icon name={icon} className="h-[18px] w-[18px]" />
 		</button>
 	);
+
+	/** 弹窗入口：语义从「切换左栏」变成「打开对话框」（契约 §1.2）。 */
+	const modalItem = (value: RailPanel, label: string, icon: IconName) => (
+		<button
+			key={value}
+			type="button"
+			onClick={() => onTogglePanel(value)}
+			aria-haspopup="dialog"
+			aria-expanded={panel === value}
+			data-modal-trigger={value}
+			title={label}
+			aria-label={label}
+			className={railButton}
+		>
+			<Icon name={icon} className="h-[18px] w-[18px]" />
+		</button>
+	);
+
 	return (
 		<nav
 			aria-label="主导航"
@@ -50,11 +75,11 @@ export function Rail({ view, onViewChange, onNewSession, newSessionDisabled, onO
 			<div aria-hidden className="my-1 h-px w-6 bg-slate-800" />
 			{item("sessions", "会话", "sessions")}
 			{item("files", "全部文件", "folder")}
-			{item("kb", "知识库", "kb")}
+			{modalItem("kb", "知识库", "kb")}
 			{sharesAvailable && item("shares", "分享", "share")}
-			{item("mcp", "连接", "connection")}
+			{modalItem("mcp", "连接", "connection")}
 			{item("automations", "定时", "clock")}
-			{item("skills", "能力", "skills")}
+			{modalItem("skills", "能力", "skills")}
 			{isOwner && item("users", "用户", "users")}
 			<div aria-hidden className="flex-1" />
 			<button type="button" onClick={onOpenSettings} title="设置" aria-label="打开设置" className={railButton}>

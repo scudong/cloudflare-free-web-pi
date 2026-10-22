@@ -5,8 +5,9 @@ import { MessageList } from "./components/MessageList";
 import { Composer } from "./components/Composer";
 import { Sidebar } from "./components/Sidebar";
 import { Workbench } from "./components/Workbench";
-import { Rail, type RailView } from "./components/Rail";
+import { Rail, type RailPanel, type RailView } from "./components/Rail";
 import { AutomationPanel, McpPanel, SkillPanel } from "./components/LeftPanels";
+import { ModalShell } from "./components/ModalShell";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { GoalBar, GoalDialog } from "./components/GoalBar";
 import { ApprovalBar } from "./components/ApprovalBar";
@@ -85,8 +86,10 @@ export default function App() {
 	const [mobileTab, setMobileTab] = useState<MobileTab>("chat");
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);
-	// 左侧 Rail 当前展示的面板（v0.21.0）：会话 / 连接 / 定时 / 技能
+	// 左侧 Rail 当前展示的面板（v0.21.0）：会话 / 定时 / 用户等左栏内容
 	const [railView, setRailView] = useState<RailView>("sessions");
+	// 知识库 / MCP / 技能三个弹窗（NERE-62）：同一时刻最多一个，互斥由单值保证
+	const [activePanel, setActivePanel] = useState<RailPanel | null>(null);
 	// 从消息里的参考资料跳到知识库（NERE-41）：nonce 让「重复点同一篇」也能再次触发
 	const [kbFocus, setKbFocus] = useState<KbFocus | null>(null);
 	const kbFocusSeq = useRef(0);
@@ -1019,13 +1022,28 @@ export default function App() {
 		[sessionId, handleSelectSession, isDesktop],
 	);
 
-	/** 从消息里的参考资料跳到知识库（NERE-41）：切到知识库栏并打开原文，手机端顺带展开抽屉。 */
+	/** 打开 / 关闭面板弹窗；同一入口再点一次 = 关闭。移动端先收起抽屉，避免两层遮罩（契约 §5）。 */
+	const togglePanel = useCallback(
+		(panel: RailPanel) => {
+			setActivePanel((prev) => (prev === panel ? null : panel));
+			// 面板弹窗与设置弹窗互斥（契约 §1.4）
+			setSettingsOpen(false);
+			if (!isDesktop) setDrawerOpen(false);
+		},
+		[isDesktop],
+	);
+	const closePanel = useCallback(() => setActivePanel(null), []);
+	const openSettings = useCallback(() => {
+		setActivePanel(null);
+		setSettingsOpen(true);
+	}, []);
+
+	/** 从消息里的参考资料跳到知识库（NERE-41）：打开知识库弹窗并定位原文；手机端先收起抽屉。 */
 	const handleOpenKbRef = useCallback(
 		(ref: KbRef) => {
 			kbFocusSeq.current += 1;
-			setRailView("kb");
-			setLeftOpen(true);
-			if (!isDesktop) setDrawerOpen(true);
+			setActivePanel("kb");
+			if (!isDesktop) setDrawerOpen(false);
 			setKbFocus({ docId: ref.docId, chunkSeq: ref.chunkSeq, nonce: kbFocusSeq.current });
 		},
 		[isDesktop],
@@ -1427,12 +1445,8 @@ export default function App() {
 				onChanged={() => setPanelTick((tick) => tick + 1)}
 				onCollapse={toggleLeft}
 			/>
-		) : activeRailView === "kb" ? (
-			<KnowledgePanel onCollapse={toggleLeft} focus={kbFocus} />
 		) : activeRailView === "shares" ? (
 			<SharesPanel onCollapse={toggleLeft} />
-		) : activeRailView === "mcp" ? (
-			<McpPanel servers={mcpServers} loading={mcpLoading} error={mcpError} onAdd={handleAddMcp} onDelete={handleDeleteMcp} onCollapse={toggleLeft} />
 		) : activeRailView === "automations" ? (
 			<AutomationPanel
 				items={automations}
@@ -1443,38 +1457,19 @@ export default function App() {
 				onDelete={handleDeleteAutomation}
 				onCollapse={toggleLeft}
 			/>
-		) : activeRailView === "users" ? (
-			<UsersPanel onCollapse={toggleLeft} />
 		) : (
-			<SkillPanel
-				items={skills}
-				loading={skillsLoading}
-				error={skillsError}
-				onAdd={handleAddSkill}
-				onDelete={handleDeleteSkill}
-				onImport={handleImportSkill}
-				onTry={handleTrySkill}
-				prompts={prompts}
-				rules={rules}
-				onAddPrompt={handleAddPrompt}
-				onDeletePrompt={handleDeletePrompt}
-				onAddRule={handleAddRule}
-				onToggleRule={handleToggleRule}
-				onDeleteRule={handleDeleteRule}
-				customTools={customTools}
-				onAddCustomTool={handleAddCustomTool}
-				onDeleteCustomTool={handleDeleteCustomTool}
-				onCollapse={toggleLeft}
-			/>
+			<UsersPanel onCollapse={toggleLeft} />
 		);
 
 	const rail = (
 		<Rail
 			view={activeRailView}
-			onViewChange={setRailView}
+			panel={activePanel}
+			onSelectView={setRailView}
+			onTogglePanel={togglePanel}
 			onNewSession={handleNewSession}
 			newSessionDisabled={resetting}
-			onOpenSettings={() => setSettingsOpen(true)}
+			onOpenSettings={openSettings}
 			isOwner={!!auth?.owner}
 			sharesAvailable={sharesAvailable}
 		/>
@@ -1486,7 +1481,7 @@ export default function App() {
 				online={online}
 				sessionLabel={sessionLabel}
 				onOpenDrawer={() => setDrawerOpen(true)}
-				onOpenSettings={() => setSettingsOpen(true)}
+				onOpenSettings={openSettings}
 			/>
 
 			<div className="flex min-h-0 flex-1">
@@ -1644,6 +1639,43 @@ export default function App() {
 				onLogout={handleLogout}
 			/>
 
+			{/* 知识库 / MCP / 技能三个互斥弹窗（NERE-62）：外壳由 ModalShell 统一提供 */}
+			<ModalShell open={activePanel === "kb"} title="知识库" size="lg" onClose={closePanel} testId="kb-modal" triggerKey="kb">
+				<KnowledgePanel onClose={closePanel} focus={kbFocus} />
+			</ModalShell>
+			<ModalShell open={activePanel === "mcp"} title="连接 · MCP" size="md" onClose={closePanel} testId="mcp-modal" triggerKey="mcp">
+				<McpPanel
+					servers={mcpServers}
+					loading={mcpLoading}
+					error={mcpError}
+					onAdd={handleAddMcp}
+					onDelete={handleDeleteMcp}
+					onClose={closePanel}
+				/>
+			</ModalShell>
+			<ModalShell open={activePanel === "skills"} title="技能" size="xl" onClose={closePanel} testId="skills-modal" triggerKey="skills">
+				<SkillPanel
+					items={skills}
+					loading={skillsLoading}
+					error={skillsError}
+					onAdd={handleAddSkill}
+					onDelete={handleDeleteSkill}
+					onImport={handleImportSkill}
+					onTry={handleTrySkill}
+					prompts={prompts}
+					rules={rules}
+					onAddPrompt={handleAddPrompt}
+					onDeletePrompt={handleDeletePrompt}
+					onAddRule={handleAddRule}
+					onToggleRule={handleToggleRule}
+					onDeleteRule={handleDeleteRule}
+					customTools={customTools}
+					onAddCustomTool={handleAddCustomTool}
+					onDeleteCustomTool={handleDeleteCustomTool}
+					onClose={closePanel}
+				/>
+			</ModalShell>
+
 			{/* Mobile drawer: the session sidebar slides over the chat */}
 			{!isDesktop && drawerOpen && (
 				<div className="absolute inset-0 z-30 md:hidden">
@@ -1689,7 +1721,7 @@ export default function App() {
 					))}
 					<button
 						type="button"
-						onClick={() => setSettingsOpen(true)}
+						onClick={openSettings}
 						className="flex flex-col items-center gap-0.5 py-2 text-[11px] text-slate-400 transition-colors hover:text-slate-200"
 					>
 						<span aria-hidden className="leading-none">
