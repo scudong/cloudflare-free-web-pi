@@ -91,15 +91,23 @@ export function upsertSkill(sql: SqlHandle, row: SkillWrite): void {
 	);
 }
 
-/** 手工粘贴（`POST /skills`）不审计：只写基础列，`content_hash` 惰性计算。 */
+/** 手工粘贴（`POST /skills`）：写入前已审计，落库的是真实状态与报告。 */
 export function upsertManualSkill(
 	sql: SqlHandle,
-	input: { name: string; description: string; content: string },
+	input: {
+		name: string;
+		description: string;
+		content: string;
+		contentHash: string;
+		auditStatus: string;
+		auditReport: string;
+		manifest: string | null;
+	},
 	now: string,
 ): void {
 	sql.exec(
-		`INSERT INTO skills (name, description, content, created_at, version, source, author, license, runtime, tags, content_hash, audit_status, audit_report, updated_at)
-		 VALUES (?, ?, ?, ?, '0.0.0', 'local', '', 'UNLICENSED', 'prompt', '[]', '', 'pass', '{}', ?)
+		`INSERT INTO skills (name, description, content, created_at, version, source, author, license, runtime, tags, content_hash, audit_status, audit_report, manifest, updated_at)
+		 VALUES (?, ?, ?, ?, '0.0.0', 'local', '', 'UNLICENSED', 'prompt', '[]', ?, ?, ?, ?, ?)
 		 ON CONFLICT(name) DO UPDATE SET
 			description = excluded.description,
 			content = excluded.content,
@@ -109,11 +117,16 @@ export function upsertManualSkill(
 			content_hash = excluded.content_hash,
 			audit_status = excluded.audit_status,
 			audit_report = excluded.audit_report,
+			manifest = excluded.manifest,
 			updated_at = excluded.updated_at`,
 		input.name,
 		input.description,
 		input.content,
 		now,
+		input.contentHash,
+		input.auditStatus,
+		input.auditReport,
+		input.manifest,
 		now,
 	);
 }
@@ -122,8 +135,19 @@ export function deleteSkill(sql: SqlHandle, name: string): void {
 	sql.exec("DELETE FROM skills WHERE name = ?", name);
 }
 
-export function updateContentHash(sql: SqlHandle, name: string, contentHash: string, now: string): void {
-	sql.exec("UPDATE skills SET content_hash = ?, updated_at = ? WHERE name = ? AND content_hash = ''", contentHash, now, name);
+/** 本地重审计后把判定回写 `skills`：hub 与 `GET /skills` / 提示词索引共用同一真相。 */
+export function updateSkillAudit(
+	sql: SqlHandle,
+	name: string,
+	input: { contentHash: string; auditStatus: string; auditReport: string },
+): void {
+	sql.exec(
+		"UPDATE skills SET content_hash = CASE WHEN content_hash = '' THEN ? ELSE content_hash END, audit_status = ?, audit_report = ? WHERE name = ?",
+		input.contentHash,
+		input.auditStatus,
+		input.auditReport,
+		name,
+	);
 }
 
 export function countSkills(sql: SqlHandle): number {

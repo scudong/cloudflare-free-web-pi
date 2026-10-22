@@ -34,7 +34,7 @@ import {
 	listSkillRows,
 	putCachedAudit,
 	recordEvent,
-	updateContentHash,
+	updateSkillAudit,
 	upsertManualSkill,
 	upsertSkill,
 	type SkillEventType,
@@ -322,7 +322,11 @@ export function createSkillService(deps: SkillServiceDeps): SkillService {
 		const cached = getCachedAudit(sql, hash, RULES_VERSION);
 		if (cached) {
 			const report = parseJson<AuditReport | null>(cached.report, null);
-			if (report) return { ...report, hash, auditSource: "local" };
+			if (report) {
+				const current = { ...report, hash, auditSource: "local" as const };
+				persistAudit(row, current);
+				return current;
+			}
 		}
 		const manifest = rowManifest(row);
 		const report = await auditSkill({
@@ -340,8 +344,19 @@ export function createSkillService(deps: SkillServiceDeps): SkillService {
 			report: JSON.stringify(report),
 			auditedAt: report.auditedAt,
 		});
-		if (!row.contentHash) updateContentHash(sql, row.name, report.hash, now().toISOString());
+		persistAudit(row, report);
 		return report;
+	}
+
+	/** 重审计是判定真相：把状态/报告回写，避免 `GET /skills` 与 hub / 提示词索引各读各的。 */
+	function persistAudit(row: SkillRow, report: AuditReport): void {
+		const auditReport = JSON.stringify(report);
+		if (row.auditStatus === report.status && row.auditReport === auditReport && row.contentHash) return;
+		updateSkillAudit(sql, row.name, {
+			contentHash: report.hash,
+			auditStatus: report.status,
+			auditReport,
+		});
 	}
 
 	async function installedRows(): Promise<{ rows: SkillRow[]; audits: Map<string, AuditReport> }> {
@@ -792,8 +807,44 @@ export function createSkillService(deps: SkillServiceDeps): SkillService {
 		};
 	}
 
-	function addManual(input: { name: string; description: string; content: string }): void {
-		upsertManualSkill(sql, input, now().toISOString());
+	/**
+	 * 手工粘贴（兼容旧 `POST /skills`）：先审计再落库，大小沿用 256 KiB 上限。
+	 * blocked 内容仍写入（旧接口语义），但状态为 blocked，不会进入提示词索引。
+	 */
+	async function addManual(input: { name: string; description: string; content: string }): Promise<void> {
+		if (byteLength(input.content) > CONTENT_MAX_BYTES) throw new SkillApiError(413, "too_large", "内容超过 256 KiB");
+		const manifest = synthesizeManifest({
+			name: input.name,
+			description: input.description,
+			runtime: "prompt",
+		});
+		const nowIso = now().toISOString();
+		const report = await auditSkill({
+			manifest,
+			content: input.content,
+			filename: "SKILL.md",
+			exemptMeta: true,
+			auditSource: "local",
+			auditedAt: nowIso,
+		});
+		putCachedAudit(sql, {
+			hash: report.hash,
+			rulesVersion: RULES_VERSION,
+			status: report.status,
+			report: JSON.stringify(report),
+			auditedAt: report.auditedAt,
+		});
+		upsertManualSkill(
+			sql,
+			{
+				...input,
+				contentHash: report.hash,
+				auditStatus: report.status,
+				auditReport: JSON.stringify(report),
+				manifest: JSON.stringify(manifest),
+			},
+			nowIso,
+		);
 	}
 
 	function remove(name: string): void {
@@ -888,7 +939,7 @@ export type SkillService = {
 	auditFor(name: string): Promise<{ name: string; version: string; contentHash: string; source: string; audit: AuditReport }>;
 	importSkill(body: unknown): Promise<ImportResult>;
 	listCompat(): { skills: Record<string, unknown>[] };
-	addManual(input: { name: string; description: string; content: string }): void;
+	addManual(input: { name: string; description: string; content: string }): Promise<void>;
 	remove(name: string): void;
 	community(): CommunityResponse;
 	metrics(daysRaw: unknown): MetricsResponse;

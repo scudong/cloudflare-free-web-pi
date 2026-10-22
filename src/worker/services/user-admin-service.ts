@@ -6,9 +6,12 @@ import { emptyUserDataCounts, type RevokeResult, type UserDataCounts } from "./u
 /**
  * 用户注销编排（NERE-24）：注册表与用户 DO 的跨 DO 协议顺序在这里固定。
  *
- * 1. 删除注册表行：`/api/*` 的旧 token 立即 401；
- * 2. 删除用户 DO 内全部分享：`/s/*` 旧链接立即 404；
+ * 1. 删除用户 DO 内全部分享：`/s/*` 旧链接立即 404；
+ * 2. 删除注册表行：`/api/*` 的旧 token 立即 401；
  * 3. 数据默认保留；purge 是独立的显式动作，要求先吊销且 `confirm` 等于用户 id。
+ *
+ * 先吊销再删注册表（NERE-77）：吊销失败时接口报错、注册表行仍在，可重试；
+ * 失败方向是「暂时不可用」而不是「公开链接继续可读」。
  *
  * 每个端口都幂等，重复调用不会重复扣减或报错。
  */
@@ -33,8 +36,8 @@ export function createUserAdminService(ports: UserAdminPorts): UserAdminService 
 			if (!USER_ID_RE.test(id)) {
 				return { ok: true, id, deleted: false, shares: 0, retained: emptyUserDataCounts() };
 			}
-			const { deleted } = await ports.deleteRegistryUser(id);
 			const { shares, retained } = await ports.revoke(id);
+			const { deleted } = await ports.deleteRegistryUser(id);
 			return { ok: true, id, deleted, shares, retained };
 		},
 

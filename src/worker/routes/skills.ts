@@ -107,12 +107,16 @@ export const skillRoutes: readonly Route[] = [
 		path: "/skills",
 		needsHarness: false,
 		handle: async (ctx) => {
-			const body = (await ctx.req.json().catch(() => ({}))) as { name?: unknown; description?: unknown; content?: unknown };
-			const name = String(body.name ?? "").trim().slice(0, 40);
-			const content = String(body.content ?? "").trim();
-			if (!name || !content) return Response.json({ error: "需要名称与内容" }, { status: 400 });
-			service(ctx).addManual({ name, description: String(body.description ?? "").trim().slice(0, 120), content });
-			return Response.json({ ok: true });
+			try {
+				const body = (await ctx.req.json().catch(() => ({}))) as { name?: unknown; description?: unknown; content?: unknown };
+				const name = String(body.name ?? "").trim().slice(0, 40);
+				const content = String(body.content ?? "").trim();
+				if (!name || !content) return Response.json({ error: "需要名称与内容" }, { status: 400 });
+				await service(ctx).addManual({ name, description: String(body.description ?? "").trim().slice(0, 120), content });
+				return Response.json({ ok: true });
+			} catch (err) {
+				return failure(err);
+			}
 		},
 	},
 	{

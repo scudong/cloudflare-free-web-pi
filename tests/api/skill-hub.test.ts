@@ -198,10 +198,31 @@ describe("Skill Hub API", () => {
 		expect(created.status).toBe(200);
 		expect(created.json).toEqual({ ok: true });
 		const list = await api("/api/skills");
-		const row = (list.json.skills as { name: string; description: string; lastInvokedAt: number | null }[]).find(
+		const row = (list.json.skills as { name: string; description: string; auditStatus: string; lastInvokedAt: number | null }[]).find(
 			(skill) => skill.name === "manual-one",
 		);
-		expect(row).toMatchObject({ description: "手写", lastInvokedAt: null });
+		expect(row).toMatchObject({ description: "手写", auditStatus: "pass", lastInvokedAt: null });
+
+		// 同名覆盖：写入前审计，GET /skills 与 hub 读同一份真相。
+		const overwritten = await post("/api/skills", {
+			name: "manual-one",
+			description: "手写",
+			content: "```python\nprint(1)\n```",
+		});
+		expect(overwritten.status).toBe(200);
+		const afterOverwrite = await api("/api/skills");
+		const blockedRow = (afterOverwrite.json.skills as { name: string; auditStatus: string }[]).find(
+			(skill) => skill.name === "manual-one",
+		);
+		expect(blockedRow!.auditStatus).toBe("blocked");
+		const hub = await api("/api/skills/hub?installed=1");
+		const hubRow = (hub.json.skills as { name: string; audit: { status: string } }[]).find((skill) => skill.name === "manual-one");
+		expect(hubRow!.audit.status).toBe("blocked");
+
+		// 256 KiB 上限：超限 413，且不覆盖已存在的行。
+		const tooLarge = await post("/api/skills", { name: "manual-big", content: "x".repeat(256 * 1024 + 1) });
+		expect(tooLarge.status).toBe(413);
+
 		const deleted = await api("/api/skills?name=manual-one", { method: "DELETE" });
 		expect(deleted.json).toEqual({ ok: true });
 	});
