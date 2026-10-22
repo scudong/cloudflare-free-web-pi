@@ -4,6 +4,13 @@
 
 ## 2026-10-22
 
+### 已安装技能可见可用：运行时 / 审计 / 上次使用 + 试用（v0.62.0，NERE-59）
+- 左栏「技能 → 已安装」每行新增一行元信息：运行时徽标（提示词 / JS / TS）、审计结论（审计通过 / 有警告 / 不可安装）、上次使用（刚刚 / N 分钟前 / N 天前 / 从未）
+- 新增「试用」按钮：把 `/技能名 ` 写进输入框并把光标移到末尾，**不自动发送**；手机端左栏是抽屉，点完自动回到聊天页
+- 从未使用且安装满 7 天的技能，卡片底部灰字提示「还没用过。试试「试用」，或删掉它保持面板清爽。」
+- 没有埋点数据（服务端不返回 `lastInvokedAt`）时这一行整行不渲染，不报错、不显示 0
+- 首屏聚合的 `skills` 面板改用与 `GET /api/skills` 同一实现（`listCompat`），补齐 `runtime` / `auditStatus` / `lastInvokedAt`，避免左栏与接口口径不一致
+
 ### Skill Hub 后端：目录索引 / 审计引擎 / 能力准入 / 埋点（v0.61.0，NERE-55）
 - 新增迁移 v6/v7：`skills` 增 `version/source/author/license/runtime/tags/content_hash/audit_status/audit_report/manifest/updated_at`（老库回填 `prompt` / `pass` / `local` / `0.0.0`，正文不动、升级后可调用）；建 `skill_audits` 缓存与 `skill_events` 埋点表（与分享计数无关）
 - 新增纯函数审计引擎 `lib/skill-audit.ts`：契约 §4 的 M/L/C/I/S/X 规则、去注释/字符串扫描、prompt 只扫 fence/shebang/命令行避免「Python 不受支持」误伤；契约 §8 五个样例的 `contentHash` 逐字节对齐

@@ -535,10 +535,6 @@ function listPendingQuestions(sessionId: string) {
 	return rows.map((row) => ({ id: row.id, created_at: row.created_at, ...(JSON.parse(row.payload) as AskPayload) }));
 }
 
-function listSkills() {
-	return sqlFacade!.exec("SELECT name, description, content, created_at FROM skills ORDER BY name").toArray();
-}
-
 function listCustomTools() {
 	return sqlFacade!
 		.exec("SELECT name, description, parameters, code, enabled, created_at FROM custom_tools ORDER BY created_at DESC")
@@ -1877,6 +1873,11 @@ export class SpikeAgent extends DurableObject {
 		return createFileService({ sql: this.ctx.storage.sql as unknown as SqlHandle });
 	}
 
+	/** 技能域服务：与 GET /api/skills 同一实现，首屏带上 runtime / auditStatus / lastInvokedAt（NERE-59）。 */
+	private skillService() {
+		return createSkillService({ sql: this.ctx.storage.sql as unknown as SqlHandle, settings: { get: getSetting } });
+	}
+
 	/**
 	 * 首屏聚合（NERE-23）：一次读取所有只读面板。
 	 * 各 loader 与单端点共用同一实现；collectBootstrap 负责逐字段容错。
@@ -1896,7 +1897,7 @@ export class SpikeAgent extends DurableObject {
 			prompts: () => listPrompts(),
 			rules: () => ruleViews(),
 			customTools: () => listCustomTools(),
-			skills: () => listSkills(),
+			skills: () => this.skillService().listCompat().skills,
 			automations: () => listAutomations(),
 			mcpServers: () => listMcpServers(),
 			models: () => {

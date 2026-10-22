@@ -119,6 +119,29 @@ export function parseAutomations(raw: unknown): AutomationInfo[] {
 	});
 }
 
+/**
+ * 上次使用时间（NERE-59）：三种状态必须区分开，不能都塌成 0。
+ * 字段缺失 → `undefined`（无埋点数据，卡片不渲染这一行）；显式 null → `null`（从未使用）。
+ */
+function pickLastInvoked(entry: Record<string, unknown>): number | null | undefined {
+	const keys = ["lastInvokedAt", "last_invoked_at"];
+	const present = keys.some((key) => key in entry);
+	if (!present) return undefined;
+	for (const key of keys) {
+		const value = entry[key];
+		if (value === null) return null;
+		if (typeof value === "number" && Number.isFinite(value)) return value;
+		if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+	}
+	return null;
+}
+
+/** 审计结论（NERE-59）：只认契约里的三个值，其它 / 缺失一律 undefined（不猜成 pass）。 */
+function pickAuditStatus(entry: Record<string, unknown>): SkillInfo["auditStatus"] {
+	const value = pickString(entry, ["auditStatus", "audit_status"]).toLowerCase();
+	return value === "pass" || value === "warn" || value === "blocked" ? value : undefined;
+}
+
 /** GET /api/skills → skill list. */
 export function parseSkills(raw: unknown): SkillInfo[] {
 	const list = arrayOf(raw, ["skills"]).filter(isObject);
@@ -126,6 +149,11 @@ export function parseSkills(raw: unknown): SkillInfo[] {
 		name: pickString(entry, ["name"]) || "未命名技能",
 		description: pickString(entry, ["description"]),
 		content: pickString(entry, ["content"]),
+		// NERE-59：卡片上的运行时 / 审计 / 上次使用；老服务端没有这些字段时降级为不渲染。
+		...(pickString(entry, ["runtime"]) ? { runtime: pickString(entry, ["runtime"]) } : {}),
+		auditStatus: pickAuditStatus(entry),
+		createdAt: pickString(entry, ["created_at", "createdAt"]) || undefined,
+		lastInvokedAt: pickLastInvoked(entry),
 	}));
 }
 

@@ -35,6 +35,7 @@ App（页面层，1689 行）
 │  ├─ McpPanel         连接（MCP 服务）
 │  ├─ AutomationPanel  定时任务
 │  ├─ SkillPanel       技能 / 提示模板 / 规则 / 自定义工具
+│  │  ├─ SkillCard     已安装技能行：运行时 / 审计 / 上次使用 / 试用（NERE-59）
 │  │  └─ SkillHubPanel 技能 Hub（已安装 / Hub 两个视图，自取数）
 │  ├─ FilesPanel       全库文件（自取数）
 │  ├─ KnowledgePanel   知识库（自取数）
@@ -79,7 +80,7 @@ App（页面层，1689 行）
 | 消息流 | `messages` | 流式事件 + bootstrap `entries` 回放 |
 | 文件（当前会话 / 全库） | `files`, `filesState` | bootstrap（`panelTick` 重取） |
 | 记忆 | `memories`, `memoriesState` | bootstrap（`panelTick` 重取） |
-| 技能 / 模板 / 规则 / 自定义工具 / MCP / 定时任务 | `skills`, `prompts`, `rules`, `customTools`, `mcpServers`, `automations` | bootstrap（`panelTick` 重取） |
+| 技能 / 模板 / 规则 / 自定义工具 / MCP / 定时任务 | `skills`, `prompts`, `rules`, `customTools`, `mcpServers`, `automations` | bootstrap（`panelTick` 重取）；技能行额外带 `runtime` / `auditStatus` / `lastInvokedAt`（NERE-59） |
 | 技能 Hub 列表（NERE-54） | `useSkillHub`（SkillHubPanel 内） | 切到 Hub 视图时取 `GET /api/skills/hub`；筛选变化带查询串重取（q 防抖），失败保留旧数据并可重试 |
 | 全局设置 | `thinkingLevel`, `compaction`, `approvalSettings`, `webSearch`, `kbPrefetch`, `kbRetrieval`, `model`, `theme` | bootstrap `settings` + 局部回写 |
 | 计划 / 目标 / 审批 / 提问 | `plan`, `goal`, `approvals`, `askQuestions` | bootstrap + 每轮 `done` / `tool_end` 后增量刷新 |
