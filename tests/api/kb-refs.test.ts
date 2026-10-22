@@ -175,3 +175,24 @@ describe("assistant entry.kbRefs（端到端）", () => {
 		expect(assistants[0]).not.toHaveProperty("kbRefs");
 	});
 });
+
+describe("长会话回归：>100 assistant entries（绑定参数上限）", () => {
+	it("101 轮对话后 /api/entries 仍 200，页内每条 assistant entry 都带 kbRefs", async () => {
+		await post("/api/kb", {
+			title: "利率风险笔记",
+			content: "久期衡量债券价格对利率变化的敏感度，久期越长波动越大。",
+		});
+		const sid = await newSession();
+		for (let i = 0; i < 101; i++) await chat(sid, `第 ${i} 轮：久期是什么`);
+
+		// 一页 200 条 = 100 组 user/assistant；旧实现用 IN(?,…) 时这里是 101 个绑定参数 → DO 报错 500。
+		const entries = await api(`/api/entries?sessionId=${sid}`);
+		expect(entries.status).toBe(200);
+		const assistants = (entries.json as Entry[]).filter((entry) => entry.kind === "pi.assistant");
+		expect(assistants).toHaveLength(100);
+		for (const assistant of assistants) {
+			expect(Array.isArray(assistant.kbRefs), `entry ${assistant.id} 缺 kbRefs`).toBe(true);
+			expect(assistant.kbRefs!.length).toBeGreaterThan(0);
+		}
+	});
+});

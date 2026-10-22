@@ -1,6 +1,10 @@
 import type { SqlHandle } from "../db/migrations";
 import type { KbRef } from "../lib/kb";
-import { getMany as getEntryKbRefs, upsert as upsertEntryKbRefs } from "../repo/entry-kb-refs-repo";
+import {
+	getMany as getEntryKbRefs,
+	removeConversation as removeEntryKbRefs,
+	upsert as upsertEntryKbRefs,
+} from "../repo/entry-kb-refs-repo";
 import { get, insertFork, insertIfAbsent, listKnownIds, listVisible, markDeleted, rename } from "../repo/sessions-repo";
 import type { SessionMetaRow } from "../repo/sessions-repo";
 import { removeSession as removeSessionFiles } from "../repo/files-repo";
@@ -128,6 +132,8 @@ export function createSessionService({ sql, runtime }: SessionServiceDeps): Sess
 		remove(id) {
 			markDeleted(sql, id, new Date().toISOString());
 			removeSessionFiles(sql, id);
+			// 旁路元数据不随 Harness 条目级联，删除会话时一并清掉，避免长期留存（NERE-40 review）。
+			removeEntryKbRefs(sql, id);
 			runtime.pauseGoal(id);
 		},
 

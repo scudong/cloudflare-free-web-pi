@@ -2705,6 +2705,8 @@ export class SpikeAgent extends DurableObject {
 						break;
 					}
 					const entry = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), ctx);
+					// 目标续转不重算 instructions：本轮注入的检索块对同一请求里的每一轮都生效，
+					// 所以每条续转 assistant entry 都记同一份 kbRefs（语义是「这一轮上下文里有哪些资料」）。
 					if (entry) this.sessionService().saveEntryKbRefs(sid, Number(entry.id), turn.kbRefs);
 					const c = entry?.model?.[0]?.content;
 					answer =

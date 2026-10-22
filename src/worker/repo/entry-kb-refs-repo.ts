@@ -42,20 +42,45 @@ export function upsert(sql: SqlHandle, conversationId: string, entryId: number, 
 	);
 }
 
-/** 批量读一个会话里若干 entry 的命中，返回 entryId → refs（空命中不建键）。 */
+/**
+ * 批量读一个会话里若干 entry 的命中，返回 entryId → refs（空命中不建键）。
+ *
+ * 用 `entry_id BETWEEN min AND max` 而不是 `IN (?,…)`：SQLite-backed DO 每条查询最多
+ * 100 个绑定参数，而 `/entries` 的一页是 200 条，assistant 条目 ≥100 时 `IN` 列表会直接
+ * 让请求 500。entry id 全局递增，区间里的空洞由 `requested` 过滤，绑定参数恒为 3 个。
+ */
 export function getMany(sql: SqlHandle, conversationId: string, entryIds: readonly number[]): Map<number, KbRef[]> {
 	const found = new Map<number, KbRef[]>();
 	if (!entryIds.length) return found;
+	const requested = new Set<number>();
+	let min = Infinity;
+	let max = -Infinity;
+	for (const raw of entryIds) {
+		const id = Number(raw);
+		if (!Number.isFinite(id)) continue;
+		requested.add(id);
+		if (id < min) min = id;
+		if (id > max) max = id;
+	}
+	if (!requested.size) return found;
 	const rows = sql
 		.exec(
-			`SELECT entry_id, refs FROM entry_kb_refs WHERE conversation_id = ? AND entry_id IN (${entryIds.map(() => "?").join(",")})`,
+			"SELECT entry_id, refs FROM entry_kb_refs WHERE conversation_id = ? AND entry_id BETWEEN ? AND ?",
 			conversationId,
-			...entryIds,
+			min,
+			max,
 		)
 		.toArray() as { entry_id: number; refs: string }[];
 	for (const row of rows) {
+		const id = Number(row.entry_id);
+		if (!requested.has(id)) continue;
 		const refs = parseKbRefs(row.refs);
-		if (refs.length) found.set(Number(row.entry_id), refs);
+		if (refs.length) found.set(id, refs);
 	}
 	return found;
+}
+
+/** 删除会话时清掉该会话的旁路行（与 `vfs_v2` 同一处调用）。 */
+export function removeConversation(sql: SqlHandle, conversationId: string): void {
+	sql.exec("DELETE FROM entry_kb_refs WHERE conversation_id = ?", conversationId);
 }
