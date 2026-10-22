@@ -628,6 +628,28 @@ describe("文件分享", () => {
 		expect(html).toContain("header{position:sticky");
 	});
 
+	it("分享页页脚有部署出口，打印预览里不出现（NERE-46）", async () => {
+		const created = await post("/api/share", {
+			sessionId: "1",
+			kind: "file",
+			name: "share-toc.md",
+			ttlSeconds: 3600,
+			theme: "dark",
+		});
+		const html = await (await fetch(created.json.url)).text();
+
+		// 页脚一行可点到仓库 Deploy 段，带来源参数
+		expect(html).toContain('class="share-cta"');
+		expect(html).toContain('href="https://github.com/scudong/cloudflare-free-web-pi?utm_source=share#deploy"');
+		expect(html).toContain("用同样的方式做一个");
+
+		// 打印 / 存为 PDF 时不出现（不污染 NERE-39 的输出）
+		expect(html).toContain(".share-cta,.demo-note{display:none}");
+
+		// 普通分享不冒充演示页：没有只读样例横条
+		expect(html).not.toContain('class="demo-note"');
+	});
+
 	it("已生成的链接可复用", async () => {
 		const created = await post("/api/share", {
 			sessionId: "1",
