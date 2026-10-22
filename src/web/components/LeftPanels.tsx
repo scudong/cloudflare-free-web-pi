@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
+import { formatLastRunAt } from "../lib/format";
 import { AutomationEditDialog } from "./AutomationEditDialog";
 import { Icon } from "./Icon";
 import { SkillCard } from "./SkillCard";
@@ -158,6 +159,40 @@ export function McpPanel({
 	);
 }
 
+/**
+ * 定时任务的上次运行（NERE-68）：没有 `last_run_at` 时整行不渲染，
+ * 有归属会话时附「查看产出」跳转入口（缺回调则只显示时间）。
+ */
+function AutomationLastRun({
+	job,
+	onOpenSession,
+}: {
+	job: AutomationInfo;
+	onOpenSession?: (sessionId: string) => void;
+}) {
+	const lastRunLabel = formatLastRunAt(job.lastRunAt);
+	if (!lastRunLabel) return null;
+	const sessionId = job.sessionId;
+	return (
+		<p className="mt-0.5 text-[11px] text-slate-600">
+			{`上次 ${lastRunLabel}`}
+			{sessionId && onOpenSession && (
+				<>
+					{" · "}
+					<button
+						type="button"
+						onClick={() => onOpenSession(sessionId)}
+						aria-label={`查看 ${job.name} 上次运行的产出`}
+						className="text-sky-400 hover:text-sky-300 hover:underline"
+					>
+						查看产出
+					</button>
+				</>
+			)}
+		</p>
+	);
+}
+
 /** 左栏「定时」：定时任务管理（v0.21.0 从工作台移入左侧工具栏）。 */
 export function AutomationPanel({
 	items,
@@ -168,6 +203,7 @@ export function AutomationPanel({
 	onDelete,
 	onUpdate,
 	defaultSessionId = "",
+	onOpenSession,
 	onCollapse,
 }: {
 	items: AutomationInfo[];
@@ -180,6 +216,8 @@ export function AutomationPanel({
 	onUpdate: (patch: AutomationPatch) => Promise<{ ok: boolean; error?: string }>;
 	/** 任务没有记录会话时的兜底回填。 */
 	defaultSessionId?: string;
+	/** 「查看产出」（NERE-68）：切到该任务上次运行的会话；缺省时不渲染入口。 */
+	onOpenSession?: (sessionId: string) => void;
 	onCollapse?: () => void;
 }) {
 	const [name, setName] = useState("");
@@ -317,6 +355,7 @@ export function AutomationPanel({
 								{job.scheduleLabel}
 								{job.nextLabel ? ` · 下次 ${job.nextLabel}` : ""}
 							</p>
+							<AutomationLastRun job={job} onOpenSession={onOpenSession} />
 						</li>
 					))}
 				</ul>

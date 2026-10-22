@@ -148,8 +148,10 @@ export interface AutomationInfo {
 	enabled: boolean;
 	/** 原始调度，供编辑弹窗回填（NERE-65）；解析失败时由解析器给默认值。 */
 	schedule?: AutomationSchedule;
-	/** 归属会话，供编辑弹窗回填（NERE-65）。 */
+	/** 归属会话，供编辑弹窗回填（NERE-65），也是「查看产出」的跳转目标（NERE-68）。 */
 	sessionId?: string;
+	/** 上次执行时间（毫秒）；后端写成功也写失败（NERE-68 2a 只展示，不判断成败）。缺失 / null 不渲染。 */
+	lastRunAt?: number;
 }
 
 /** PATCH /api/automations 的请求体（NERE-64 契约；enabled 原样带回，编辑不改启停）。 */
