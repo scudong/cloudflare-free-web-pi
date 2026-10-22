@@ -1476,6 +1476,7 @@ export default function App() {
 				onDelete={handleDeleteAutomation}
 				onUpdate={handleUpdateAutomation}
 				defaultSessionId={sessionId}
+				onOpenSession={handleSelectSession}
 				onCollapse={toggleLeft}
 			/>
 		) : (

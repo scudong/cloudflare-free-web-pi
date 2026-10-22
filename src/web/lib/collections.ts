@@ -108,8 +108,19 @@ export function parseAutomations(raw: unknown): AutomationInfo[] {
 			enabled: entry.enabled !== 0 && entry.enabled !== false,
 			schedule,
 			sessionId: pickString(entry, ["session_id", "sessionId"]) || undefined,
+			lastRunAt: pickLastRunAt(entry),
 		};
 	});
+}
+
+/** 上次执行时间（NERE-68）：缺失 / null / 非法值都当「没有」，避免列表渲染假时间。 */
+function pickLastRunAt(entry: Record<string, unknown>): number | undefined {
+	for (const key of ["last_run_at", "lastRunAt"]) {
+		const value = entry[key];
+		const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+		if (Number.isFinite(numeric) && numeric > 0) return numeric;
+	}
+	return undefined;
 }
 
 /**
