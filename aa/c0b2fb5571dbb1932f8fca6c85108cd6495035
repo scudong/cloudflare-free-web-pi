@@ -1,0 +1,125 @@
+src/web/types.ts
+  9f28f1ff6a737f89 41-56
+src/web/lib/format.ts
+  9f28f1ff6a737f89 19-36
+src/web/components/Rail.tsx
+  9f28f1ff6a737f89 3,52
+src/web/components/SharesPanel.tsx
+  9f28f1ff6a737f89 1-84
+tests/unit/shares.test.tsx
+  9f28f1ff6a737f89 1-227
+src/web/App.tsx
+  9f28f1ff6a737f89 17,1383-1384
+src/web/components/ShareRow.tsx
+  9f28f1ff6a737f89 1-108
+src/web/hooks/useShares.ts
+  9f28f1ff6a737f89 1-120
+src/web/lib/api.ts
+  9f28f1ff6a737f89 106-126,552-559
+src/web/lib/clipboard.ts
+  9f28f1ff6a737f89 1-31
+src/web/components/LeftPanels.tsx
+  9f28f1ff6a737f89 1,7-19,24
+src/web/lib/collections.ts
+  9f28f1ff6a737f89 1-14,202-227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "85631c0fca10fd65fb96f0171a8293a34899bd17",
+  "prompts": {
+    "9f28f1ff6a737f89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ead097e-a7df-43ee-b36f-04432bc90a60",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 1083,
+      "total_deletions": 187,
+      "accepted_lines": 902,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "preview-shares/index.html": {
+          "additions": 12,
+          "deletions": 12
+        },
+        "preview-shares/main.tsx": {
+          "additions": 68,
+          "deletions": 68
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 15,
+          "deletions": 2,
+          "accepted_lines": 15
+        },
+        "docs/pr-nere43/shares-panel-empty.png": {
+          "additions": 22,
+          "accepted_lines": 22
+        },
+        "src/web/components/Rail.tsx": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 40,
+          "deletions": 1,
+          "accepted_lines": 40
+        },
+        "src/web/preview-shares-main.tsx": {
+          "additions": 86,
+          "deletions": 86
+        },
+        "src/web/hooks/useShares.ts": {
+          "additions": 120,
+          "accepted_lines": 120
+        },
+        "src/web/lib/api.ts": {
+          "additions": 32,
+          "deletions": 3,
+          "accepted_lines": 31
+        },
+        "src/web/components/SharesPanel.tsx": {
+          "additions": 84,
+          "accepted_lines": 84
+        },
+        "src/web/components/ShareRow.tsx": {
+          "additions": 108,
+          "accepted_lines": 108
+        },
+        "src/web/types.ts": {
+          "additions": 16,
+          "accepted_lines": 16
+        },
+        "tests/unit/shares.test.tsx": {
+          "additions": 228,
+          "deletions": 1,
+          "accepted_lines": 227
+        },
+        "docs/pr-nere43/shares-panel-data.png": {
+          "additions": 184,
+          "accepted_lines": 184
+        },
+        "src/web/App.tsx": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "src/web/lib/format.ts": {
+          "additions": 20,
+          "deletions": 1,
+          "accepted_lines": 19
+        },
+        "src/web/lib/clipboard.ts": {
+          "additions": 31,
+          "accepted_lines": 31
+        },
+        "src/web/preview-shares.html": {
+          "additions": 12,
+          "deletions": 12
+        }
+      }
+    }
+  }
+}
