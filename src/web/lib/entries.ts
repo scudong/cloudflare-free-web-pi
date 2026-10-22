@@ -1,4 +1,4 @@
-import type { ChatMessage, ShareLink, ToolCallInfo } from "../types";
+import type { ChatMessage, KbRef, ShareLink, ToolCallInfo } from "../types";
 
 /** 工具活动条摘要的最大长度（字）。 */
 export const TOOL_SUMMARY_MAX = 60;
@@ -148,6 +148,34 @@ function isDescending(list: unknown[]): boolean {
 }
 
 /**
+ * 宽容解析 entry.kbRefs：缺省/非数组 → []；丢弃 docId 非法的项；
+ * 按 docId:chunkId 去重并保持原序（NERE-40 / NERE-41）。
+ */
+export function parseKbRefs(value: unknown): KbRef[] {
+	if (!Array.isArray(value)) return [];
+	const refs: KbRef[] = [];
+	const seen = new Set<string>();
+	for (const item of value) {
+		if (!item || typeof item !== "object") continue;
+		const o = item as Record<string, unknown>;
+		if (typeof o.docId !== "number" || !Number.isFinite(o.docId)) continue;
+		const chunkId = typeof o.chunkId === "number" && Number.isFinite(o.chunkId) ? o.chunkId : 0;
+		const key = `${o.docId}:${chunkId}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		const source = pickString(o, ["source"]);
+		refs.push({
+			docId: o.docId,
+			chunkId,
+			chunkSeq: typeof o.chunkSeq === "number" && Number.isFinite(o.chunkSeq) ? o.chunkSeq : 0,
+			title: pickString(o, ["title"]) || "未命名文档",
+			...(source ? { source } : {}),
+		});
+	}
+	return refs;
+}
+
+/**
  * 把 GET /api/entries 的历史条目宽容解析为消息列表。
  * - user：取 content 文本 → 右侧气泡
  * - assistant：取文本 → 左侧气泡；此前累积的 tool-result 作为其上方的工具活动条
@@ -203,6 +231,7 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 			pendingFiles = [];
 			const shares = pendingShares;
 			pendingShares = [];
+			const kbRefs = parseKbRefs(entry.kbRefs);
 			messages.push({
 				id: `a${seq++}`,
 				role: "assistant",
@@ -211,6 +240,7 @@ export function parseEntries(entries: unknown): ChatMessage[] {
 				thinking: thinking || undefined,
 				files: files.length ? files : undefined,
 				shares: shares.length ? shares : undefined,
+				...(kbRefs.length ? { kbRefs } : {}),
 			});
 		} else if (kind === "compaction") {
 			// pi.compaction：早期对话被摘要成一条记录（v0.31.0），聊天里显示为一条系统提示

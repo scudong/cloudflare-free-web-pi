@@ -38,6 +38,24 @@ export interface ShareLink {
 	reused?: boolean;
 }
 
+/** 一条知识库命中（NERE-40）：随 assistant entry 落库，用于消息下方「参考资料」。 */
+export interface KbRef {
+	docId: number;
+	chunkId: number;
+	/** 命中的分块序号（从 0 开始），仅用于标注「第 N 段」，不做正文定位。 */
+	chunkSeq: number;
+	title: string;
+	/** 来源（文件名 / 链接），可缺省。 */
+	source?: string;
+}
+
+/** 从消息里的参考资料跳到知识库（NERE-41）。nonce 让「重复点同一段」也能再次触发。 */
+export interface KbFocus {
+	docId: number;
+	chunkSeq?: number;
+	nonce: number;
+}
+
 /** Message list entry. notice = system hint (stopped / reset failed...); tool = orphan tool activity row. */
 export type ChatMessage =
 	| { id: string; role: "user"; text: string; images?: string[]; /** 后端条目 id（v0.32.0：分支用）。 */ entryId?: number }
@@ -53,6 +71,8 @@ export type ChatMessage =
 			files?: FileArtifact[];
 			/** 本轮生成的分享链接（v0.55.0）。 */
 			shares?: ShareLink[];
+			/** 本轮知识库命中（NERE-40）；缺省或空数组时不渲染任何 UI。 */
+			kbRefs?: KbRef[];
 	  }
 	| { id: string; role: "tool"; tools: ToolCallInfo[] }
 	| { id: string; role: "notice"; text: string };
