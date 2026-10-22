@@ -1,0 +1,124 @@
+src/web/App.tsx
+  759dd939d1d08131 8,10,89,91-92,1025-1041,1045-1046,1461,1467-1469,1472,1484,1642-1678,1724
+src/web/components/KnowledgePanel.tsx
+  759dd939d1d08131 11-13,15,17-18,20,24-29,196,220,229,236,279,319
+src/web/components/SettingsDialog.tsx
+  759dd939d1d08131 485-486
+src/web/components/ShareDialog.tsx
+  759dd939d1d08131 60-61
+docs/frontend-map.md
+  759dd939d1d08131 9,28,31,33,37-38,56-61,67,100-103,131-132
+src/web/components/ModalShell.tsx
+  759dd939d1d08131 1-203
+src/web/components/SkillHubPanel.tsx
+  759dd939d1d08131 9,55-57,67-70,125
+tests/unit/shares.test.tsx
+  759dd939d1d08131 239-241
+src/web/components/Rail.tsx
+  759dd939d1d08131 3-6,10-14,25,27-28,33,42-59,78,80,82
+tests/unit/modal.test.tsx
+  759dd939d1d08131 1-141
+src/web/styles/index.css
+  759dd939d1d08131 257-291
+src/web/components/LeftPanels.tsx
+  759dd939d1d08131 45,58-59,84,125,310-313,353-354,365-369,401,423
+src/web/lib/focus.ts
+  759dd939d1d08131 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "f7ff2f471ce32802cc803e7f37cc90372bb54fb3",
+  "prompts": {
+    "759dd939d1d08131": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2fa453be-2038-4f75-bc75-e0ed6c65f050",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 2706,
+      "total_deletions": 97,
+      "accepted_lines": 2703,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/unit/modal.test.tsx": {
+          "additions": 141,
+          "accepted_lines": 141
+        },
+        "src/web/components/SettingsDialog.tsx": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/components/ShareDialog.tsx": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 18,
+          "deletions": 13,
+          "accepted_lines": 18
+        },
+        "src/web/components/KnowledgePanel.tsx": {
+          "additions": 22,
+          "deletions": 23,
+          "accepted_lines": 19
+        },
+        "tests/unit/shares.test.tsx": {
+          "additions": 3,
+          "deletions": 1,
+          "accepted_lines": 3
+        },
+        "src/web/App.tsx": {
+          "additions": 68,
+          "deletions": 36,
+          "accepted_lines": 68
+        },
+        "docs/nere-63-skills.png": {
+          "additions": 575,
+          "accepted_lines": 575
+        },
+        "docs/nere-63-kb.png": {
+          "additions": 591,
+          "accepted_lines": 591
+        },
+        "src/web/components/SkillHubPanel.tsx": {
+          "additions": 9,
+          "deletions": 3,
+          "accepted_lines": 9
+        },
+        "src/web/lib/focus.ts": {
+          "additions": 23,
+          "accepted_lines": 23
+        },
+        "src/web/components/ModalShell.tsx": {
+          "additions": 203,
+          "accepted_lines": 203
+        },
+        "docs/nere-63-sheet.png": {
+          "additions": 206,
+          "accepted_lines": 206
+        },
+        "src/web/styles/index.css": {
+          "additions": 35,
+          "accepted_lines": 35
+        },
+        "docs/frontend-map.md": {
+          "additions": 19,
+          "deletions": 12,
+          "accepted_lines": 19
+        },
+        "src/web/components/Rail.tsx": {
+          "additions": 34,
+          "deletions": 9,
+          "accepted_lines": 34
+        },
+        "docs/nere-63-mcp.png": {
+          "additions": 755,
+          "accepted_lines": 755
+        }
+      }
+    }
+  }
+}
