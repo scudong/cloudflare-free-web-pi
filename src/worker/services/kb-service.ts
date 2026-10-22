@@ -14,6 +14,7 @@ import {
 import {
 	chunksByIds,
 	countChunks,
+	countChunksForDoc,
 	countUnvectorized,
 	countVectorized,
 	deleteChunks,
@@ -21,6 +22,7 @@ import {
 	deleteFts,
 	docExists,
 	docExistsByContent,
+	findDocBySource,
 	getDoc,
 	insertChunk,
 	insertDoc,
@@ -32,6 +34,7 @@ import {
 	markVectorized,
 	searchFts,
 	searchLike,
+	updateDoc,
 	type KbDocDetail,
 	type KbDocRow,
 	type KbBackupDoc,
@@ -95,7 +98,9 @@ type KbMarkdownConversion = { format?: string; data?: string; error?: string };
 type KbMarkdownAi = { toMarkdown(input: { name: string; blob: Blob }): Promise<KbMarkdownConversion | KbMarkdownConversion[]> };
 
 export type KbAddInput = { title: string; content: string; source?: string; tags?: string };
-export type KbIngestOk = { ok: true; docId: string; title: string; chunks: number; chars: number };
+/** updated=false 只表示「同来源同正文已存在」，本次未写库；新建与版本替换都是 true。 */
+export type KbAddResult = { id: number; chunks: number; updated: boolean };
+export type KbIngestOk = { ok: true; docId: string; title: string; chunks: number; chars: number; updated: boolean };
 export type KbStatus = {
 	mode: KbRetrievalMode;
 	available: boolean;
@@ -126,10 +131,10 @@ export interface KbService {
 	backupDocs(): KbBackupDoc[];
 	/** 恢复备份用的同标题同正文判定。 */
 	hasDoc(title: string, content: string): boolean;
-	/** 纯入库（恢复备份走这条，不建向量）。 */
-	add(input: KbAddInput): { id: number; chunks: number };
+	/** 纯入库 / 版本替换（恢复备份走这条，不建向量）。 */
+	add(input: KbAddInput): Promise<KbAddResult>;
 	/** 入库并按当前检索模式增量建向量。 */
-	addIndexed(input: KbAddInput): Promise<{ id: number; chunks: number; vectorized: number }>;
+	addIndexed(input: KbAddInput): Promise<KbAddResult & { vectorized: number }>;
 	/** 删除文档、分块、FTS 行与已写入的向量；文档不存在返回 false。 */
 	remove(id: number): Promise<boolean>;
 	search(query: string, limit?: number): KbHit[];
@@ -259,7 +264,7 @@ export function createKbService(deps: KbServiceDeps): KbService {
 		}
 	}
 
-	function writeChunks(docId: number, title: string, source: string, tags: string, chunks: string[]): void {
+	function writeChunks(docId: number, title: string, source: string, tags: string, chunks: string[]): number {
 		const titleTokens = [...new Set(kbTokens(`${title} ${source} ${tags}`))].join(" ");
 		for (let seq = 0; seq < chunks.length; seq++) {
 			const text = chunks[seq]!;
@@ -267,15 +272,59 @@ export function createKbService(deps: KbServiceDeps): KbService {
 			if (!chunkId) continue;
 			insertFts(sql, chunkId, titleTokens, [...new Set(kbTokens(text))].join(" "));
 		}
+		return chunks.length;
 	}
 
-	function add({ title, content, source = "", tags = "" }: KbAddInput): { id: number; chunks: number } {
+	/** 删除某篇文档已写入的向量；失败只记日志，DB 侧仍继续替换。 */
+	async function deleteDocVectors(docId: number): Promise<void> {
+		const chunkIds = listChunkIds(sql, docId);
+		if (!chunkIds.length || !bindings()) return;
+		try {
+			await vectorDelete(chunkIds.map((chunkId) => `${scopeId}:${chunkId}`));
+		} catch (err) {
+			console.warn("kb vector delete failed", String(err).slice(0, 160));
+		}
+	}
+
+	/**
+	 * 入库（NERE-47）：非空 source 是文档身份。
+	 * - 同来源同正文：不写库，复用原 id，返回 updated:false；
+	 * - 同来源不同正文：保留 id，清掉旧分块 / FTS / 向量后重建，返回 updated:true；
+	 * - 无来源（粘贴、工具未带 source）：没有稳定身份，按新文档插入。
+	 * 最终查重与写入之间不能有 await，否则同一 DO 的并发导入会各写一篇。
+	 */
+	async function add({ title, content, source = "", tags = "" }: KbAddInput): Promise<KbAddResult> {
 		const clean = content.replace(/\r\n/g, "\n").trim().slice(0, KB_MAX_CONTENT);
-		const chunks = kbChunkText(clean).slice(0, KB_MAX_CHUNKS);
-		const id = insertDoc(sql, { title, source, tags, content: clean, now: clock() });
+		const chunked = () => kbChunkText(clean).slice(0, KB_MAX_CHUNKS);
+		const key = source.trim();
+		if (!key) {
+			const id = insertDoc(sql, { title, source: "", tags, content: clean, now: clock() });
+			if (!id) throw new Error("知识库写入失败");
+			return { id, chunks: writeChunks(id, title, "", tags, chunked()), updated: true };
+		}
+
+		const existing = findDocBySource(sql, key);
+		if (existing?.content === clean) {
+			return { id: existing.id, chunks: countChunksForDoc(sql, existing.id), updated: false };
+		}
+		if (existing) {
+			// 删向量是唯一的外部调用；它完成后重新确认目标，再同步替换，避免并发导入各写一篇。
+			await deleteDocVectors(existing.id);
+			const target = findDocBySource(sql, key);
+			if (target?.content === clean) {
+				return { id: target.id, chunks: countChunksForDoc(sql, target.id), updated: false };
+			}
+			if (target) {
+				for (const chunkId of listChunkIds(sql, target.id)) deleteFts(sql, chunkId);
+				deleteChunks(sql, target.id);
+				updateDoc(sql, target.id, { title, source: key, tags, content: clean, now: clock() });
+				return { id: target.id, chunks: writeChunks(target.id, title, key, tags, chunked()), updated: true };
+			}
+		}
+
+		const id = insertDoc(sql, { title, source: key, tags, content: clean, now: clock() });
 		if (!id) throw new Error("知识库写入失败");
-		writeChunks(id, title, source, tags, chunks);
-		return { id, chunks: chunks.length };
+		return { id, chunks: writeChunks(id, title, key, tags, chunked()), updated: true };
 	}
 
 	function search(query: string, limit = 6): KbHit[] {
@@ -362,9 +411,9 @@ export function createKbService(deps: KbServiceDeps): KbService {
 	/** 入库 + 可选向量索引；chars 是实际落库的字符数（add 会按上限截断）。 */
 	async function ingestDoc(title: string, content: string, source: string): Promise<KbIngestOk> {
 		const stored = content.replace(/\r\n/g, "\n").trim().slice(0, KB_MAX_CONTENT);
-		const { id, chunks } = add({ title, content: stored, source: source.slice(0, 300) });
+		const { id, chunks, updated } = await add({ title, content: stored, source: source.slice(0, 300) });
 		await indexIfEnabled(id);
-		return { ok: true as const, docId: String(id), title, chunks, chars: stored.length };
+		return { ok: true as const, docId: String(id), title, chunks, chars: stored.length, updated };
 	}
 
 	/** 未知异常统一收敛为 internal_error；KbIngestError 原样上抛给 Route 映射状态码。 */
@@ -427,7 +476,7 @@ export function createKbService(deps: KbServiceDeps): KbService {
 		add,
 
 		async addIndexed(input) {
-			const result = add(input);
+			const result = await add(input);
 			const vectorized = await indexIfEnabled(result.id);
 			return { ...result, vectorized };
 		},
@@ -435,13 +484,7 @@ export function createKbService(deps: KbServiceDeps): KbService {
 		async remove(id) {
 			if (!docExists(sql, id)) return false;
 			const chunkIds = listChunkIds(sql, id);
-			if (bindings()) {
-				try {
-					await vectorDelete(chunkIds.map((chunkId) => `${scopeId}:${chunkId}`));
-				} catch (err) {
-					console.warn("kb vector delete failed", String(err).slice(0, 160));
-				}
-			}
+			await deleteDocVectors(id);
 			for (const chunkId of chunkIds) deleteFts(sql, chunkId);
 			deleteChunks(sql, id);
 			deleteDoc(sql, id);

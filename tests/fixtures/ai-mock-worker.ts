@@ -28,6 +28,10 @@ const MOCK_MARKDOWN = [
 	"embedding 批量 16 条一次请求，向量库批量 200 条写入；权限按用户 DO 隔离，向量元数据带 scope 过滤。",
 ].join("\n");
 
+/** 版本替换用：带 MOCK_REVISION 的 PDF 返回换了备注段落的正文，旧句子在新版里完全不存在。 */
+const OLD_SECTION = "## 第七页：初版备注\n\n旧版专用词甲：这句只出现在初版里，用于确认版本替换后不再被检索到。";
+const NEW_SECTION = "## 第七页：修订备注\n\n新版专用词乙：这句只出现在修订版里，用于确认替换后的正文已重建索引。";
+
 export class AiMock extends WorkerEntrypoint {
 	async toMarkdown(input: { name: string; blob: Blob }) {
 		const text = await input.blob.text();
@@ -37,7 +41,14 @@ export class AiMock extends WorkerEntrypoint {
 		if (text.includes("MOCK_EMPTY")) {
 			return { id: "1", name: input.name, mimeType: "application/pdf", format: "markdown", tokens: 0, data: "  \n " };
 		}
-		return { id: "1", name: input.name, mimeType: "application/pdf", format: "markdown", tokens: 120, data: MOCK_MARKDOWN };
+		return {
+			id: "1",
+			name: input.name,
+			mimeType: "application/pdf",
+			format: "markdown",
+			tokens: 120,
+			data: `${MOCK_MARKDOWN}\n\n${text.includes("MOCK_REVISION") ? NEW_SECTION : OLD_SECTION}`,
+		};
 	}
 }
 

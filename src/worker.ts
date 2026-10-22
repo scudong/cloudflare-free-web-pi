@@ -1423,7 +1423,7 @@ const baseSpikeExtension = defineExtension({
 				const title = String(a.title ?? "").trim().slice(0, 120);
 				const content = String(a.content ?? "").trim();
 				if (!title || !content) return { output: [{ type: "text", text: "标题和正文都不能为空。" }] };
-				const { id, chunks, vectorized } = await kbService().addIndexed({
+				const { id, chunks, vectorized, updated } = await kbService().addIndexed({
 					title,
 					content,
 					source: String(a.source ?? "").trim().slice(0, 300),
@@ -1433,7 +1433,9 @@ const baseSpikeExtension = defineExtension({
 					output: [
 						{
 							type: "text",
-							text: `已存入知识库：${title}（id=${id}，${chunks} 个片段，${content.length} 字符${vectorized ? `，已建向量 ${vectorized} 段` : ""}）。`,
+							text: updated
+								? `已存入知识库：${title}（id=${id}，${chunks} 个片段，${content.length} 字符${vectorized ? `，已建向量 ${vectorized} 段` : ""}）。`
+								: `知识库已有相同内容：${title}（id=${id}，${chunks} 个片段），未重复入库。`,
 						},
 					],
 				};
@@ -2835,8 +2837,8 @@ export class SpikeAgent extends DurableObject {
 			const content = str(doc.content).trim();
 			if (!title || !content) continue;
 			if (kb.hasDoc(title, content)) continue;
-			kb.add({ title, content, source: str(doc.source), tags: str(doc.tags) });
-			counts.kbDocs = (counts.kbDocs ?? 0) + 1;
+			const restored = await kb.add({ title, content, source: str(doc.source), tags: str(doc.tags) });
+			if (restored.updated) counts.kbDocs = (counts.kbDocs ?? 0) + 1;
 		}
 		for (const s of rows("mcpServers")) {
 			const id = str(s.id);

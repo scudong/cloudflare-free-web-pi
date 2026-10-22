@@ -4,6 +4,13 @@
 
 ## 2026-10-22
 
+### 知识库导入去重与版本替换（v0.59.0，NERE-47）
+- `POST /api/kb/ingest`（文件与链接）、`POST /api/kb`、`kb_add` 统一按「source + 正文」查重：同来源同正文复用原 `docId`、不写库、不重建向量，响应 `updated:false`
+- 同来源正文变化时原地替换：保留 `docId` 与 `created_at`，删除旧分块 / FTS / 向量后按新正文重建，`updated_at` 刷新，响应 `updated:true`
+- source 为空（粘贴正文、工具未带来源）不参与去重，避免不同资料互相覆盖
+- 新增迁移 v4：`kb_docs(source)` 索引；不新增表、不新增依赖，历史重复文档不做破坏性清理
+- 金标新增：同一 PDF 连导两次仍 1 篇且 chunk 数不变、修改正文后同 docId 且旧句子检索不到；单测覆盖向量删除与重建
+
 ### 知识库命中随 assistant entry 落库（v0.58.0，NERE-40）
 - `GET /api/entries` 的 assistant entry 新增可选 `kbRefs: {docId, chunkId, chunkSeq, title, source?}[]`：本轮预检索的命中与注入 instructions 的参考资料逐条对应；未命中或 `kb_prefetch` 关闭时不写该字段
 - Harness 的 `pi.assistant` entry 不承载自定义字段，命中落在旁路表 `entry_kb_refs(conversation_id, entry_id, refs, created_at)`；迁移 v3 建表，读路径在 session-service 合并，老会话无行时响应与迁移前一致

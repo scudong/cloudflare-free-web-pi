@@ -70,6 +70,39 @@ export function docExistsByContent(sql: SqlHandle, title: string, content: strin
 	return sql.exec("SELECT id FROM kb_docs WHERE title = ? AND content = ?", title, content).toArray().length > 0;
 }
 
+/** 导入去重的身份键：非空 source 对应唯一一篇文档（历史重复时取最近更新的一篇）。 */
+export type KbDocIdentity = { id: number; content: string };
+
+export function findDocBySource(sql: SqlHandle, source: string): KbDocIdentity | undefined {
+	const rows = sql
+		.exec("SELECT id, content FROM kb_docs WHERE source = ? ORDER BY updated_at DESC, id DESC LIMIT 1", source)
+		.toArray() as KbDocIdentity[];
+	return rows[0];
+}
+
+export function countChunksForDoc(sql: SqlHandle, docId: number): number {
+	return Number(
+		(sql.exec("SELECT COUNT(*) AS n FROM kb_chunks WHERE doc_id = ?", docId).toArray() as { n: number }[])[0]?.n ?? 0,
+	);
+}
+
+/** 版本替换：保留 id 与 created_at，刷新标题、来源、标签、正文与更新时间。 */
+export function updateDoc(
+	sql: SqlHandle,
+	id: number,
+	doc: { title: string; source: string; tags: string; content: string; now: string },
+): void {
+	sql.exec(
+		"UPDATE kb_docs SET title = ?, source = ?, tags = ?, content = ?, updated_at = ? WHERE id = ?",
+		doc.title,
+		doc.source,
+		doc.tags,
+		doc.content,
+		doc.now,
+		id,
+	);
+}
+
 export function insertDoc(
 	sql: SqlHandle,
 	doc: { title: string; source: string; tags: string; content: string; now: string },

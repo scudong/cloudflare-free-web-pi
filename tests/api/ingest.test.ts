@@ -28,11 +28,11 @@ const LINK_CONTENT = Array.from(
 	(_, i) => `第 ${i + 1} 段：知识库导入验收正文，用于确认链接抓取与入库链路。${LINK_TERM} 出现在正文里。`,
 ).join("\n\n");
 
-type IngestOk = { ok: true; docId: string; title: string; chunks: number; chars: number };
+type IngestOk = { ok: true; docId: string; title: string; chunks: number; chars: number; updated: boolean };
 type IngestFail = { ok: false; code: string; message: string };
 type IngestResult = IngestOk | IngestFail;
 type KbDoc = { id: number; title: string; source: string; chunks: number };
-type KbHit = { title: string; text: string };
+type KbHit = { docId: number; title: string; text: string };
 
 function okBody(json: IngestResult): IngestOk {
 	expect(json.ok).toBe(true);
@@ -237,5 +237,49 @@ describe("知识库导入：链接", () => {
 		expect(res.status).toBe(400);
 		const body = failBody(res.json);
 		expect(body.code).toBe("invalid_url");
+	});
+});
+
+describe("知识库导入：去重与版本替换（NERE-47）", () => {
+	const FILE = "去重验收.pdf";
+	const listBySource = async (source: string) =>
+		(await api<{ docs: KbDoc[] }>("/api/kb")).json.docs.filter((doc) => doc.source === source);
+
+	it("同一份 PDF 连导两次：仍 1 篇、chunk 数不变、updated:false", async () => {
+		const first = okBody((await upload(new File(["%PDF-1.4 dedupe"], FILE, { type: "application/pdf" }))).json);
+		expect(first.updated).toBe(true);
+		const before = await listBySource(FILE);
+		expect(before).toHaveLength(1);
+
+		const second = okBody((await upload(new File(["%PDF-1.4 dedupe"], FILE, { type: "application/pdf" }))).json);
+		expect(second).toMatchObject({ docId: first.docId, chunks: first.chunks, updated: false });
+
+		const after = await listBySource(FILE);
+		expect(after).toHaveLength(1);
+		expect(after[0]).toMatchObject({ id: Number(first.docId), chunks: before[0]!.chunks });
+	});
+
+	it("改一句话再导：仍 1 篇、updated:true、旧句子不再命中", async () => {
+		const [before] = await listBySource(FILE);
+		expect(before).toBeTruthy();
+
+		const revised = okBody(
+			(await upload(new File(["%PDF-1.4 MOCK_REVISION"], FILE, { type: "application/pdf" }))).json,
+		);
+		expect(revised).toMatchObject({ docId: String(before!.id), updated: true });
+
+		const after = await listBySource(FILE);
+		expect(after).toHaveLength(1);
+		expect(after[0]!.id).toBe(before!.id);
+
+		// 其他文档也可能含相近词，只验证被替换的这一篇
+		const oldHits = await api<{ hits: KbHit[] }>(`/api/kb/search?q=${encodeURIComponent("旧版本专用词")}`);
+		expect(oldHits.json.hits.filter((hit) => hit.docId === before!.id && hit.text.includes("旧版专用词甲"))).toEqual([]);
+		const oldPhrase = await api<{ hits: KbHit[] }>(`/api/kb/search?q=${encodeURIComponent("旧版")}`);
+		expect(oldPhrase.json.hits.filter((hit) => hit.docId === before!.id)).toEqual([]);
+
+		const newHits = await api<{ hits: KbHit[] }>(`/api/kb/search?q=${encodeURIComponent("新版专用词")}`);
+		expect(newHits.json.hits.length).toBeGreaterThan(0);
+		expect(newHits.json.hits[0]!.title).toBe("去重验收");
 	});
 });

@@ -79,7 +79,13 @@ const noFetch = async (): Promise<WebFetchResult> => ({ ok: false, kind: "error"
 
 function service(
 	sql: SqlHandle,
-	overrides: { env?: KbEnv; settings?: KbSettings; scopeId?: string; webFetch?: (url: string) => Promise<WebFetchResult> } = {},
+	overrides: {
+		env?: KbEnv;
+		settings?: KbSettings;
+		scopeId?: string;
+		webFetch?: (url: string) => Promise<WebFetchResult>;
+		now?: () => string;
+	} = {},
 ) {
 	return createKbService({
 		sql,
@@ -87,7 +93,7 @@ function service(
 		scopeId: overrides.scopeId ?? "scope-a",
 		settings: overrides.settings ?? { get: (_key, fallback) => fallback },
 		webFetch: overrides.webFetch ?? noFetch,
-		now: () => "2026-01-01T00:00:00.000Z",
+		now: overrides.now ?? (() => "2026-01-01T00:00:00.000Z"),
 	});
 }
 
@@ -105,7 +111,7 @@ describe("kb-service：入库与全文检索", () => {
 		"入库后自动分块，FTS 命中，删除后不再命中",
 		withDb(async (sql) => {
 			const kb = service(sql);
-			const added = kb.add(DOC);
+			const added = await kb.add(DOC);
 			expect(added.chunks).toBeGreaterThanOrEqual(1);
 
 			const [doc] = kb.listDocs();
@@ -127,7 +133,7 @@ describe("kb-service：入库与全文检索", () => {
 	it(
 		"预检索块受 kb_prefetch 开关控制",
 		withDb(async (sql) => {
-			service(sql).add(DOC);
+			await service(sql).add(DOC);
 			const on = service(sql);
 			expect(await on.prefetchBlock("组合久期怎么看")).toContain("债券研究笔记");
 
@@ -238,7 +244,7 @@ describe("kb-service：预检索引用（NERE-40）", () => {
 	it(
 		"命中时 refs 与注入块逐条对应，带文档定位信息",
 		withDb(async (sql) => {
-			const added = service(sql).add({ ...DOC, content: "久期是衡量利率风险的核心指标。久期越长，价格对利率越敏感。" });
+			const added = await service(sql).add({ ...DOC, content: "久期是衡量利率风险的核心指标。久期越长，价格对利率越敏感。" });
 			const result = await service(sql).prefetch("久期怎么看");
 
 			expect(result.block).toContain("债券研究笔记");
@@ -255,7 +261,7 @@ describe("kb-service：预检索引用（NERE-40）", () => {
 	it(
 		"未命中 / 开关关闭 / 查询过短都不产生引用",
 		withDb(async (sql) => {
-			service(sql).add(DOC);
+			await service(sql).add(DOC);
 			expect(await service(sql).prefetch("今天天气怎么样")).toEqual({ block: "", refs: [] });
 			expect(await service(sql).prefetch("久")).toEqual({ block: "", refs: [] });
 
@@ -268,13 +274,89 @@ describe("kb-service：预检索引用（NERE-40）", () => {
 		"多文档命中时按 docId:chunkId 去重，refs 不重复",
 		withDb(async (sql) => {
 			const kb = service(sql);
-			kb.add({ title: "债券研究笔记", content: "久期是衡量利率风险的核心指标。", source: "a.md" });
-			kb.add({ title: "组合管理手册", content: "组合久期与利率敏感度成正比。", source: "b.md" });
+			await kb.add({ title: "债券研究笔记", content: "久期是衡量利率风险的核心指标。", source: "a.md" });
+			await kb.add({ title: "组合管理手册", content: "组合久期与利率敏感度成正比。", source: "b.md" });
 			const result = await kb.prefetch("久期");
 
 			const keys = result.refs.map((ref) => `${ref.docId}:${ref.chunkId}`);
 			expect(new Set(keys).size).toBe(keys.length);
 			expect(result.refs.map((ref) => ref.title).sort()).toEqual(["债券研究笔记", "组合管理手册"]);
+		}),
+	);
+});
+
+describe("kb-service：来源去重与版本替换（NERE-47）", () => {
+	const OLD = { title: "导入验收", source: "report.pdf", tags: "验收", content: "第一版正文。旧版本专用词甲。\n\n结尾说明。" };
+	const NEW = { ...OLD, content: "第二版正文。新版本专用词乙。\n\n结尾说明。" };
+
+	it(
+		"同来源同正文重复入库：复用 docId、chunk 不变、updated:false",
+		withDb(async (sql) => {
+			const kb = service(sql);
+			const first = await kb.add(OLD);
+			expect(first.updated).toBe(true);
+
+			const second = await kb.add({ ...OLD, title: "改个标题也不该重复" });
+			expect(second).toMatchObject({ id: first.id, chunks: first.chunks, updated: false });
+			expect(kb.listDocs()).toHaveLength(1);
+			expect(kb.listDocs()[0]!.chunks).toBe(first.chunks);
+			// 命中已存在的文档时不改写标题 / 时间
+			expect(kb.getDoc(first.id)?.title).toBe(OLD.title);
+		}),
+	);
+
+	it(
+		"同来源不同正文：保留 docId、重建分块，旧句子不再命中",
+		withDb(async (sql) => {
+			let tick = 0;
+			const kb = service(sql, { now: () => `2026-01-0${++tick}T00:00:00.000Z` });
+			const first = await kb.add(OLD);
+			expect(kb.search("旧版本专用词")).not.toEqual([]);
+
+			const second = await kb.add(NEW);
+			expect(second).toMatchObject({ id: first.id, updated: true });
+			expect(kb.listDocs()).toHaveLength(1);
+			expect(kb.getDoc(first.id)?.content).not.toContain("旧版本专用词");
+			expect(kb.search("旧版")).toEqual([]);
+			expect(kb.search("旧版本专用词").every((hit) => !hit.text.includes("旧版本专用词"))).toBe(true);
+			expect(kb.search("新版本专用词").length).toBeGreaterThan(0);
+			expect(kb.listDocs()[0]!.updatedAt > "2026-01-01T00:00:00.000Z").toBe(true);
+		}),
+	);
+
+	it(
+		"不同来源同正文各存一篇；无来源的粘贴不去重",
+		withDb(async (sql) => {
+			const kb = service(sql);
+			const a = await kb.add({ ...OLD, source: "a.pdf" });
+			const b = await kb.add({ ...OLD, source: "b.pdf" });
+			expect(b.id).not.toBe(a.id);
+
+			const paste1 = await kb.add({ title: "粘贴", content: "同一段粘贴正文" });
+			const paste2 = await kb.add({ title: "粘贴", content: "同一段粘贴正文" });
+			expect(paste2.id).not.toBe(paste1.id);
+			expect(kb.listDocs()).toHaveLength(4);
+		}),
+	);
+
+	it(
+		"版本替换删除旧向量并按新分块重建",
+		withDb(async (sql) => {
+			const ai = fakeAi();
+			const vec = fakeVector();
+			const kb = service(sql, { env: { AI: ai, KB_VEC: vec }, settings: hybridSettings });
+
+			const first = await kb.addIndexed(OLD);
+			const oldVectorIds = vec.upserts.map((row) => row.id);
+			expect(oldVectorIds.length).toBeGreaterThan(0);
+
+			const second = await kb.addIndexed(NEW);
+			expect(second).toMatchObject({ id: first.id, updated: true });
+			expect(vec.deleted.sort()).toEqual([...oldVectorIds].sort());
+
+			const newVectors = vec.upserts.slice(oldVectorIds.length);
+			expect(newVectors).toHaveLength(second.chunks);
+			expect(newVectors.every((row) => !oldVectorIds.includes(row.id))).toBe(true);
 		}),
 	);
 });
