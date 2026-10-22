@@ -41,7 +41,7 @@ SpikeAgent DO（每用户一个；主人沿用 "spike"，邀请用户 "user:<id>
 | HTTP 路由层 | `handleFetch`（`3903-4948`） | 81 个分支：解析、校验、状态码、**内联 SQL** | DO 方法、模块级 helper | 直接读写 15+ 张表 |
 | Agent 运行时 | `spikeExtension`（`1969`）、`buildInstructions`（`2940`）、`runChat`（`2702-2769`）、`runChatStream`（`3699-3875`） | 工具定义、系统提示、chat / SSE 流、技能注入 | Harness、LLM、MCP、AI | Harness 表 |
 | 会话与文件 | 路由 `routes/session.ts`、`routes/files.ts`；用例 `services/session-service.ts`、`services/file-service.ts`；SQL `repo/sessions-repo.ts`、`repo/files-repo.ts`；工具 `write_file`/`read_file`/`list_files`（`~1770-1810`） | 会话列表/新建/分支/删除、工作台文件；路由层零 SQL，Harness 协调留在 DO 的 `sessionRuntime()` 端口 | 服务/仓储、Harness | `sessions_meta`、`vfs_v2` |
-| 知识库 | `kbTokens`→`kbPrefetchBlock`（`774-1290`）、路由 `4031-4152` | 分块、FTS5、向量索引、混合检索、预检索、ingest | `kb_*`、AI、Vectorize | `kb_docs/kb_chunks/kb_fts` |
+| 知识库 | 路由 `routes/kb.ts`；用例 `services/kb-service.ts`；SQL `repo/kb-repo.ts`；纯函数 `lib/kb.ts`；工具 `kb_search`/`kb_add`/`kb_list`/`kb_delete`（`~1400-1465`） | 分块、FTS5、向量索引、混合检索、预检索、ingest；AI / Vectorize / settings / 抓取全部经端口注入 | 服务/仓储、AI、Vectorize | `kb_docs/kb_chunks/kb_fts` |
 | 分享 | `sharePage`（`2498`）、`createShare`（`3321`）、`listShares`（`3343`）、路由 `4219-4279` | token 生成、SSR 分享页、主题/目录、过期 | `shares`、`vfs_v2`、Harness | `shares` |
 | 定时任务与目标 | 调度 helper（`196-300`）、`alarm`（`3006-3019`）、`goalTick`（`3667`）、路由 `4280-4326`、`4756-4786` | alarm 调度、token 预算、自动续转 | `automations`、`goals` | `automations`、`goals` |
 | 审批与问答 | 审批闸门 / `ask_user`（`~380-500`）、路由 `4433-4472`、`4582-4628` | 工具审批闸门、ask_user 卡片 | `approvals`、`approval_grants`、`questions` | 同上 |
@@ -60,7 +60,7 @@ Worker 剥掉 `/api` 或 `/agent` 前缀后转发给 DO（`src/worker.ts:5211-52
 | 会话 | `GET/POST/PATCH/DELETE /sessions`、`POST /branches`、`GET /entries`、`GET /session` | 阶段 1 已离开 legacy：`routes/session.ts` → `session-service` → `sessions-repo`；`sessions_meta` 与 Harness 双写 |
 | 首屏 | `GET /bootstrap` | 17 个只读面板聚合，单字段故障隔离 |
 | 文件 | `GET/DELETE /files`、`GET /files/content`、`GET /files/all` | 阶段 1 已离开 legacy：`routes/files.ts` → `file-service` → `files-repo` |
-| 知识库 | `GET/POST/DELETE /kb`、`/kb/doc`、`/kb/search`、`/kb/prefetch`、`/kb/status`、`/kb/reindex` | FTS / vector / hybrid |
+| 知识库 | `GET/POST/DELETE /kb`、`/kb/doc`、`/kb/search`、`/kb/prefetch`、`/kb/status`、`/kb/reindex`、`POST /kb/ingest` | 阶段 2 已离开 legacy：`routes/kb.ts` → `kb-service` → `kb-repo`；FTS / vector / hybrid |
 | 分享 | `POST /share`、`GET /shares`、`GET /s/<token>` | `/s/` 公开 |
 | 自动化 / 目标 | `GET/POST/PATCH/DELETE /automations`、`GET/POST/DELETE /goal` | alarm |
 | 设置 / 模型 | `GET/POST /settings`、`GET/POST/DELETE /providers`、`POST /providers/activate`、`GET /models`、`POST /model`、`GET /context` | 改压缩/供应商会重建 Harness |
@@ -117,7 +117,7 @@ DO            ──→ Harness / MCP / Vectorize / LLM
 | `providers` | LLM 供应商 | `/providers` | 是（含明文 `api_key`） |
 | `mcp_servers` | MCP 配置 | `/mcp` | 是（含 headers） |
 | `shares` | 公开分享 token | `/share` | 是 |
-| `kb_docs` / `kb_chunks` / `kb_fts` | 知识库 + FTS 索引 | `/kb`、`kb_add` | 仅 `kb_docs`，恢复时重建分块/索引 |
+| `kb_docs` / `kb_chunks` / `kb_fts` | 知识库 + FTS 索引 | `kb-repo`（`kb-service` 编排：`/kb*`、`kb_add`/`kb_delete`、恢复） | 仅 `kb_docs`，恢复时重建分块/索引 |
 
 表定义集中在 `ensureTables`（`worker.ts:63-153`），`open()` 每次执行；`handleFetch` 里另有 **52 次**重复调用。迁移器落地后改为 `db/migrations.ts` 一次执行（ADR-0001 §9.4）。
 
@@ -127,7 +127,7 @@ DO            ──→ Harness / MCP / Vectorize / LLM
 |---|---|---|
 | 会话条目、用量、任务 | pi-durable Harness（同一 DO SQLite） | 表结构由依赖管理，应用代码不应直查；`/export` 是唯一出口（`exportMarkdown` @ `3445`） |
 | 邀请用户 | `UserRegistry` DO（全局单实例 `registry`） | 只存 `users`，不含任何用户内容 |
-| 向量 | Vectorize `pi-kb`（全局索引） | 派生数据，`id = <scope>:<chunkId>`，`scope` 为 DO 名（`kbScopeId` @ `965`，索引写入 `kbVectorIndexDoc` @ `1011`）；可重建 |
+| 向量 | Vectorize `pi-kb`（全局索引） | 派生数据，`id = <scope>:<chunkId>`，`scope` 由 `RequestContext.scopeId` 经端口传入（前缀与 metadata 过滤，写入 `kb-service` 的 `indexDoc`）；可重建 |
 | 分享页 | `shares` + 请求时渲染 | 会话分享实时读 Harness 条目，不是快照 |
 
 ### 5.3 生命周期边界
@@ -177,7 +177,7 @@ CI：`.github/workflows/deploy.yml`（test → build → deploy）、`smoke.yml`
 
 > 行号口径：R1/R4/R5/R11 已按 `ce75bce` 刷新；R2/R3/R6-R15 的证据行号仍是 `64c9515` 基线，在其所属域迁移时重锚（阶段 3/4 顺手更新）。引用风险时优先用符号名。
 
-> 执行状态（2026-10-22）：ADR-0001 已转 Accepted；阶段 0a（迁移器）与 0b（路由表）已合并。阶段 1（会话/文件）已收口：`routes/session|files.ts` → `services/session|file-service.ts` → `repo/sessions|files-repo.ts`，`sessions_meta`/`vfs_v2` 在路由与工具中零内联 SQL；R4 由 0a 关闭，R1/R11 由阶段 1-5 逐步关闭。
+> 执行状态（2026-10-22）：ADR-0001 已转 Accepted；阶段 0a（迁移器）与 0b（路由表）已合并。阶段 1（会话/文件）已收口：`routes/session|files.ts` → `services/session|file-service.ts` → `repo/sessions|files-repo.ts`，`sessions_meta`/`vfs_v2` 在路由与工具中零内联 SQL。阶段 2（知识库）已收口：`routes/kb.ts` → `services/kb-service.ts` → `repo/kb-repo.ts`，纯函数在 `lib/kb.ts`；AI / Vectorize / settings / 抓取经端口注入，路由与工具零内联 SQL；R4 由 0a 关闭，R1/R11 由阶段 1-5 逐步关闭。
 
 | ID | 级别 | 问题 | 证据 | 影响 | 建议 |
 |---|---|---|---|---|---|

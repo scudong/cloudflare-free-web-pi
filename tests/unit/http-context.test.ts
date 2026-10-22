@@ -33,6 +33,8 @@ function context(overrides: Partial<Parameters<typeof buildContext>[0]> = {}) {
 		open: async () => harness,
 		legacy: async () => new Response("legacy"),
 		sessionRuntime,
+		settings: { get: (_key, fallback) => fallback },
+		webFetch: async () => ({ ok: false, kind: "error", message: "stub" }),
 		...overrides,
 	});
 }

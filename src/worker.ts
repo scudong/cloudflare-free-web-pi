@@ -27,6 +27,7 @@ import { migrate, type SqlHandle } from "./worker/db/migrations";
 import { buildContext, type AppEnv } from "./worker/http/context";
 import { getModel } from "./worker/repo/sessions-repo";
 import { createFileService } from "./worker/services/file-service";
+import { createKbService, KB_VECTOR_DEFAULT_INDEX, type WebFetchResult } from "./worker/services/kb-service";
 import { createSessionService, type SessionRuntime } from "./worker/services/session-service";
 import { dispatch } from "./worker/routes";
 
@@ -575,11 +576,12 @@ function ruleViews() {
 
 /** GET /settings 的响应体；POST /settings 与 /bootstrap 复用，避免键漂移。 */
 function settingsView() {
+	const kb = kbService();
 	return {
 		webSearch: getSetting("web_search", "1") === "1",
 		kbPrefetch: getSetting("kb_prefetch", "1") === "1",
-		kbRetrieval: kbRetrievalMode(),
-		kbVector: { available: kbVectorAvailable(), index: KB_VECTOR_DEFAULT_INDEX },
+		kbRetrieval: kb.retrievalMode(),
+		kbVector: { available: kb.vectorAvailable(), index: KB_VECTOR_DEFAULT_INDEX },
 		thinkingLevel: currentThinkingLevel(),
 		compaction: compactionSettings(),
 		approval: approvalSettings(),
@@ -735,403 +737,20 @@ const stripHtml = (html: string) =>
 		.slice(0, 6000);
 
 /* ---------------- 用户知识库（v0.45.0） ----------------
- * 数据落在每个用户自己的 DO SQLite 里，天然按用户隔离。
- * 中文没有空格：索引时把连续汉字切成重叠二元组（「知识库」→ 知识/识库），
- * 查询用同样的切法做 AND 匹配；单个汉字不进索引，退回 LIKE。
+ * 纯函数在 lib/kb.ts，用例在 services/kb-service.ts，SQL 在 repo/kb-repo.ts。
+ * 本文件只保留工具/legacy 端点对 KB 服务的调用装配。
  */
-const KB_MAX_CONTENT = 200_000;
-const KB_CHUNK_CHARS = 800;
-const KB_CHUNK_OVERLAP = 80;
-const KB_MAX_CHUNKS = 2_000;
-
-/** 中文二元组 + 英文/数字词，供 FTS5 使用。 */
-function kbTokens(text: string): string[] {
-	const tokens: string[] = [];
-	const normalized = text.normalize("NFKC").toLowerCase();
-	for (const run of normalized.match(/[㐀-鿿豈-﫿]+|[a-z0-9_]+/g) ?? []) {
-		if (/^[㐀-鿿豈-﫿]/.test(run)) {
-			if (run.length === 1) tokens.push(run);
-			else for (let i = 0; i + 1 < run.length; i++) tokens.push(run.slice(i, i + 2));
-		} else {
-			tokens.push(run);
-		}
-	}
-	return tokens;
-}
-
-/** 口语疑问词不作为检索词：几乎每个问题里都有，会淹没真正的主题词。 */
-const KB_STOP_BIGRAMS = new Set([
-	"怎么", "么办", "什么", "如何", "可以", "请问", "是否", "多少", "哪些", "这个", "那个",
-	"我们", "你们", "他们", "一下", "现在", "然后", "就是", "因为", "所以", "如果", "但是",
-	"不是", "没有", "需要", "一个", "这些", "那些", "以及", "还是", "或者", "而且", "关于",
-]);
-
-function kbQueryTokens(query: string): string[] {
-	return [...new Set(kbTokens(query))].filter((token) => !KB_STOP_BIGRAMS.has(token)).slice(0, 32);
-}
-
-/** 查询串 → FTS5 MATCH 表达式；单字返回 null（索引只有二元组）。 */
-function kbFtsQuery(query: string, mode: "and" | "or" = "and"): string | null {
-	const tokens = kbQueryTokens(query);
-	if (!tokens.length || (tokens.length === 1 && tokens[0]!.length < 2)) return null;
-	return tokens.map((token) => `"${token}"`).join(mode === "and" ? " AND " : " OR ");
-}
-
-/** 按段落聚合成约 800 字的片段，超长段落按 720 字步长切分并留 80 字重叠。 */
-function kbChunkText(text: string): string[] {
-	if (!text) return [];
-	const out: string[] = [];
-	let buf = "";
-	const flush = () => {
-		const trimmed = buf.trim();
-		if (trimmed) out.push(trimmed);
-		buf = "";
-	};
-	for (const raw of text.split(/\n{2,}/)) {
-		const para = raw.trim();
-		if (!para) continue;
-		if (para.length > KB_CHUNK_CHARS) {
-			flush();
-			const step = KB_CHUNK_CHARS - KB_CHUNK_OVERLAP;
-			for (let i = 0; i < para.length; i += step) {
-				const piece = para.slice(i, i + KB_CHUNK_CHARS).trim();
-				if (piece) out.push(piece);
-				if (out.length >= KB_MAX_CHUNKS) return out;
-			}
-			continue;
-		}
-		if (buf.length + para.length + 2 > KB_CHUNK_CHARS) flush();
-		buf += (buf ? "\n\n" : "") + para;
-	}
-	flush();
-	return out;
-}
-
-type KbDocRow = { id: number; title: string; source: string; tags: string; size: number; chunks: number; createdAt: string; updatedAt: string };
-type KbHit = { chunkId: number; docId: number; title: string; source: string; chunkSeq: number; text: string; score: number };
-
-function kbListDocs(): KbDocRow[] {
-	return sqlFacade!
-		.exec(
-			"SELECT id, title, source, tags, length(content) AS size, created_at AS createdAt, updated_at AS updatedAt, " +
-				"(SELECT COUNT(*) FROM kb_chunks WHERE kb_chunks.doc_id = kb_docs.id) AS chunks FROM kb_docs ORDER BY updated_at DESC",
-		)
-		.toArray() as KbDocRow[];
-}
-
-function kbIndexDoc(docId: number, title: string, source: string, tags: string, chunks: string[]): void {
-	const titleTokens = [...new Set(kbTokens(`${title} ${source} ${tags}`))].join(" ");
-	for (let seq = 0; seq < chunks.length; seq++) {
-		const text = chunks[seq]!;
-		sqlFacade!.exec("INSERT INTO kb_chunks (doc_id, seq, text) VALUES (?, ?, ?)", docId, seq, text);
-		const chunkId = Number((sqlFacade!.exec("SELECT last_insert_rowid() AS id").toArray() as { id: number }[])[0]?.id ?? 0);
-		if (!chunkId) continue;
-		sqlFacade!.exec("INSERT INTO kb_fts (rowid, title_tokens, body_tokens) VALUES (?, ?, ?)", chunkId, titleTokens, [...new Set(kbTokens(text))].join(" "));
-	}
-}
-
-function kbAddDoc(title: string, content: string, source = "", tags = ""): { id: number; chunks: number } {
-	const clean = content.replace(/\r\n/g, "\n").trim().slice(0, KB_MAX_CONTENT);
-	const chunks = kbChunkText(clean).slice(0, KB_MAX_CHUNKS);
-	const now = new Date().toISOString();
-	sqlFacade!.exec(
-		"INSERT INTO kb_docs (title, source, tags, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-		title, source, tags, clean, now, now,
-	);
-	const id = Number((sqlFacade!.exec("SELECT last_insert_rowid() AS id").toArray() as { id: number }[])[0]?.id ?? 0);
-	if (!id) throw new Error("知识库写入失败");
-	kbIndexDoc(id, title, source, tags, chunks);
-	return { id, chunks: chunks.length };
-}
-
-async function kbDeleteDoc(id: number): Promise<boolean> {
-	if (!sqlFacade!.exec("SELECT id FROM kb_docs WHERE id = ?", id).toArray().length) return false;
-	const chunkIds = (sqlFacade!.exec("SELECT id FROM kb_chunks WHERE doc_id = ?", id).toArray() as { id: number }[]).map((row) => row.id);
-	if (kbVectorBindings()) {
-		try {
-			await vectorDelete(chunkIds.map((chunkId) => `${kbScopeId()}:${chunkId}`));
-		} catch (err) {
-			console.warn("kb vector delete failed", String(err).slice(0, 160));
-		}
-	}
-	for (const chunkId of chunkIds) sqlFacade!.exec("DELETE FROM kb_fts WHERE rowid = ?", chunkId);
-	sqlFacade!.exec("DELETE FROM kb_chunks WHERE doc_id = ?", id);
-	sqlFacade!.exec("DELETE FROM kb_docs WHERE id = ?", id);
-	return true;
-}
-
-function kbSearch(query: string, limit = 6): KbHit[] {
-	const q = query.trim().slice(0, 200);
-	if (!q) return [];
-	const capped = Math.max(1, Math.min(Number(limit) || 6, 20));
-	const match = kbFtsQuery(q);
-	const runFts = (expression: string) =>
-		sqlFacade!
-			.exec(
-				"SELECT kb_fts.rowid AS chunkId, kb_chunks.doc_id AS docId, kb_chunks.seq AS chunkSeq, kb_chunks.text AS text, " +
-					"kb_docs.title AS title, kb_docs.source AS source, bm25(kb_fts, 6.0, 1.0) AS score " +
-					"FROM kb_fts JOIN kb_chunks ON kb_chunks.id = kb_fts.rowid JOIN kb_docs ON kb_docs.id = kb_chunks.doc_id " +
-					"WHERE kb_fts MATCH ? ORDER BY score LIMIT ?",
-				expression, capped,
-			)
-			.toArray() as KbHit[];
-	if (match) {
-		try {
-			const rows = runFts(match);
-			if (rows.length) return rows;
-			// 自然语言问句里会出现「期怎」「么看」这类跨词二元组，AND 可能全空：
-			// 退化为 OR，由 bm25 的 IDF 把真正相关的片段排到前面。
-			const loose = kbFtsQuery(q, "or");
-			if (loose && loose !== match) {
-				const looseRows = runFts(loose);
-				if (looseRows.length) return looseRows;
-			}
-		} catch (err) {
-			console.warn("kb fts search failed", String(err).slice(0, 120));
-		}
-	}
-	const like = `%${q.replace(/[%_]/g, "")}%`;
-	return sqlFacade!
-		.exec(
-			"SELECT 0 AS chunkId, id AS docId, 0 AS chunkSeq, content AS text, title, source, 0 AS score " +
-				"FROM kb_docs WHERE title LIKE ? OR content LIKE ? ORDER BY updated_at DESC LIMIT ?",
-			like, like, capped,
-		)
-		.toArray() as KbHit[];
-}
-
-/* ---------------- 知识库向量检索（v0.53.0） ----------------
- * Vectorize 走 REST（不引入静态 binding，避免本地开发/测试被迫访问真实账号）；
- * embedding 走 Workers AI 的 bge-m3。没有配置时一律回退 FTS5。
- */
-type KbRetrievalMode = "fts" | "vector" | "hybrid";
-type KbVectorMatch = { id: string; score: number; metadata?: { docId?: number; chunkSeq?: number; scope?: string } };
-type KbVectorBindings = {
-	ai: { run(model: string, input: unknown): Promise<{ data?: number[][] }> };
-	vec: {
-		upsert(vectors: { id: string; values: number[]; metadata?: Record<string, string | number> }[]): Promise<unknown>;
-		deleteByIds(ids: string[]): Promise<unknown>;
-		query(vector: number[], options: Record<string, unknown>): Promise<{ matches?: KbVectorMatch[] }>;
-	};
-};
-
-const KB_VECTOR_DEFAULT_INDEX = "pi-kb";
-const KB_EMBED_MODEL = "@cf/baai/bge-m3";
-const KB_EMBED_BATCH = 16;
-const KB_VECTOR_BATCH = 200;
-
-function kbRetrievalMode(): KbRetrievalMode {
-	const value = getSetting("kb_retrieval", "fts");
-	return value === "vector" || value === "hybrid" ? value : "fts";
-}
-
-/** 生产环境用 AI / KB_VEC 绑定；测试与本地可用 CF_DISABLE_VECTOR=1 强制关闭。 */
-function kbVectorBindings(): KbVectorBindings | null {
-	const env = scope().env as
-		| (Record<string, unknown> & { AI?: KbVectorBindings["ai"]; KB_VEC?: KbVectorBindings["vec"]; CF_DISABLE_VECTOR?: string })
-		| undefined;
-	if (env?.CF_DISABLE_VECTOR === "1") return null;
-	if (!env?.AI || !env?.KB_VEC) return null;
-	return { ai: env.AI, vec: env.KB_VEC };
-}
-
-const kbVectorAvailable = () => kbVectorBindings() !== null;
-const kbScopeId = () => scope().scopeId ?? "spike";
-
-async function embedTexts(texts: string[]): Promise<number[][]> {
-	const bindings = kbVectorBindings();
-	if (!bindings) throw new Error("未配置向量检索");
-	const out: number[][] = [];
-	for (let i = 0; i < texts.length; i += KB_EMBED_BATCH) {
-		const batch = texts.slice(i, i + KB_EMBED_BATCH);
-		const result = await bindings.ai.run(KB_EMBED_MODEL, { text: batch });
-		const vectors = result?.data;
-		if (!Array.isArray(vectors) || vectors.length !== batch.length) throw new Error("embedding 返回格式不正确");
-		out.push(...vectors);
-	}
-	return out;
-}
-
-async function vectorUpsert(rows: { id: string; values: number[]; metadata: Record<string, string | number> }[]): Promise<void> {
-	if (!rows.length) return;
-	const bindings = kbVectorBindings();
-	if (!bindings) throw new Error("未配置向量检索");
-	await bindings.vec.upsert(rows);
-}
-
-async function vectorDelete(ids: string[]): Promise<void> {
-	if (!ids.length) return;
-	const bindings = kbVectorBindings();
-	if (!bindings) throw new Error("未配置向量检索");
-	await bindings.vec.deleteByIds(ids);
-}
-
-async function vectorQuery(values: number[], topK: number): Promise<KbVectorMatch[]> {
-	const bindings = kbVectorBindings();
-	if (!bindings) throw new Error("未配置向量检索");
-	const scopeId = kbScopeId();
-	// 先按 scope 过滤；元数据索引尚未生效时退化为无过滤查询，再在 Worker 侧按 scope 过滤。
-	const filtered = await bindings.vec.query(values, {
-		topK,
-		returnMetadata: "all",
-		filter: { scope: { $eq: scopeId } },
+/** 按请求作用域装配知识库服务：工具与 legacy 端点共用，服务不读 scope()。 */
+function kbService() {
+	const current = scope();
+	return createKbService({
+		sql: sqlFacade!,
+		env: current.env ?? {},
+		scopeId: current.scopeId ?? "spike",
+		settings: { get: getSetting },
+		webFetch: (url) => webFetchPageContent(url, current.apiKey),
 	});
-	if ((filtered.matches ?? []).length) return filtered.matches ?? [];
-	const loose = await bindings.vec.query(values, { topK: Math.min(topK * 5, 50), returnMetadata: "all" });
-	return (loose.matches ?? []).filter((match) => match.metadata?.scope === scopeId);
 }
-
-/** 把未建向量的分块写入 Vectorize（单次最多 100 段，避免一次请求太久）。 */
-async function kbVectorIndexDoc(docId: number): Promise<number> {
-	if (!kbVectorBindings()) return 0;
-	const rows = sqlFacade!
-		.exec("SELECT id, seq, text FROM kb_chunks WHERE doc_id = ? AND vectorized = 0 ORDER BY seq LIMIT 100", docId)
-		.toArray() as { id: number; seq: number; text: string }[];
-	if (!rows.length) return 0;
-	const vectors = await embedTexts(rows.map((row) => row.text));
-	const scopeId = kbScopeId();
-	await vectorUpsert(
-		rows.map((row, index) => ({
-			id: `${scopeId}:${row.id}`,
-			values: vectors[index]!,
-			metadata: { scope: scopeId, docId, chunkSeq: row.seq },
-		})),
-	);
-	for (const row of rows) sqlFacade!.exec("UPDATE kb_chunks SET vectorized = 1 WHERE id = ?", row.id);
-	return rows.length;
-}
-
-/** 当前检索模式需要向量时增量建索引；失败只记日志，不影响 FTS 入库。 */
-async function kbVectorIndexIfEnabled(docId: number): Promise<number> {
-	if (kbRetrievalMode() === "fts" || !kbVectorAvailable()) return 0;
-	try {
-		return await kbVectorIndexDoc(docId);
-	} catch (err) {
-		console.warn("kb vector index failed", String(err).slice(0, 160));
-		return 0;
-	}
-}
-
-/** 重建待索引分块；返回本次处理数与剩余数。 */
-async function kbReindexPending(limit = KB_VECTOR_BATCH): Promise<{ indexed: number; remaining: number }> {
-	if (!kbVectorBindings()) throw new Error("向量检索未启用（缺少 AI / KB_VEC 绑定）");
-	const capped = Math.max(1, Math.min(Number(limit) || KB_VECTOR_BATCH, 500));
-	const rows = sqlFacade!
-		.exec("SELECT id, doc_id, seq, text FROM kb_chunks WHERE vectorized = 0 ORDER BY id LIMIT ?", capped)
-		.toArray() as { id: number; doc_id: number; seq: number; text: string }[];
-	if (!rows.length) return { indexed: 0, remaining: 0 };
-	const vectors = await embedTexts(rows.map((row) => row.text));
-	const scopeId = kbScopeId();
-	await vectorUpsert(
-		rows.map((row, index) => ({
-			id: `${scopeId}:${row.id}`,
-			values: vectors[index]!,
-			metadata: { scope: scopeId, docId: row.doc_id, chunkSeq: row.seq },
-		})),
-	);
-	for (const row of rows) sqlFacade!.exec("UPDATE kb_chunks SET vectorized = 1 WHERE id = ?", row.id);
-	const remaining = Number(
-		(sqlFacade!.exec("SELECT COUNT(*) AS n FROM kb_chunks WHERE vectorized = 0").toArray() as { n: number }[])[0]?.n ?? 0,
-	);
-	return { indexed: rows.length, remaining };
-}
-
-function kbHitsFromMatches(matches: KbVectorMatch[]): KbHit[] {
-	const ids: number[] = [];
-	for (const match of matches) {
-		const chunkId = Number(String(match.id).split(":").pop());
-		if (Number.isFinite(chunkId) && chunkId > 0) ids.push(chunkId);
-	}
-	if (!ids.length) return [];
-	const rows = sqlFacade!
-		.exec(
-			`SELECT c.id AS chunkId, c.doc_id AS docId, c.seq AS chunkSeq, c.text AS text, d.title AS title, d.source AS source
-			 FROM kb_chunks c JOIN kb_docs d ON d.id = c.doc_id WHERE c.id IN (${ids.map(() => "?").join(",")})`,
-			...ids,
-		)
-		.toArray() as KbHit[];
-	const byChunk = new Map(rows.map((row) => [Number(row.chunkId), row]));
-	return matches
-		.map((match) => {
-			const row = byChunk.get(Number(String(match.id).split(":").pop()));
-			return row ? { ...row, score: match.score } : null;
-		})
-		.filter((hit): hit is KbHit => hit !== null);
-}
-
-/** Reciprocal Rank Fusion：关键词与向量两路各按名次计分，去重后取前 N。 */
-function kbRrfMerge(keyword: KbHit[], vector: KbHit[], limit: number): KbHit[] {
-	const merged = new Map<string, { hit: KbHit; score: number }>();
-	const add = (hits: KbHit[]) => {
-		hits.forEach((hit, index) => {
-			const key = hit.chunkId ? String(hit.chunkId) : `${hit.docId}:${hit.chunkSeq}`;
-			const value = 1 / (60 + index + 1);
-			const entry = merged.get(key);
-			if (entry) entry.score += value;
-			else merged.set(key, { hit, score: value });
-		});
-	};
-	add(keyword);
-	add(vector);
-	return [...merged.values()]
-		.sort((a, b) => b.score - a.score)
-		.slice(0, limit)
-		.map((entry) => ({ ...entry.hit, score: entry.score }));
-}
-
-/** 统一检索入口：fts / vector / hybrid；向量不可用或失败时回退 FTS。 */
-async function kbSearchAsync(query: string, limit = 6, modeOverride?: KbRetrievalMode): Promise<KbHit[]> {
-	const mode = modeOverride ?? kbRetrievalMode();
-	const capped = Math.max(1, Math.min(Number(limit) || 6, 20));
-	if (mode === "fts" || !kbVectorAvailable()) return kbSearch(query, capped);
-	const candidateLimit = Math.min(capped * 3, 30);
-	const keyword = kbSearch(query, candidateLimit);
-	let vector: KbHit[] = [];
-	try {
-		const [embedding] = await embedTexts([query]);
-		if (!embedding) return keyword.slice(0, capped);
-		vector = kbHitsFromMatches(await vectorQuery(embedding, candidateLimit));
-	} catch (err) {
-		console.warn("kb vector search failed", String(err).slice(0, 160));
-		return keyword.slice(0, capped);
-	}
-	if (mode === "vector") return vector.slice(0, capped);
-	return kbRrfMerge(keyword, vector, capped);
-}
-
-/* ---------------- 知识库导入（v0.56.0） ----------------
- * 文件：MD / TXT 直接读文本；PDF / DOCX 走 Workers AI 的 toMarkdown，不引解析库。
- * 链接：复用 web_fetch_page 的 DeepSeek Fetch API，标题取页面 title。
- * 失败一律返回 { ok:false, code, message }，不静默。
- */
-const KB_INGEST_MAX_BYTES = 25 * 1024 * 1024;
-const KB_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-type KbIngestErrorCode =
-	| "too_large"
-	| "unsupported_type"
-	| "empty_content"
-	| "ai_unavailable"
-	// 契约之外的扩展码：链接不合法 / 抓取服务失败 / 其它内部错误
-	| "invalid_url"
-	| "fetch_failed"
-	| "internal_error";
-
-class KbIngestFailure extends Error {
-	constructor(
-		readonly status: number,
-		readonly code: KbIngestErrorCode,
-		message: string,
-	) {
-		super(message);
-	}
-}
-
-function kbIngestError(status: number, code: KbIngestErrorCode, message: string): Response {
-	return Response.json({ ok: false, code, message }, { status });
-}
-
-type WebFetchResult = { ok: true; title: string; content: string } | { ok: false; kind: "empty" | "error"; message: string };
 
 /** web_fetch_page 与链接 ingest 共用：DeepSeek Fetch API 抓正文，不截断（调用方决定长度）。 */
 async function webFetchPageContent(url: string, apiKey: string | null): Promise<WebFetchResult> {
@@ -1156,93 +775,6 @@ async function webFetchPageContent(url: string, apiKey: string | null): Promise<
 	} catch (e) {
 		return { ok: false, kind: "error", message: "抓取失败：" + String(e).slice(0, 200) };
 	}
-}
-
-type KbIngestFileKind = "pdf" | "docx" | "text";
-
-function kbIngestFileKind(file: File): KbIngestFileKind | null {
-	const name = String(file.name ?? "").toLowerCase();
-	const mime = String(file.type ?? "").toLowerCase();
-	const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
-	if (mime === "application/pdf" || ext === "pdf") return "pdf";
-	if (mime === KB_DOCX_MIME || ext === "docx") return "docx";
-	if (mime === "text/markdown" || mime === "text/plain" || mime === "text/x-markdown" || ext === "md" || ext === "markdown" || ext === "txt") return "text";
-	return null;
-}
-
-function kbIngestTitle(name: string): string {
-	const base = String(name ?? "").split(/[\\/]/).pop() ?? "";
-	const dot = base.lastIndexOf(".");
-	const stem = (dot > 0 ? base.slice(0, dot) : base).trim();
-	return (stem || "未命名文档").slice(0, 120);
-}
-
-type KbMarkdownConversion = { format?: string; data?: string; error?: string };
-type KbMarkdownAi = { toMarkdown(input: { name: string; blob: Blob }): Promise<KbMarkdownConversion | KbMarkdownConversion[]> };
-
-function kbMarkdownAi(): KbMarkdownAi | null {
-	const ai = scope().env?.AI;
-	if (!ai || typeof ai !== "object" || !("toMarkdown" in ai) || typeof ai.toMarkdown !== "function") return null;
-	// AgentScope 里 AI 是 unknown（生产是 Workers AI 绑定，测试可注入同形对象）。
-	const markdownAi = ai as unknown as KbMarkdownAi;
-	return markdownAi;
-}
-
-async function kbFileToMarkdown(file: File, kind: "pdf" | "docx"): Promise<string> {
-	const ai = kbMarkdownAi();
-	if (!ai) {
-		throw new KbIngestFailure(501, "ai_unavailable", "当前环境不支持 PDF / DOCX 解析，请上传 Markdown / TXT 或直接粘贴正文。");
-	}
-	let result: KbMarkdownConversion | KbMarkdownConversion[];
-	try {
-		// File 不能跨 RPC / 部分绑定传输，转成等长 Blob（slice 不复制内容）。
-		result = await ai.toMarkdown({ name: file.name || `document.${kind}`, blob: file.slice(0, file.size, file.type) });
-	} catch (err) {
-		throw new KbIngestFailure(422, "empty_content", `文档解析失败：${String(err).slice(0, 200)}`);
-	}
-	const item = Array.isArray(result) ? result[0] : result;
-	if (item?.format === "error") {
-		throw new KbIngestFailure(422, "empty_content", `文档解析失败：${String(item.error || "").slice(0, 200) || "未知原因"}`);
-	}
-	const data = String(item?.data ?? "").trim();
-	if (!data) throw new KbIngestFailure(422, "empty_content", "文档里没有可提取的正文。");
-	return data;
-}
-
-/** 入库 + 可选向量索引；chars 是实际落库的字符数（kbAddDoc 会按上限截断）。 */
-async function kbIngestDoc(title: string, content: string, source: string) {
-	const stored = content.replace(/\r\n/g, "\n").trim().slice(0, KB_MAX_CONTENT);
-	const { id, chunks } = kbAddDoc(title, stored, source.slice(0, 300));
-	await kbVectorIndexIfEnabled(id);
-	return { ok: true as const, docId: String(id), title, chunks, chars: stored.length };
-}
-
-/* 预检索（v0.46.0）：每轮把用户消息当查询，命中时把前几段拼进 instructions。
- * 模型仍然可以继续调用 kb_search；这里只是提前把最可能相关的内容放到眼前。 */
-const KB_PREFETCH_TOP = 3;
-const KB_PREFETCH_CHARS = 600;
-
-async function kbPrefetchBlock(message: string): Promise<string> {
-	if (getSetting("kb_prefetch", "1") !== "1") return "";
-	const query = message.trim().slice(0, 200);
-	if (query.length < 2) return "";
-	const hits = await kbSearchAsync(query, KB_PREFETCH_TOP);
-	if (!hits.length) return "";
-	const seen = new Set<number>();
-	const lines: string[] = [];
-	for (const hit of hits) {
-		if (hit.chunkId) {
-			if (seen.has(hit.chunkId)) continue;
-			seen.add(hit.chunkId);
-		}
-		const text = String(hit.text ?? "").slice(0, KB_PREFETCH_CHARS);
-		if (!text.trim()) continue;
-		lines.push(
-			`[${lines.length + 1}] ${hit.title}${hit.source ? `（${hit.source}）` : ""} · 片段 ${Number(hit.chunkSeq) + 1}\n${text}`,
-		);
-	}
-	if (!lines.length) return "";
-	return `\n\n## 知识库参考资料（按当前问题自动检索，可能相关；不相关就忽略）\n${lines.join("\n\n---\n\n")}\n\n需要更多内容时调用 kb_search 继续检索；引用资料时注明文档标题。`;
 }
 
 const baseSpikeExtension = defineExtension({
@@ -1867,7 +1399,7 @@ const baseSpikeExtension = defineExtension({
 				const a = args as { query?: unknown; limit?: unknown };
 				const query = String(a.query ?? "").trim();
 				if (!query) return { output: [{ type: "text", text: "检索词不能为空。" }] };
-				const hits = await kbSearchAsync(query, Number(a.limit) || 6);
+				const hits = await kbService().searchAsync(query, Number(a.limit) || 6);
 				if (!hits.length) return { output: [{ type: "text", text: `知识库里没有匹配「${query}」的内容。可用 kb_list 查看已有哪些文档。` }] };
 				const lines = hits.map(
 					(hit, i) => `[${i + 1}] ${hit.title}${hit.source ? `（${hit.source}）` : ""} · 片段 ${hit.chunkSeq + 1}\n${String(hit.text).slice(0, 900)}`,
@@ -1890,20 +1422,12 @@ const baseSpikeExtension = defineExtension({
 				const title = String(a.title ?? "").trim().slice(0, 120);
 				const content = String(a.content ?? "").trim();
 				if (!title || !content) return { output: [{ type: "text", text: "标题和正文都不能为空。" }] };
-				const { id, chunks } = kbAddDoc(
+				const { id, chunks, vectorized } = await kbService().addIndexed({
 					title,
 					content,
-					String(a.source ?? "").trim().slice(0, 300),
-					String(a.tags ?? "").trim().slice(0, 120),
-				);
-				let vectorized = 0;
-				if (kbRetrievalMode() !== "fts" && kbVectorAvailable()) {
-					try {
-						vectorized = await kbVectorIndexDoc(id);
-					} catch (err) {
-						console.warn("kb vector index failed", String(err).slice(0, 160));
-					}
-				}
+					source: String(a.source ?? "").trim().slice(0, 300),
+					tags: String(a.tags ?? "").trim().slice(0, 120),
+				});
 				return {
 					output: [
 						{
@@ -1919,7 +1443,7 @@ const baseSpikeExtension = defineExtension({
 			description: "列出当前用户知识库里的文档",
 			parameters: Type.Object({}),
 			execute: async () => {
-				const docs = kbListDocs();
+				const docs = kbService().listDocs();
 				const text = docs.length
 					? docs.map((doc) => `- [${doc.id}] ${doc.title}${doc.source ? ` · ${doc.source}` : ""} · ${doc.chunks} 段 · ${doc.size} 字符`).join("\n")
 					: "知识库还是空的。用户贴资料时可以调用 kb_add 保存。";
@@ -1933,7 +1457,7 @@ const baseSpikeExtension = defineExtension({
 			execute: async (args) => {
 				const id = Number((args as { id?: unknown }).id ?? 0);
 				if (!id) return { output: [{ type: "text", text: "需要一个有效的文档 id。" }] };
-				return { output: [{ type: "text", text: (await kbDeleteDoc(id)) ? `已删除文档 ${id}。` : `文档 ${id} 不存在。` }] };
+				return { output: [{ type: "text", text: (await kbService().remove(id)) ? `已删除文档 ${id}。` : `文档 ${id} 不存在。` }] };
 			},
 		}),
 	],
@@ -3015,7 +2539,7 @@ export class SpikeAgent extends DurableObject {
 			goal && goal.status === "active"
 				? `\n\n## 目标模式（进行中）\n目标：${goal.objective}\n进度：第 ${goal.turns + 1} 轮，已用 ${goal.tokens_used} / ${goal.token_budget} tokens。\n- 这一轮必须有实际进展，不要只回复「继续」。\n- 全部达成后调用 complete_goal，并附可核对的证据。\n- 确实无法推进时调用 report_goal 说明阻塞原因。`
 				: "";
-		const kbBlock = message ? await kbPrefetchBlock(message) : "";
+		const kbBlock = message ? await kbService().prefetchBlock(message) : "";
 		if (!inv) return withSkills + goalBlock + kbBlock;
 		return `${withSkills}${goalBlock}\n\n## 用户显式调用的技能：${inv.name}\n下面是该技能的完整说明，请严格按照它执行，不要声称找不到该技能：\n\n${inv.content}${kbBlock}`;
 	}
@@ -3239,7 +2763,7 @@ export class SpikeAgent extends DurableObject {
 				prompts: q("SELECT name, description, content FROM prompts"),
 				rules: q("SELECT name, content, enabled FROM rules"),
 				goals: q("SELECT session_id, objective, status, token_budget, baseline_tokens, tokens_used, turns, max_turns, summary, next_run_at, created_at, updated_at FROM goals"),
-				kbDocs: q("SELECT id, title, source, tags, content, created_at, updated_at FROM kb_docs ORDER BY id"),
+				kbDocs: kbService().backupDocs(),
 			},
 		};
 	}
@@ -3294,12 +2818,13 @@ export class SpikeAgent extends DurableObject {
 			counts.skills = (counts.skills ?? 0) + 1;
 		}
 		// 知识库只备份文档正文；恢复时分块并重建 FTS 索引（v0.45.0）
+		const kb = kbService();
 		for (const doc of rows("kbDocs")) {
 			const title = str(doc.title).trim();
 			const content = str(doc.content).trim();
 			if (!title || !content) continue;
-			if (sqlFacade!.exec("SELECT id FROM kb_docs WHERE title = ? AND content = ?", title, content).toArray().length) continue;
-			kbAddDoc(title, content, str(doc.source), str(doc.tags));
+			if (kb.hasDoc(title, content)) continue;
+			kb.add({ title, content, source: str(doc.source), tags: str(doc.tags) });
 			counts.kbDocs = (counts.kbDocs ?? 0) + 1;
 		}
 		for (const s of rows("mcpServers")) {
@@ -4008,6 +3533,8 @@ export class SpikeAgent extends DurableObject {
 					open: () => this.open(),
 					legacy: () => this.handleLegacyFetch(request),
 					sessionRuntime: this.sessionRuntime(),
+					settings: { get: getSetting },
+					webFetch: (target) => webFetchPageContent(target, env.DEEPSEEK_API_KEY ?? null),
 				});
 				return dispatch(context);
 			},
@@ -4075,120 +3602,6 @@ export class SpikeAgent extends DurableObject {
 					return Response.json({ error: "sessionId 必须是正整数" }, { status: 400 });
 				}
 				return Response.json(await this.readBootstrap(sessionId));
-			}
-			// 用户知识库（v0.45.0）：每人独立 DO，天然隔离
-			if (url.pathname === "/kb" && request.method === "GET") {
-				return Response.json({ docs: kbListDocs() });
-			}
-			if (url.pathname === "/kb" && request.method === "POST") {
-				const body = (await request.json().catch(() => ({}))) as { title?: string; content?: string; source?: string; tags?: string };
-				const title = String(body.title ?? "").trim().slice(0, 120);
-				const content = String(body.content ?? "").trim();
-				if (!title || !content) return Response.json({ error: "标题和正文都不能为空" }, { status: 400 });
-				const result = kbAddDoc(title, content, String(body.source ?? "").trim().slice(0, 300), String(body.tags ?? "").trim().slice(0, 120));
-				const vectorized = await kbVectorIndexIfEnabled(result.id);
-				return Response.json({ ok: true, ...result, vectorized });
-			}
-			// 知识库导入（v0.56.0）：multipart 文件或 JSON {url}，复用 kbAddDoc 入库
-			if (url.pathname === "/kb/ingest" && request.method === "POST") {
-				const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
-				try {
-					if (contentType.includes("application/json")) {
-						const body = (await request.json().catch(() => null)) as { url?: unknown } | null;
-						const target = typeof body?.url === "string" ? body.url.trim() : "";
-						if (!target) throw new KbIngestFailure(400, "invalid_url", "缺少 url 字段，或 url 不是字符串。");
-						if (!/^https?:\/\//i.test(target)) throw new KbIngestFailure(400, "invalid_url", "链接必须以 http(s):// 开头。");
-						const page = await webFetchPageContent(target, scope().apiKey);
-						if (!page.ok) {
-							throw page.kind === "empty"
-								? new KbIngestFailure(422, "empty_content", page.message)
-								: new KbIngestFailure(502, "fetch_failed", page.message);
-						}
-						let fallbackTitle = "未命名文档";
-						try {
-							fallbackTitle = new URL(target).hostname || fallbackTitle;
-						} catch {
-							// 校验只保证协议前缀，保留兜底标题即可
-						}
-						const title = (page.title || fallbackTitle).slice(0, 120);
-						return Response.json(await kbIngestDoc(title, page.content, target));
-					}
-					if (!contentType.includes("multipart/form-data")) {
-						throw new KbIngestFailure(415, "unsupported_type", "请用 multipart/form-data 上传文件，或用 application/json 传 {url}。");
-					}
-					let form: FormData;
-					try {
-						form = await request.formData();
-					} catch {
-						throw new KbIngestFailure(415, "unsupported_type", "上传内容不是有效的 multipart/form-data。");
-					}
-					const file = form.get("file");
-					if (!(file instanceof File)) throw new KbIngestFailure(415, "unsupported_type", "缺少 file 字段。");
-					if (file.size > KB_INGEST_MAX_BYTES) throw new KbIngestFailure(413, "too_large", "文件超过 25MB，请压缩后再试。");
-					const kind = kbIngestFileKind(file);
-					if (!kind) throw new KbIngestFailure(415, "unsupported_type", "只支持 PDF / DOCX / Markdown / TXT 文件。");
-					let content: string;
-					if (kind === "text") {
-						content = (await file.text()).trim();
-						if (!content) throw new KbIngestFailure(422, "empty_content", "文件里没有可提取的正文。");
-					} else {
-						content = await kbFileToMarkdown(file, kind);
-					}
-					return Response.json(await kbIngestDoc(kbIngestTitle(file.name), content, String(file.name ?? "")));
-				} catch (err) {
-					if (err instanceof KbIngestFailure) return kbIngestError(err.status, err.code, err.message);
-					console.warn("kb ingest failed", String(err).slice(0, 200));
-					return kbIngestError(500, "internal_error", "导入失败，请稍后重试。");
-				}
-			}
-			if (url.pathname === "/kb/doc" && request.method === "GET") {
-				const id = Number(url.searchParams.get("id") ?? 0);
-				const rows = sqlFacade!.exec("SELECT id, title, source, tags, content, created_at AS createdAt, updated_at AS updatedAt FROM kb_docs WHERE id = ?", id).toArray();
-				if (!rows[0]) return Response.json({ error: "文档不存在" }, { status: 404 });
-				return Response.json(rows[0]);
-			}
-			if (url.pathname === "/kb/search" && request.method === "GET") {
-				const q = url.searchParams.get("q") ?? "";
-				if (!q.trim()) return Response.json({ hits: [] });
-				return Response.json({ hits: await kbSearchAsync(q, Number(url.searchParams.get("limit") ?? 8)) });
-			}
-			// 预检索预览（v0.46.0）：返回本轮会注入 instructions 的原文，便于排查
-			if (url.pathname === "/kb/prefetch" && request.method === "GET") {
-				const q = url.searchParams.get("q") ?? "";
-				return Response.json({
-					enabled: getSetting("kb_prefetch", "1") === "1",
-					hits: q.trim() ? await kbSearchAsync(q, KB_PREFETCH_TOP) : [],
-					block: q.trim() ? await kbPrefetchBlock(q) : "",
-				});
-			}
-			if (url.pathname === "/kb" && request.method === "DELETE") {
-				const id = Number(url.searchParams.get("id") ?? 0);
-				if (!id) return Response.json({ error: "缺少文档 id" }, { status: 400 });
-				return Response.json({ ok: await kbDeleteDoc(id) });
-			}
-			if (url.pathname === "/kb/status" && request.method === "GET") {
-				const bindings = kbVectorBindings();
-				const total = Number((sqlFacade!.exec("SELECT COUNT(*) AS n FROM kb_chunks").toArray() as { n: number }[])[0]?.n ?? 0);
-				const indexed = Number((sqlFacade!.exec("SELECT COUNT(*) AS n FROM kb_chunks WHERE vectorized = 1").toArray() as { n: number }[])[0]?.n ?? 0);
-				return Response.json({
-					mode: kbRetrievalMode(),
-					available: !!bindings,
-					index: KB_VECTOR_DEFAULT_INDEX,
-					model: KB_EMBED_MODEL,
-					total,
-					indexed,
-				});
-			}
-			if (url.pathname === "/kb/reindex" && request.method === "POST") {
-				if (!kbVectorAvailable()) {
-					return Response.json({ error: "向量检索未启用（缺少 AI / KB_VEC 绑定）" }, { status: 400 });
-				}
-				try {
-					const result = await kbReindexPending(Number(url.searchParams.get("limit") ?? KB_VECTOR_BATCH));
-					return Response.json({ ok: true, ...result });
-				} catch (err) {
-					return Response.json({ error: String(err).slice(0, 200) }, { status: 500 });
-				}
 			}
 			if (url.pathname === "/skills/community" && request.method === "GET") {
 				return Response.json({
