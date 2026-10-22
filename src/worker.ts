@@ -10,6 +10,7 @@ import { demoShareToken, demoShareUrl } from "./worker/lib/share-render";
 import { userContent } from "./worker/lib/chat-content";
 import { migrate, migrateRegistry, type SqlHandle } from "./worker/db/migrations";
 import { buildContext, type AppEnv } from "./worker/http/context";
+import { AppError, toResponse } from "./worker/http/errors";
 import {
 	createChatGate,
 	USER_ID_RE,
@@ -62,8 +63,12 @@ import {
 	thinkingLevel,
 } from "./worker/services/settings-service";
 import { createWebFetch } from "./worker/services/web-fetch";
+import { createUserAdminService } from "./worker/services/user-admin-service";
+import type { BackupPayload } from "./worker/services/data-service";
+import type { RevokeResult, UserDataCounts } from "./worker/services/user-lifecycle-service";
 import { createAgentExtensions, type AgentExtensions, type HarnessLike } from "./worker/tools/spike-tools";
 import { dispatch } from "./worker/routes";
+import { internalRoutes } from "./worker/routes/internal";
 
 /** pi-durable 的 Harness 调用上下文。 */
 const ctx = BACKGROUND_CONTEXT;
@@ -713,6 +718,24 @@ export class SpikeAgent extends DurableObject {
 		this.harness = null;
 	}
 
+	/**
+	 * 清空该 DO 的全部存储（NERE-24 purge）：先关 Harness，再删 SQL/条目/闹钟。
+	 * 迁移备忘一起清掉，下一次任何请求（包括旧分享链接）会重建空 schema。
+	 */
+	private async purgeStorage(): Promise<void> {
+		await this.recoverSession();
+		await this.ctx.storage.deleteAll();
+		await this.ctx.storage.deleteAlarm().catch(() => {});
+		this.migrated = null;
+		this.storageRef = null;
+		this.registryRef = null;
+		this.baseExt = null;
+		this.mcpExt = null;
+		this.customExt = null;
+		this.customToolNames.clear();
+		this.mcpCache.clear();
+	}
+
 	/** 下一次闹钟时间：定时任务与待续转目标里最早的一个（判断在 automation-service）。 */
 	private async scheduleNextAlarm(): Promise<void> {
 		try {
@@ -811,6 +834,11 @@ export class SpikeAgent extends DurableObject {
 			if (env.TEST_HARNESS_STATS !== "1") return Response.json({ error: "not found" }, { status: 404 });
 			return Response.json({ opens: this.harnessOpens });
 		}
+		// 跨 DO 内部协议（NERE-24）：只有 Worker 主动发起的请求带这个头，客户端伪造会在 Worker 层被剥离。
+		const internal = url.pathname.startsWith("/internal/");
+		if (internal && request.headers.get("x-pi-internal") !== "1") {
+			return Response.json({ error: "not found" }, { status: 404 });
+		}
 		const deps = this.deps({
 			env,
 			origin: url.origin,
@@ -830,6 +858,7 @@ export class SpikeAgent extends DurableObject {
 			open: () => this.open(),
 			sessionRuntime: this.sessionRuntime(deps),
 			shareRuntime: this.shareRuntime(),
+			userLifecycleRuntime: { purge: () => this.purgeStorage() },
 			settings: this.settingsPort(deps),
 			setSetting: (key, value) => settingsRepo.set(deps.sql, key, value),
 			settingsRuntime: this.settingsRuntime(),
@@ -844,7 +873,7 @@ export class SpikeAgent extends DurableObject {
 			customToolsRuntime: this.customToolsRuntime(deps),
 			webFetch: this.webFetch(deps),
 		});
-		return dispatch(context);
+		return dispatch(context, internal ? internalRoutes : undefined);
 	}
 }
 
@@ -1030,8 +1059,9 @@ export class UserRegistry extends DurableObject {
 				return Response.json({ ok: true, code, hint: code.slice(-4) });
 			}
 			if (url.pathname === "/users" && request.method === "DELETE") {
-				db.exec("DELETE FROM users WHERE id = ?", url.searchParams.get("id") ?? "");
-				return Response.json({ ok: true });
+				const id = (url.searchParams.get("id") ?? "").trim();
+				const rows = id ? db.exec("DELETE FROM users WHERE id = ? RETURNING id", id).toArray() : [];
+				return Response.json({ ok: true, id, deleted: rows.length > 0 });
 			}
 			return Response.json({ error: "not found" }, { status: 404 });
 		} catch (err) {
@@ -1046,6 +1076,69 @@ function sessionResponse(token: string, payload: Record<string, unknown>): Respo
 		headers: {
 			"content-type": "application/json",
 			"set-cookie": `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`,
+		},
+	});
+}
+
+/* ---------------- 用户吊销 / 数据处置（NERE-24） ---------------- */
+
+/** 用户 DO 的显式内部调用：只在 Worker 侧构造，带内部头，客户端同名头在转发前被剥离。 */
+async function callUserData<T>(
+	env: Pick<AppEnv, "SpikeAgent">,
+	userId: string,
+	path: string,
+	method: "GET" | "POST",
+): Promise<T> {
+	const stub = env.SpikeAgent.get(env.SpikeAgent.idFromName(`user:${userId}`));
+	const res = await stub.fetch(
+		new Request(`https://user${path}`, { method, headers: { "x-pi-internal": "1" } }),
+	);
+	const data = (await res.json().catch(() => ({}))) as { error?: string };
+	if (!res.ok) {
+		throw new AppError("cleanup_failed", 502, `用户数据处置失败：${data.error ?? res.status}`, true);
+	}
+	return data as T;
+}
+
+async function callRegistry<T>(
+	env: Pick<AppEnv, "UserRegistry">,
+	path: string,
+	method: "GET" | "DELETE",
+): Promise<T> {
+	const registry = env.UserRegistry.get(env.UserRegistry.idFromName("registry"));
+	const res = await registry.fetch(
+		new Request(`https://registry${path}`, { method, headers: { "x-pi-internal": "1" } }),
+	);
+	const data = (await res.json().catch(() => ({}))) as { error?: string };
+	if (!res.ok) {
+		throw new AppError("registry_failed", 502, `注册表操作失败：${data.error ?? res.status}`, true);
+	}
+	return data as T;
+}
+
+function userAdmin(env: AppEnv) {
+	return createUserAdminService({
+		deleteRegistryUser: async (id) => {
+			const data = await callRegistry<{ deleted?: boolean }>(
+				env,
+				`/users?id=${encodeURIComponent(id)}`,
+				"DELETE",
+			);
+			return { deleted: Boolean(data.deleted) };
+		},
+		registryHas: async (id) => {
+			const data = await callRegistry<{ ok?: boolean }>(
+				env,
+				`/internal/user-status?userId=${encodeURIComponent(id)}`,
+				"GET",
+			);
+			return Boolean(data.ok);
+		},
+		revoke: (id) => callUserData<RevokeResult>(env, id, "/internal/revoke-user", "POST"),
+		backup: (id) => callUserData<BackupPayload>(env, id, "/internal/user-backup", "GET"),
+		purge: async (id) => {
+			const data = await callUserData<{ purged: UserDataCounts }>(env, id, "/internal/purge-user", "POST");
+			return data.purged;
 		},
 	});
 }
@@ -1122,22 +1215,48 @@ export default {
 			});
 		}
 
-		// 用户管理：仅主人；转发到轻量注册表 DO。
-		if (
-			(url.pathname === "/api/users" || url.pathname === "/api/users/reset") &&
-			(request.method === "GET" || request.method === "POST" || request.method === "DELETE")
-		) {
+		// 用户管理：仅主人；注册表 CRUD 转发到轻量 DO，吊销/导出/清空走显式跨 DO 协议（NERE-24）。
+		const userPath =
+			url.pathname === "/api/users" ||
+			url.pathname === "/api/users/reset" ||
+			url.pathname === "/api/users/export" ||
+			url.pathname === "/api/users/data";
+		if (userPath && (request.method === "GET" || request.method === "POST" || request.method === "DELETE")) {
 			if (protect && !userId) return Response.json({ error: "未登录" }, { status: 401 });
 			if (protect && userId !== OWNER_ID) return Response.json({ error: "只有主人可以管理用户" }, { status: 403 });
-			const registry = env.UserRegistry.get(env.UserRegistry.idFromName("registry"));
-			const inner = new URL(request.url);
-			inner.pathname = url.pathname.replace(/^\/api/, "");
-			const headers = new Headers(request.headers);
-			headers.delete("x-pi-user");
-			const method: string = request.method;
-			const init: RequestInit = { method, headers };
-			if (method !== "GET" && method !== "HEAD") init.body = request.body;
-			return registry.fetch(new Request(inner, init));
+			try {
+				const admin = userAdmin(env);
+				const id = (url.searchParams.get("id") ?? "").trim();
+				if (url.pathname === "/api/users/export" && request.method === "GET") {
+					const backup = await admin.exportData(id);
+					return new Response(JSON.stringify(backup), {
+						headers: {
+							"content-type": "application/json; charset=utf-8",
+							"content-disposition": `attachment; filename="user-${id || "unknown"}-backup.json"`,
+						},
+					});
+				}
+				if (url.pathname === "/api/users/data" && request.method === "DELETE") {
+					const purged = await admin.purge(id, url.searchParams.get("confirm"));
+					return Response.json({ ok: true, id, purged });
+				}
+				if (url.pathname === "/api/users" && request.method === "DELETE") {
+					return Response.json(await admin.remove(id));
+				}
+
+				const registry = env.UserRegistry.get(env.UserRegistry.idFromName("registry"));
+				const inner = new URL(request.url);
+				inner.pathname = url.pathname.replace(/^\/api/, "");
+				const headers = new Headers(request.headers);
+				headers.delete("x-pi-user");
+				headers.delete("x-pi-internal");
+				const method: string = request.method;
+				const init: RequestInit = { method, headers };
+				if (method !== "GET" && method !== "HEAD") init.body = request.body;
+				return registry.fetch(new Request(inner, init));
+			} catch (err) {
+				return toResponse(err);
+			}
 		}
 
 		// 分享页保持公开：只读、只含被打包的内容。
@@ -1151,6 +1270,7 @@ export default {
 			const shareUser = /^\/s\/(u_[a-z0-9]{6,16})\./.exec(url.pathname)?.[1];
 			const stub = env.SpikeAgent.get(env.SpikeAgent.idFromName(shareUser ? `user:${shareUser}` : "spike"));
 			const headers = new Headers(request.headers);
+			headers.delete("x-pi-internal");
 			headers.set("x-pi-user", shareUser ?? "");
 			return stub.fetch(new Request(new URL(request.url), { method: request.method, headers }));
 		}
@@ -1162,6 +1282,7 @@ export default {
 			const inner = new URL(request.url);
 			inner.pathname = url.pathname.replace(/^\/(agent|api)/, "") || "/";
 			const headers = new Headers(request.headers);
+			headers.delete("x-pi-internal");
 			headers.set("x-pi-user", who);
 			const init: RequestInit = { method: request.method, headers };
 			if (request.method !== "GET" && request.method !== "HEAD") init.body = request.body;

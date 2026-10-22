@@ -35,9 +35,9 @@ export function remove(sql: SqlHandle, sessionId: string, name: string): void {
 	sql.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? AND name = ?", sessionId, name);
 }
 
-/** 会话删除时清掉该会话全部文件（非级联语义，见 R10）。 */
-export function removeSession(sql: SqlHandle, sessionId: string): void {
-	sql.exec("DELETE FROM vfs_v2 WHERE conversation_id = ?", sessionId);
+/** 会话删除时清掉该会话全部文件（NERE-24 级联）：返回实际删除行数。 */
+export function removeSession(sql: SqlHandle, sessionId: string): number {
+	return sql.exec("DELETE FROM vfs_v2 WHERE conversation_id = ? RETURNING name", sessionId).toArray().length;
 }
 
 /** 跨会话汇总，`query` 已归一化；`%` 通配由调用方负责。 */

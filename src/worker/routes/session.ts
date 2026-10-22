@@ -39,8 +39,7 @@ export const sessionRoutes: readonly Route[] = [
 		handle: async (ctx) => {
 			const id = ctx.url.searchParams.get("id") ?? "";
 			if (!id) throw new AppError("bad_request", 400, "缺少 id");
-			service(ctx).remove(id);
-			return Response.json({ ok: true });
+			return Response.json({ ok: true, deleted: service(ctx).remove(id) });
 		},
 	},
 	{

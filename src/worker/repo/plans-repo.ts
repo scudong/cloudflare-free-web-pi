@@ -24,6 +24,11 @@ export function save(sql: SqlHandle, conversationId: string, steps: PlanStep[], 
 	);
 }
 
+/** 会话删除时清掉该会话的计划（NERE-24 级联）：返回实际删除行数。 */
+export function remove(sql: SqlHandle, conversationId: string): number {
+	return sql.exec("DELETE FROM plans WHERE conversation_id = ? RETURNING conversation_id", conversationId).toArray().length;
+}
+
 export function listForBackup(sql: SqlHandle): Record<string, unknown>[] {
 	return sql.exec("SELECT conversation_id, steps, updated_at FROM plans").toArray() as Record<string, unknown>[];
 }

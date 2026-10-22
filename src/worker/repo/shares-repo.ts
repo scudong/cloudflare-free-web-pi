@@ -131,6 +131,18 @@ export function deleteByToken(sql: SqlHandle, token: string): boolean {
 	return rows.length > 0;
 }
 
+/** 删除某个会话的全部分享（会话级联，NERE-24）：返回实际删除行数。 */
+export function deleteBySession(sql: SqlHandle, sessionId: string): number {
+	return sql.exec("DELETE FROM shares WHERE session_id = ? RETURNING token", sessionId).toArray().length;
+}
+
+/** 删除该 DO 的全部分享（用户吊销，NERE-24）：返回实际删除行数，重复调用为 0。 */
+export function deleteAll(sql: SqlHandle): number {
+	const rows = sql.exec("SELECT COUNT(*) AS n FROM shares").toArray() as { n: number }[];
+	sql.exec("DELETE FROM shares");
+	return Number(rows[0]?.n ?? 0);
+}
+
 /** 清掉已过期的分享，避免表无限增长。 */
 export function purgeExpired(sql: SqlHandle, now: number): void {
 	sql.exec("DELETE FROM shares WHERE expires_at > 0 AND expires_at <= ?", now);

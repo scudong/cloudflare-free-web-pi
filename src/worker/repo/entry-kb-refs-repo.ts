@@ -81,6 +81,6 @@ export function getMany(sql: SqlHandle, conversationId: string, entryIds: readon
 }
 
 /** 删除会话时清掉该会话的旁路行（与 `vfs_v2` 同一处调用）。 */
-export function removeConversation(sql: SqlHandle, conversationId: string): void {
-	sql.exec("DELETE FROM entry_kb_refs WHERE conversation_id = ?", conversationId);
+export function removeConversation(sql: SqlHandle, conversationId: string): number {
+	return sql.exec("DELETE FROM entry_kb_refs WHERE conversation_id = ? RETURNING entry_id", conversationId).toArray().length;
 }

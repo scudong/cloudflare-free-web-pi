@@ -105,7 +105,7 @@ DO（worker.ts）
 - 路由层零 SQL；`scripts/check-layering.sh` 在 CI 中拦截回退（`routes` 禁止 `sqlFacade`/`sql.exec`，`services` 禁止 `Response`，`repo` 禁止反向依赖）。
 - 组合根只做装配：`SpikeAgent.fetch` 建立 `RequestContext` 后交给 `dispatch`；`alarm()` 直接执行，不再包 `agentScope.run`。
 - 工具扩展按请求构造并 install 到注册表（pi-durable 的 `configure` 只存扩展名，工具由注册表解析）；`share_file` 的 Origin 因此来自当前请求。
-- 跨 DO 通信只有一种显式协议：Worker → `UserRegistry` 的 `/internal/verify-code`、`/internal/user-status`；其余都是 Worker 直连各用户 DO。
+- 跨 DO 通信只有显式协议：Worker → `UserRegistry` 的 `/internal/verify-code`、`/internal/user-status`；Worker → 用户 DO 的 `/internal/revoke-user`、`/internal/user-backup`、`/internal/purge-user`（NERE-24，带 `x-pi-internal`，不在公开路由表）。其余都是 Worker 直连各用户 DO。
 
 ## 5. 数据所有权
 
@@ -142,8 +142,8 @@ DO（worker.ts）
 
 ### 5.3 生命周期边界
 
-- 删除会话只做 `deleted=1` + 删该会话文件 + 暂停目标（`worker.ts:3654-3666`），不删该会话的 `shares`、`plans`、`approvals`、`questions`，也不删 Harness 条目。
-- 删除邀请用户只删 `UserRegistry.users` 一行（`worker.ts:4734-4738`），不通知该用户的 DO；其公开分享链接仍可访问（`/s/` 不鉴权）。
+- 删除会话：先删该会话的 `shares`，再清 `vfs_v2`、`plans`、`approvals`/`approval_grants`、`questions`、`entry_kb_refs`，最后标记 `deleted=1` 并暂停目标（NERE-24）；Harness 条目仍由 pi-durable 保留。
+- 删除邀请用户：删 `UserRegistry.users` 一行，并经 `/internal/revoke-user` 删除该用户 DO 的全部 `shares`；`/s/*` 随即 404、旧 token 401，其余数据保留。显式 `/api/users/data?id=&confirm=` 才清空该 DO（NERE-24，ADR-0004）。
 - 备份不覆盖 `approvals`、`questions`、`custom_tools`、`reflect_state`、`users`；恢复不做事务。
 
 ## 6. 关键时序：一次流式对话
@@ -198,11 +198,11 @@ CI：`.github/workflows/deploy.yml`（test → build → deploy）、`smoke.yml`
 | R3 | P1 | 首屏 18 个 API 请求，全部进同一个单线程 DO；邀请用户每次再查一次全局 registry | `App.tsx:160-260, 638-1050`；`worker.ts:4637`、`4600-4613` | 首屏延迟 = 18 次串行 DO 往返；registry 成为全站串行点 | 已落地 `GET /api/bootstrap`（NERE-23）：后端只读面板合并为 1 个请求，registry 查询随面板数收敛为每请求一次；前端切换后首屏为 bootstrap + auth 两个请求 |
 | R4 | P1 | ~~schema bootstrap 顺序脆弱~~ **已关闭（阶段 0a/6）** | DDL 只在 `db/migrations.ts`：业务库 `migrate()`、注册表库 `migrateRegistry()`；`worker.ts` 无 `CREATE TABLE`/`ALTER TABLE` | 原风险：全新 DO 首次 `open()` 只有 4 列、请求路径重复建表 | 版本化迁移 + 空库首启测试：`tests/unit/migrations.test.ts`、`tests/api/api.test.ts`「空库首启」 |
 | R5 | P1 | ~~跨 DO 的模块级可变状态~~ **已关闭（阶段 4，NERE-32）** | `customToolNames` / `mcpCache` 已从模块级搬入 `SpikeAgent` 实例字段；构建器改为显式收缓存：`services/custom-tool-service.ts` `buildExtension(sql, customToolNames)`、`services/mcp-service.ts` `buildExtension(sql, cache)`；`/tools` 的工具分级经 `toolRuntime.customNames()` 读实例集合 | 原风险：同 isolate 多用户时自定义工具分类与 MCP client 互相覆盖 | 验证：`tests/unit/custom-tool-r5.test.ts`（两个集合/缓存互不覆盖，预置缓存不建连接）；`tests/api/multiuser.test.ts`「阶段 4」用例（主人 `owner_probe` 不出现在邀请用户的 `/api/custom-tools` 与 `/api/tools`，分类为 exec） |
-| R6 | P1 | 删除用户不吊销数据与分享 | `4734-4738`；`4828-4836`；`3043-3129` | 被吊销用户的公开链接继续可读，DO 数据与费用继续存在 | 定义吊销语义：立即删 shares（可选清空 DO），分享 404 |
+| R6 | P1 | ~~删除用户不吊销数据与分享~~ **已关闭（NERE-24）** | `services/user-admin-service.ts`（注册表删除 → `/internal/revoke-user`）；`services/user-lifecycle-service.ts`（删全部分享、保留数据、显式 purge）；`routes/internal.ts` | 原风险：被吊销用户的公开链接继续可读 | 吊销立即 404/401，数据默认保留；验证：`tests/api/multiuser.test.ts`「用户吊销生命周期」 |
 | R7 | P1 | 大规模知识库的向量索引只建前 100 段 | `986`（`LIMIT 100`）；`3712-3717` 只调一次；`1002-1023` 手动重建 | 20 万字符文档约 270 段，尾部在 vector 模式下永远检索不到，status 只显示比例 | 批量循环或 alarm 续建；`/kb/status` 暴露 pending；补 >100 段用例 |
 | R8 | P1 | 备份/恢复把全部文件正文与供应商 key 装进一个 JSON，恢复无事务 | `2809-2834`；`2835-2977` | DO 内存与响应体积随文件增长；恢复中途失败留下半套数据 | 流式/按域导出；恢复用事务或可重入游标；key 默认脱敏 |
 | R9 | P2 | 会话元数据与 Harness 会话双源，靠读时修复 | `2553-2580` | 两侧漂移时列表/删除/分享行为不一致 | 明确唯一真源；把 `sessions_meta` 降级为索引或在迁移中重建 |
-| R10 | P2 | 会话/用户删除不做级联清理 | `3654-3666`；`4734-4738`；`3004` 只在建分享时清过期 | `shares/plans/approvals/questions` 与 Harness 条目长期堆积 | 统一生命周期 Service + 定期清理 alarm |
+| R10 | P2 | **部分关闭（NERE-24）**：会话删除已级联 `shares/plans/approvals/questions/entry_kb_refs`，用户删除已清全部分享；Harness 条目仍保留 | `services/session-service.ts` 的 `remove()`；`services/user-lifecycle-service.ts`；`routes/internal.ts` | 原风险：`shares/plans/approvals/questions` 长期堆积 | 剩余：会话删除后的 Harness 条目与 `goals/automations` 清理，需要 pi-durable 删除接口或定期清理 alarm |
 | R11 | P2 | ~~流式与非流式对话是两套实现~~ **已关闭（阶段 5，NERE-33）** | `services/chat-service.ts` 的 `prepare` / `submit` / `finish`；`routes/chat.ts` 的 `/chat` 与 `/chat/stream`；DO 只剩 `chatRuntime()` 端口（open/重试、conversation、configure、watchEvents、reflect） | 原风险：标题、目标续转、工具摘要逻辑漂移 | 合并为单一 ChatService，非流式复用同一提交路径；验证：`tests/api/share-tools.test.ts`「对话提交路径（NERE-33）」断言同一输入下流式/非流式 answer 与 `sessions_meta.title` 相同 |
 | R12 | P2 | 入站对话没有并发闸门；`activeChats` 只挡 alarm | `2347-2362`、`3371-3383`；检查点仅 `2693/2721`；SSE 在 `3539` 之后继续 | 同会话两个请求可能交错 submit，是否被 Harness 拒绝取决于依赖行为（**未验证**） | 显式会话锁或 409；补并发用例 |
 | R13 | P2 | 向量过滤回退可能被其他用户结果挤占 | `966-979`：先 filter，空则无过滤取 `topK*5` 再 Worker 侧过滤 | 元数据索引未生效时，本用户命中可能被其他 scope 的近似向量挤出 | 明确索引就绪检查/skip；或按用户独立索引 |

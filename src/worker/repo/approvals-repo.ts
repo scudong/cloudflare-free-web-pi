@@ -93,3 +93,12 @@ export function hasPendingForSession(sql: SqlHandle, sessionId: string): boolean
 		.toArray();
 	return rows.length > 0;
 }
+
+/** 会话删除时清掉该会话的审批与放行许可（NERE-24 级联）。 */
+export function removeForSession(sql: SqlHandle, sessionId: string): { approvals: number; grants: number } {
+	const approvals = sql.exec("DELETE FROM approvals WHERE session_id = ? RETURNING id", sessionId).toArray().length;
+	const grants = sql
+		.exec("DELETE FROM approval_grants WHERE session_id = ? RETURNING tool", sessionId)
+		.toArray().length;
+	return { approvals, grants };
+}

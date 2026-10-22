@@ -35,6 +35,38 @@ export type DataServiceDeps = {
 
 export type BackupPayload = { version: number; exportedAt: string; data: Record<string, unknown> };
 
+/**
+ * 备份载荷（NERE-24 起也供用户数据导出复用）：纯 SQL 汇总，不读 Harness、不写库。
+ * `kbDocs` 由调用方传入，避免本函数依赖 KbService 的检索/向量能力。
+ */
+export function buildBackup(input: {
+	sql: SqlHandle;
+	kbDocs: readonly unknown[];
+	now?: () => string;
+}): BackupPayload {
+	const { sql, kbDocs, now = () => new Date().toISOString() } = input;
+	return {
+		version: 1,
+		exportedAt: now(),
+		data: {
+			memories: memoryRepo.listForBackup(sql),
+			files: filesRepo.listForBackup(sql),
+			automations: automationsRepo.listForBackup(sql),
+			mcpServers: mcpRepo.listForBackup(sql),
+			sessions: sessionsRepo.listForBackup(sql),
+			shares: sharesRepo.listForBackup(sql),
+			skills: skillsRepo.listForBackup(sql),
+			settings: settingsRepo.listAll(sql),
+			plans: plansRepo.listForBackup(sql),
+			providers: providersRepo.listForBackup(sql),
+			prompts: promptsRepo.listPromptsForBackup(sql),
+			rules: promptsRepo.listRulesForBackup(sql),
+			goals: goalsRepo.listForBackup(sql),
+			kbDocs,
+		},
+	};
+}
+
 export type DataService = {
 	backup(): BackupPayload;
 	restore(payload: unknown): Promise<Record<string, number>>;
@@ -60,26 +92,7 @@ function rows(value: unknown): Record<string, unknown>[] {
 
 export function createDataService({ sql, kb, runtime, alarm, now = () => new Date().toISOString() }: DataServiceDeps): DataService {
 	return {
-		backup: () => ({
-			version: 1,
-			exportedAt: now(),
-			data: {
-				memories: memoryRepo.listForBackup(sql),
-				files: filesRepo.listForBackup(sql),
-				automations: automationsRepo.listForBackup(sql),
-				mcpServers: mcpRepo.listForBackup(sql),
-				sessions: sessionsRepo.listForBackup(sql),
-				shares: sharesRepo.listForBackup(sql),
-				skills: skillsRepo.listForBackup(sql),
-				settings: settingsRepo.listAll(sql),
-				plans: plansRepo.listForBackup(sql),
-				providers: providersRepo.listForBackup(sql),
-				prompts: promptsRepo.listPromptsForBackup(sql),
-				rules: promptsRepo.listRulesForBackup(sql),
-				goals: goalsRepo.listForBackup(sql),
-				kbDocs: kb.backupDocs(),
-			},
-		}),
+		backup: () => buildBackup({ sql, kbDocs: kb.backupDocs(), now }),
 
 		/** 从备份恢复：按主键 upsert，不删除现有数据。返回各类写入条数。 */
 		restore: async (payload) => {
