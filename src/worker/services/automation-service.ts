@@ -44,10 +44,122 @@ export type AutomationInput = {
 	schedule?: { kind?: string; time?: string; minutes?: number };
 };
 
+/** PATCH 请求体（NERE-64）：字段都可选，值来自 JSON，所以按 unknown 校验。 */
+export type AutomationPatchInput = {
+	name?: unknown;
+	prompt?: unknown;
+	sessionId?: unknown;
+	schedule?: unknown;
+	enabled?: unknown;
+};
+
+/** PATCH 返回给前端的任务形态；`next_run_at` 与列表同一口径。 */
+export type AutomationView = {
+	id: string;
+	name: string;
+	prompt: string;
+	sessionId: string;
+	schedule: Schedule;
+	enabled: boolean;
+	last_run_at: number | null;
+	next_run_at: number;
+};
+
+export const AUTOMATION_NAME_MAX = 40;
+export const AUTOMATION_PROMPT_MAX = 2000;
+const DAILY_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** 编辑的调度校验：不合法直接 400，不做 create 那种静默兜底。 */
+export function parseScheduleInput(raw: unknown): Schedule {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+		throw new AutomationApiError(400, "调度格式不正确");
+	}
+	const input = raw as { kind?: unknown; time?: unknown; minutes?: unknown };
+	if (input.kind === "interval") {
+		const minutes = Number(input.minutes);
+		if (!Number.isInteger(minutes) || minutes < 1) throw new AutomationApiError(400, "间隔需为不小于 1 的整数分钟");
+		return { kind: "interval", minutes };
+	}
+	if (input.kind === "daily") {
+		const time = typeof input.time === "string" ? input.time.trim() : "";
+		if (!DAILY_TIME.test(time)) throw new AutomationApiError(400, "时间需为 HH:MM（24 小时制）");
+		return { kind: "daily", time };
+	}
+	throw new AutomationApiError(400, "调度类型需为 daily 或 interval");
+}
+
+/**
+ * 校验 PATCH 并算出仓储增量（纯函数，便于单测）。
+ * - 只校验传入的字段，未传的不动；
+ * - 传了 schedule → `next_run_at = nextRunAt(newSchedule)`；
+ * - 只传 enabled → 沿用旧启停语义（启用时 next_run_at = now+60s，停用不动）；
+ * - 传了其他字段时即使带了 enabled 也不改 next_run_at（编辑不该把任务提前到 60 秒后）。
+ */
+export function buildAutomationPatch(body: AutomationPatchInput, now = Date.now()): automationsRepo.AutomationUpdate {
+	const patch: automationsRepo.AutomationUpdate = {};
+	if (body.name !== undefined) {
+		if (typeof body.name !== "string") throw new AutomationApiError(400, "名称需为字符串");
+		const name = body.name.trim();
+		if (!name || name.length > AUTOMATION_NAME_MAX) {
+			throw new AutomationApiError(400, `名称需为 1–${AUTOMATION_NAME_MAX} 个字符`);
+		}
+		patch.name = name;
+	}
+	if (body.prompt !== undefined) {
+		if (typeof body.prompt !== "string") throw new AutomationApiError(400, "提示词需为字符串");
+		const prompt = body.prompt.trim();
+		if (!prompt || prompt.length > AUTOMATION_PROMPT_MAX) {
+			throw new AutomationApiError(400, `提示词需为 1–${AUTOMATION_PROMPT_MAX} 个字符`);
+		}
+		patch.prompt = prompt;
+	}
+	if (body.sessionId !== undefined) {
+		if (typeof body.sessionId !== "string") throw new AutomationApiError(400, "会话 ID 需为字符串");
+		patch.sessionId = body.sessionId;
+	}
+	let schedule: Schedule | undefined;
+	if (body.schedule !== undefined) {
+		schedule = parseScheduleInput(body.schedule);
+		patch.schedule = JSON.stringify(schedule);
+	}
+	if (body.enabled !== undefined) {
+		if (typeof body.enabled !== "boolean") throw new AutomationApiError(400, "enabled 需为布尔值");
+		patch.enabled = body.enabled;
+	}
+
+	const onlyEnabled = body.enabled !== undefined && body.name === undefined && body.prompt === undefined && body.sessionId === undefined && body.schedule === undefined;
+	if (schedule) patch.nextRunAt = nextRunAt(schedule, now);
+	else if (onlyEnabled && body.enabled === true) patch.nextRunAt = now + 60_000;
+	return patch;
+}
+
+function parseStoredSchedule(raw: string): Schedule {
+	try {
+		const value = JSON.parse(raw) as Schedule;
+		return value && typeof value === "object" ? value : DAILY_DEFAULT;
+	} catch {
+		return DAILY_DEFAULT;
+	}
+}
+
+export function automationView(row: automationsRepo.AutomationRow): AutomationView {
+	return {
+		id: row.id,
+		name: row.name,
+		prompt: row.prompt,
+		sessionId: row.session_id,
+		schedule: parseStoredSchedule(row.schedule),
+		enabled: row.enabled === 1,
+		last_run_at: row.last_run_at,
+		next_run_at: row.next_run_at,
+	};
+}
+
 export type AutomationService = {
 	list(): automationsRepo.AutomationRow[];
 	create(body: AutomationInput): { id: string; nextRunAt: number };
-	setEnabled(id: string, enabled: boolean, now?: number): void;
+	/** 编辑 / 启停（NERE-64）；只传 enabled 时与旧行为一致。 */
+	update(id: string, body: AutomationPatchInput, now?: number): AutomationView;
 	remove(id: string): void;
 	/** alarm：到点且启用的任务。 */
 	due(now: number): automationsRepo.AutomationDueRow[];
@@ -94,9 +206,12 @@ export function createAutomationService(sql: SqlHandle): AutomationService {
 			return { id, nextRunAt: at };
 		},
 
-		setEnabled(id, enabled, now = Date.now()) {
+		update(id, body, now = Date.now()) {
 			if (!id) throw new AutomationApiError(400, "缺少 id");
-			automationsRepo.setEnabled(sql, id, enabled, now + 60_000);
+			const patch = buildAutomationPatch(body, now);
+			if (!automationsRepo.get(sql, id)) throw new AutomationApiError(404, "任务不存在");
+			automationsRepo.update(sql, id, patch);
+			return automationView(automationsRepo.get(sql, id)!);
 		},
 
 		remove(id) {

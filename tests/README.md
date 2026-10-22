@@ -83,4 +83,5 @@ tests/
 | **交互式问答** | `api/api.test.ts` · 交互式问答 |
 | **分享工具 / 链接卡** | `api/share-tools.test.ts`（成功/复用/过期/审批/默认有效期）+ `api/api.test.ts` · 文件分享 / 工具注册 + `unit/entries.test.ts` · 分享链接 |
 | **首屏聚合 `/api/bootstrap`** | `unit/bootstrap.test.ts` · 逐字段容错 + `api/api.test.ts` · 首屏聚合 + `api/multiuser.test.ts` · 邀请用户注册表计数 |
+| **定时任务编辑（PATCH）** | `unit/automation-patch.test.ts` · 字段组合 / next_run_at 重算 + `api/api.test.ts` · 定时任务编辑 |
 | **路由表覆盖（阶段 6）** | `unit/route-coverage.test.ts`（20 个 method+path 全部命中，未知路径不命中） |
