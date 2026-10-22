@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { KbRefsBar, groupByDoc } from "../../src/web/components/KbRefsBar";
 import { parseEntries, parseKbRefs } from "../../src/web/lib/entries";
+import { PANEL_IDLE, reducePanel } from "../../src/web/lib/panels";
 import type { KbRef } from "../../src/web/types";
 
 const REFS: KbRef[] = [
@@ -69,5 +70,36 @@ describe("KbRefsBar · 参考资料条（NERE-41）", () => {
 		// 收起态不渲染列表，也不伪造链接
 		expect(html).not.toContain("<ul");
 		expect(html).not.toContain("<a ");
+	});
+});
+
+describe("知识库定位生命周期 · 重开弹窗不重放（NERE-75 P1-1）", () => {
+	const focus = { docId: 7, chunkSeq: 2, nonce: 1 };
+
+	it("点参考资料 A → Esc → 点 Rail「知识库」：停在列表", () => {
+		const opened = reducePanel(PANEL_IDLE, { type: "kb-ref", focus });
+		expect(opened).toEqual({ active: "kb", kbFocus: focus });
+
+		const closed = reducePanel(opened, { type: "close" });
+		expect(closed).toEqual(PANEL_IDLE);
+
+		const reopened = reducePanel(closed, { type: "toggle", panel: "kb" });
+		expect(reopened.active).toBe("kb");
+		expect(reopened.kbFocus).toBeNull();
+	});
+
+	it("消费后立即清空：即使没有经过 close，重开也不会用旧 nonce 再打开一次", () => {
+		const opened = reducePanel(PANEL_IDLE, { type: "kb-ref", focus });
+		const consumed = reducePanel(opened, { type: "kb-focus-consumed" });
+		expect(consumed).toEqual({ active: "kb", kbFocus: null });
+
+		expect(reducePanel(consumed, { type: "toggle", panel: "kb" })).toEqual(PANEL_IDLE);
+		expect(reducePanel(consumed, { type: "close" })).toEqual(PANEL_IDLE);
+	});
+
+	it("切到别的弹窗 / 打开设置同样丢弃未消费的定位", () => {
+		const opened = reducePanel(PANEL_IDLE, { type: "kb-ref", focus });
+		expect(reducePanel(opened, { type: "toggle", panel: "mcp" })).toEqual({ active: "mcp", kbFocus: null });
+		expect(reducePanel(opened, { type: "settings" })).toEqual(PANEL_IDLE);
 	});
 });

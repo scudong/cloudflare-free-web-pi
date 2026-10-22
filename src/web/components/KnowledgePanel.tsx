@@ -17,7 +17,15 @@ const viewMemory = { query: "" };
  *
  * 外壳（标题 / 宽度 / 遮罩 / 关闭）由 ModalShell 提供；本组件只负责面板内容。
  */
-export function KnowledgePanel({ focus }: { onClose: () => void; focus?: KbFocus | null }) {
+export function KnowledgePanel({
+	focus,
+	onFocusConsumed,
+}: {
+	onClose: () => void;
+	focus?: KbFocus | null;
+	/** 定位请求已消费：通知页面层清空，弹窗重开时不再重放上一篇（NERE-75 P1-1）。 */
+	onFocusConsumed?: () => void;
+}) {
 	const [docs, setDocs] = useState<KbDocInfo[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -136,13 +144,15 @@ export function KnowledgePanel({ focus }: { onClose: () => void; focus?: KbFocus
 	}, []);
 
 	// 从消息里的参考资料跳进来（NERE-41）：nonce 变化即打开对应文档，重复点同一篇也能再次触发。
+	// 打开后立刻消费掉（NERE-75 P1-1）：否则关闭再重开时组件重新挂载，旧 nonce 会再打开同一篇。
 	const focusNonce = focus?.nonce;
 	const focusDocId = focus?.docId;
 	const focusSeq = focus?.chunkSeq;
 	useEffect(() => {
 		if (focusNonce === undefined || focusDocId === undefined) return;
 		view(focusDocId, focusSeq);
-	}, [focusNonce, focusDocId, focusSeq, view]);
+		onFocusConsumed?.();
+	}, [focusNonce, focusDocId, focusSeq, view, onFocusConsumed]);
 
 	/** 导入成功后回到完整列表：检索结果里不会有刚入库的文档。 */
 	const handleImported = useCallback(() => {
