@@ -4,6 +4,13 @@
 
 ## 2026-10-22
 
+### 定时任务上次运行结果落库：`last_status`（NERE-68 2b）
+- 迁移 v8 给 `automations` 加 `last_status TEXT`（`ok` / `failed` / `deferred`），老数据为 NULL，走 `ensureColumn` 幂等补列
+- alarm 三条路径各写各的状态：成功 `ok`、异常 `failed`（`console.warn` 保留）、会话忙 `deferred`；`deferred` 只推后 `next_run_at`，不动 `last_run_at`
+- 执行循环从 `worker.ts` 收进 `automation-service.ts` 的 `runDueAutomations`：三态判定可单测，`worker.ts` 只注入 chat 端口
+- `GET /api/automations` 与 `PATCH` 返回体的 `automation` 都带 `last_status`（未知值收敛为 `null`）；bootstrap 的 `automations` 同步带上
+- 测试：`unit/automation-last-status.test.ts`（三态落库 / 顺延不覆盖 / 视图收敛）+ `unit/migrations.test.ts` v8 老库补列 + `api/api.test.ts` 接口字段断言
+
 ### 知识库重建向量索引支持大批量：`IN` 列表分批（NERE-66）
 - `repo/kb-repo.ts` 的 `markVectorized` / `chunksByIds` 改用 `db/sql-batch.ts` 的 `chunkIds`（去重后每 90 个 id 一批）：SQLite-backed DO 每条查询最多 100 个绑定参数，默认 200 / 上限 500 的重建批次原先会在 `IN (?,…)` 处失败
 - 设置页「重建向量索引」不再报错；`KB_VECTOR_BATCH` 默认值与检索逻辑未改

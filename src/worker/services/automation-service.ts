@@ -62,6 +62,8 @@ export type AutomationView = {
 	schedule: Schedule;
 	enabled: boolean;
 	last_run_at: number | null;
+	/** 上次运行结果（NERE-68）：ok / failed / deferred，老数据为 null。 */
+	last_status: automationsRepo.AutomationLastStatus | null;
 	next_run_at: number;
 };
 
@@ -151,6 +153,7 @@ export function automationView(row: automationsRepo.AutomationRow): AutomationVi
 		schedule: parseStoredSchedule(row.schedule),
 		enabled: row.enabled === 1,
 		last_run_at: row.last_run_at,
+		last_status: automationsRepo.parseLastStatus(row.last_status),
 		next_run_at: row.next_run_at,
 	};
 }
@@ -163,10 +166,10 @@ export type AutomationService = {
 	remove(id: string): void;
 	/** alarm：到点且启用的任务。 */
 	due(now: number): automationsRepo.AutomationDueRow[];
-	/** 会话忙：顺延 5 分钟（不改 last_run_at）。 */
+	/** 会话忙：顺延 5 分钟，只记 `last_status = deferred`（不改 last_run_at）。 */
 	defer(id: string, now: number): void;
-	/** 执行完一轮：写 last_run_at 与下一次 next_run_at。 */
-	markRun(job: { id: string; schedule: string }, now: number): void;
+	/** 执行完一轮：写 last_run_at、last_status（ok / failed）与下一次 next_run_at。 */
+	markRun(job: { id: string; schedule: string }, now: number, status: "ok" | "failed"): void;
 	/** 本轮处理过任务时，把仍落在过去的时间统一顺延 60s。 */
 	rescheduleOverdue(now: number): void;
 	/** alarm：到点且 active 的目标会话。 */
@@ -176,6 +179,43 @@ export type AutomationService = {
 	/** 任务与目标中最早的闹钟时刻；没有返回 null。 */
 	nextAlarmAt(): number | null;
 };
+
+/** alarm 每轮需要的执行端口：会话忙判断、提交一轮、失败后的会话恢复。 */
+export type AutomationRunner = {
+	hasActive(sessionId: string): boolean;
+	run(job: automationsRepo.AutomationDueRow): Promise<void>;
+	recover(): Promise<void>;
+};
+
+/**
+ * 执行一轮到点任务（NERE-68 三态）：
+ * - 会话忙 → `deferred` 且不改 last_run_at（顺延不算一次运行）；
+ * - 成功 → `ok`；异常 → `failed`（console.warn 保留），两者都更新 last_run_at；
+ * - 单个任务的异常不外抛，后续任务照常执行。
+ */
+export async function runDueAutomations(
+	jobs: readonly automationsRepo.AutomationDueRow[],
+	now: number,
+	service: Pick<AutomationService, "defer" | "markRun">,
+	runner: AutomationRunner,
+): Promise<void> {
+	for (const job of jobs) {
+		// 会话正忙时跳过这一轮，避免并发 submit 破坏会话状态（v0.17.1）
+		if (runner.hasActive(job.session_id || "1")) {
+			service.defer(job.id, now);
+			continue;
+		}
+		let status: "ok" | "failed" = "ok";
+		try {
+			await runner.run(job);
+		} catch (err) {
+			console.warn(`automation ${job.id} failed`, String(err).slice(0, 200));
+			status = "failed";
+			await runner.recover();
+		}
+		service.markRun(job, now, status);
+	}
+}
 
 export function createAutomationService(sql: SqlHandle): AutomationService {
 	return {
@@ -224,14 +264,14 @@ export function createAutomationService(sql: SqlHandle): AutomationService {
 			automationsRepo.markDeferred(sql, id, now + 5 * 60_000);
 		},
 
-		markRun(job, now) {
+		markRun(job, now, status) {
 			let schedule: Schedule = DAILY_DEFAULT;
 			try {
 				schedule = JSON.parse(job.schedule) as Schedule;
 			} catch {
 				// 保持默认
 			}
-			automationsRepo.markRun(sql, job.id, now, nextRunAt(schedule, Date.now()));
+			automationsRepo.markRun(sql, job.id, now, nextRunAt(schedule, Date.now()), status);
 		},
 
 		rescheduleOverdue(now) {

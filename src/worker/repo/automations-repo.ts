@@ -12,13 +12,24 @@ export type AutomationRow = {
 	schedule: string;
 	enabled: number;
 	last_run_at: number | null;
+	last_status: string | null;
 	next_run_at: number;
 };
 
 export type AutomationDueRow = { id: string; prompt: string; session_id: string; schedule: string };
 
+/** 上次运行结果（NERE-68）：成功 / 异常 / 会话忙顺延。 */
+export type AutomationLastStatus = "ok" | "failed" | "deferred";
+
+const LAST_STATUSES: readonly AutomationLastStatus[] = ["ok", "failed", "deferred"];
+
+/** 只透出三种已知值；老库 NULL 与脏值都按 null（前端不渲染徽标）。 */
+export function parseLastStatus(raw: unknown): AutomationLastStatus | null {
+	return LAST_STATUSES.includes(raw as AutomationLastStatus) ? (raw as AutomationLastStatus) : null;
+}
+
 const SELECT =
-	"SELECT id, name, prompt, session_id, schedule, enabled, last_run_at, next_run_at FROM automations";
+	"SELECT id, name, prompt, session_id, schedule, enabled, last_run_at, last_status, next_run_at FROM automations";
 
 export function list(sql: SqlHandle): AutomationRow[] {
 	return sql.exec(`${SELECT} ORDER BY created_at DESC`).toArray() as AutomationRow[];
@@ -97,12 +108,19 @@ export function listDue(sql: SqlHandle, now: number): AutomationDueRow[] {
 		.toArray() as AutomationDueRow[];
 }
 
+/** 会话忙：只推 next_run_at 并记 deferred，不动 last_run_at。 */
 export function markDeferred(sql: SqlHandle, id: string, nextRunAt: number): void {
-	sql.exec("UPDATE automations SET next_run_at = ? WHERE id = ?", nextRunAt, id);
+	sql.exec("UPDATE automations SET next_run_at = ?, last_status = 'deferred' WHERE id = ?", nextRunAt, id);
 }
 
-export function markRun(sql: SqlHandle, id: string, lastRunAt: number, nextRunAt: number): void {
-	sql.exec("UPDATE automations SET last_run_at = ?, next_run_at = ? WHERE id = ?", lastRunAt, nextRunAt, id);
+export function markRun(
+	sql: SqlHandle,
+	id: string,
+	lastRunAt: number,
+	nextRunAt: number,
+	status: Exclude<AutomationLastStatus, "deferred">,
+): void {
+	sql.exec("UPDATE automations SET last_run_at = ?, last_status = ?, next_run_at = ? WHERE id = ?", lastRunAt, status, nextRunAt, id);
 }
 
 /** 全部顺延（旧逻辑：本轮处理过任务时把所有仍在过去的 next_run_at 推到 now+60s）。 */
