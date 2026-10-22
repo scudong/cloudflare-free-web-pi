@@ -1,0 +1,160 @@
+tests/unit/automation-last-run.test.tsx
+  62451ee138aee532 1-157
+docs/frontend-map.md
+  62451ee138aee532 38,86
+src/worker/db/sql-batch.ts
+  62451ee138aee532 1-13
+src/worker/repo/kb-repo.ts
+  62451ee138aee532 2,182,184-196,211,213-215
+src/web/components/LeftPanels.tsx
+  62451ee138aee532 3,8,162-216,227,240-241,379
+src/web/types.ts
+  62451ee138aee532 140-142,154,156-159
+src/web/lib/format.ts
+  62451ee138aee532 47-54
+tests/unit/kb-service.test.ts
+  62451ee138aee532 12-13,17,109-113,213-229
+tests/unit/automation-patch.test.ts
+  62451ee138aee532 134,145,159
+tests/api/api.test.ts
+  62451ee138aee532 1048-1056
+CHANGELOG.md
+  62451ee138aee532 7-18
+tests/unit/automation-last-status.test.ts
+  62451ee138aee532 1-176
+README.zh-CN.md
+  62451ee138aee532 169
+src/worker/db/migrations.ts
+  62451ee138aee532 192-203,212
+tests/unit/migrations.test.ts
+  62451ee138aee532 288-314
+src/web/App.tsx
+  62451ee138aee532 1476
+src/worker.ts
+  62451ee138aee532 39,769-773
+src/web/lib/collections.ts
+  62451ee138aee532 4,112-113,118-131
+src/worker/services/automation-service.ts
+  62451ee138aee532 65-66,156,169,171-172,183-219,267,274
+src/worker/repo/automations-repo.ts
+  62451ee138aee532 15,21-30,32,111,113,116-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "99c063b05c4d483d8fdf22a97d3e1ad639164184",
+  "prompts": {
+    "62451ee138aee532": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0d1462e-073b-4b02-a4a7-a8c4cd702dcb",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 1103,
+      "total_deletions": 40,
+      "accepted_lines": 1103,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "docs/frontend-map.md": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "docs/nere-68-last-status.png": {
+          "additions": 290,
+          "accepted_lines": 290
+        },
+        "src/worker/services/automation-service.ts": {
+          "additions": 45,
+          "deletions": 5,
+          "accepted_lines": 45
+        },
+        "tests/unit/automation-last-status.test.ts": {
+          "additions": 176,
+          "accepted_lines": 176
+        },
+        "README.zh-CN.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "tests/unit/automation-patch.test.ts": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "tests/api/api.test.ts": {
+          "additions": 9,
+          "accepted_lines": 9
+        },
+        "docs/nere-68-last-run.png": {
+          "additions": 181,
+          "accepted_lines": 181
+        },
+        "src/web/types.ts": {
+          "additions": 8,
+          "deletions": 1,
+          "accepted_lines": 8
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 19,
+          "accepted_lines": 19
+        },
+        "src/worker/db/migrations.ts": {
+          "additions": 13,
+          "accepted_lines": 13
+        },
+        "src/web/App.tsx": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "src/worker/db/sql-batch.ts": {
+          "additions": 13,
+          "accepted_lines": 13
+        },
+        "CHANGELOG.md": {
+          "additions": 12,
+          "accepted_lines": 12
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 61,
+          "deletions": 1,
+          "accepted_lines": 61
+        },
+        "tests/unit/automation-last-run.test.tsx": {
+          "additions": 157,
+          "accepted_lines": 157
+        },
+        "src/web/lib/format.ts": {
+          "additions": 9,
+          "accepted_lines": 9
+        },
+        "src/worker.ts": {
+          "additions": 6,
+          "deletions": 15,
+          "accepted_lines": 6
+        },
+        "tests/unit/migrations.test.ts": {
+          "additions": 27,
+          "accepted_lines": 27
+        },
+        "src/worker/repo/kb-repo.ts": {
+          "additions": 19,
+          "deletions": 10,
+          "accepted_lines": 19
+        },
+        "tests/unit/kb-service.test.ts": {
+          "additions": 29,
+          "deletions": 1,
+          "accepted_lines": 29
+        },
+        "src/worker/repo/automations-repo.ts": {
+          "additions": 22,
+          "deletions": 4,
+          "accepted_lines": 22
+        }
+      }
+    }
+  }
+}
