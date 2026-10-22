@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-22T05:52:02Z",
+  "entries": [
+    {
+      "schemaVersion": 1,
+      "name": "meeting-notes",
+      "version": "1.0.0",
+      "description": "把会议录音转写、聊天记录或零散笔记整理成可执行的会议纪要，明确决议、待办、负责人和截止时间。",
+      "author": "pi-harness",
+      "source": "https://github.com/scudong/cloudflare-free-web-pi/tree/main/skills/meeting-notes",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["meeting"],
+      "requires": {
+        "tools": [],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/meeting-notes/SKILL.md",
+      "contentHash": "sha256:cef77650d65efe4ae1b811758b0aa0106dbf1cd8f7a3248aac1a0f70cc276f2e",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": []
+        },
+        "auditedAt": "2026-10-22T05:52:02Z",
+        "hash": "sha256:cef77650d65efe4ae1b811758b0aa0106dbf1cd8f7a3248aac1a0f70cc276f2e",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "weekly-report",
+      "version": "1.0.0",
+      "description": "把一周的零散工作记录整理成结构清晰的周报或日报，突出结果、数据、风险与下周计划。",
+      "author": "pi-harness",
+      "source": "https://github.com/scudong/cloudflare-free-web-pi/tree/main/skills/weekly-report",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["writing"],
+      "requires": {
+        "tools": [],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/weekly-report/SKILL.md",
+      "contentHash": "sha256:2336689061295cddb9077b215612c640cfa2bdf610e3b80e9494c0df5bbe697e",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": []
+        },
+        "auditedAt": "2026-10-22T05:52:02Z",
+        "hash": "sha256:2336689061295cddb9077b215612c640cfa2bdf610e3b80e9494c0df5bbe697e",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "code-review-checklist",
+      "version": "1.0.0",
+      "description": "按风险优先级审查代码变更，输出可执行的评审意见，覆盖正确性、边界、并发、安全、兼容性和测试。",
+      "author": "pi-harness",
+      "source": "https://github.com/scudong/cloudflare-free-web-pi/tree/main/skills/code-review-checklist",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["engineering"],
+      "requires": {
+        "tools": [],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/code-review-checklist/SKILL.md",
+      "contentHash": "sha256:1495efa2fd7ee8b85aa0811c37fa0d1f11332d6c2aa42bb9832430c533d0395c",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": []
+        },
+        "auditedAt": "2026-10-22T05:52:02Z",
+        "hash": "sha256:1495efa2fd7ee8b85aa0811c37fa0d1f11332d6c2aa42bb9832430c533d0395c",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "research-brief",
+      "version": "1.0.0",
+      "description": "把研报、公告、访谈或网页资料压缩成结论先行、证据可追溯的投研摘要，明确事实、推断与未知。",
+      "author": "pi-harness",
+      "source": "https://github.com/scudong/cloudflare-free-web-pi/tree/main/skills/research-brief",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["research"],
+      "requires": {
+        "tools": [],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/research-brief/SKILL.md",
+      "contentHash": "sha256:d0b0f34d782c0b7a254d511d18088f7ad0e1efae56750840dbb9e637ae4f6304",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": []
+        },
+        "auditedAt": "2026-10-22T05:52:02Z",
+        "hash": "sha256:d0b0f34d782c0b7a254d511d18088f7ad0e1efae56750840dbb9e637ae4f6304",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "reply-polish",
+      "version": "1.0.0",
+      "description": "润色客服、商务和跨部门回复，保留原意与承诺边界，让语气专业、结构清楚、下一步明确。",
+      "author": "pi-harness",
+      "source": "https://github.com/scudong/cloudflare-free-web-pi/tree/main/skills/reply-polish",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["business"],
+      "requires": {
+        "tools": [],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/reply-polish/SKILL.md",
+      "contentHash": "sha256:123dc92ced8b1cbbe740fbd4e9285b8346879dfdf426820f0d9d49d1555503c3",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": []
+        },
+        "auditedAt": "2026-10-22T05:52:02Z",
+        "hash": "sha256:123dc92ced8b1cbbe740fbd4e9285b8346879dfdf426820f0d9d49d1555503c3",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "requirement-breakdown",
+      "version": "1.0.0",
+      "description": "把一句话需求拆成可交付的用户故事、边界场景和可验证的验收标准，提前暴露依赖与开放问题。",
+      "author": "pi-harness",
+      "source": "https://github.com/scudong/cloudflare-free-web-pi/tree/main/skills/requirement-breakdown",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["product"],
+      "requires": {
+        "tools": [],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/requirement-breakdown/SKILL.md",
+      "contentHash": "sha256:b7228df7e310931c816b64d3575af9598f500e416141ae3b26af5cd6a109d7ba",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": []
+        },
+        "auditedAt": "2026-10-22T05:52:02Z",
+        "hash": "sha256:b7228df7e310931c816b64d3575af9598f500e416141ae3b26af5cd6a109d7ba",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    }
+  ]
+}
