@@ -54,6 +54,14 @@ afterAll(async () => {
 	await stopServer(proc, STATE);
 });
 
+describe("空库首启", () => {
+	it("第一个 DO 请求 GET /api/sessions 直接 200", async () => {
+		const { status, json } = await api("/api/sessions");
+		expect(status).toBe(200);
+		expect(Array.isArray(json.sessions)).toBe(true);
+	});
+});
+
 describe("访问控制", () => {
 	it("未配置密码时 auth 返回无需登录", async () => {
 		const { json } = await api("/api/auth");

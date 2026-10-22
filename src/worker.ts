@@ -23,10 +23,9 @@ import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudfl
 // 构建期注入：内核依赖版本（v0.35.0）
 import packageJson from "../package.json";
 import { collectBootstrap } from "./worker/bootstrap";
+import { migrate, type SqlHandle } from "./worker/db/migrations";
 
 const ctx = BACKGROUND_CONTEXT;
-
-type SqlHandle = { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } };
 
 /**
  * 同一 isolate 可能同时承载多个 Durable Object（多用户后必然发生），
@@ -61,100 +60,6 @@ const sqlFacade = new Proxy({} as SqlHandle, {
 		return typeof value === "function" ? value.bind(db) : value;
 	},
 });
-const ensureTables = (sql: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } }) => {
-	sql.exec(`CREATE TABLE IF NOT EXISTS pi_mem (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL, created_at TEXT NOT NULL)`);
-	sql.exec(`CREATE TABLE IF NOT EXISTS vfs_v2 (conversation_id TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (conversation_id, name))`);
-	// 旧版全局文件表 → 迁到 v2 的根会话（'1'），然后丢弃旧表。
-	try {
-		const legacy = sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='vfs_files'").toArray() as { name: string }[];
-		if (legacy.length) {
-			sql.exec(`INSERT OR IGNORE INTO vfs_v2 (conversation_id, name, content, updated_at) SELECT '1', name, content, updated_at FROM vfs_files`);
-			sql.exec(`DROP TABLE vfs_files`);
-		}
-	} catch (err) {
-		console.warn("vfs migration skipped", err);
-	}
-	try {
-		sql.exec(`ALTER TABLE sessions_meta ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0`);
-	} catch {
-		// 列已存在
-	}
-	try {
-		sql.exec(`ALTER TABLE sessions_meta ADD COLUMN model TEXT NOT NULL DEFAULT 'deepseek-flash'`);
-	} catch {
-		// 列已存在
-	}
-	// v0.29.0：子代理会话不出现在侧栏
-	try {
-		sql.exec(`ALTER TABLE sessions_meta ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`);
-	} catch {
-		// 列已存在
-	}
-	// v0.32.0：会话分支——记录分叉来源与分叉点条目
-	try {
-		sql.exec(`ALTER TABLE sessions_meta ADD COLUMN parent_id TEXT`);
-	} catch {
-		// 列已存在
-	}
-	try {
-		sql.exec(`ALTER TABLE sessions_meta ADD COLUMN fork_at INTEGER`);
-	} catch {
-		// 列已存在
-	}
-	sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
-	sql.exec(`CREATE TABLE IF NOT EXISTS skills (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)`);
-	// 只读分享（v0.9.0）；v0.38.0 起支持过期时间，v0.39.1 起记录分享时的主题
-	sql.exec(`CREATE TABLE IF NOT EXISTS shares (token TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0, theme TEXT NOT NULL DEFAULT 'dark', created_at TEXT NOT NULL)`);
-	try {
-		sql.exec(`ALTER TABLE shares ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0`);
-	} catch {
-		// 列已存在（老库）
-	}
-	try {
-		sql.exec(`ALTER TABLE shares ADD COLUMN theme TEXT NOT NULL DEFAULT 'dark'`);
-	} catch {
-		// 列已存在（老库）
-	}
-	sql.exec(`CREATE TABLE IF NOT EXISTS automations (id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_run_at INTEGER, next_run_at INTEGER NOT NULL)`);
-	sql.exec(`CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)`);
-	sql.exec(`CREATE TABLE IF NOT EXISTS reflect_state (conversation_id TEXT PRIMARY KEY, last_entry_id INTEGER NOT NULL, updated_at TEXT NOT NULL)`);
-	sql.exec(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
-	// 分步计划（update_plan 工具写入）：每个会话一份最新计划（v0.22.0）
-	sql.exec(`CREATE TABLE IF NOT EXISTS plans (conversation_id TEXT PRIMARY KEY, steps TEXT NOT NULL, updated_at TEXT NOT NULL)`);
-	// 提示模板与规则文件（v0.31.0）：纯数据能力，运行时加载
-	sql.exec(`CREATE TABLE IF NOT EXISTS prompts (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)`);
-	sql.exec(`CREATE TABLE IF NOT EXISTS rules (name TEXT PRIMARY KEY, content TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`);
-	// 用户知识库（v0.45.0）：每个用户一个独立 DO，文档、分块与 FTS5 索引都落在自己的库
-	sql.exec(`CREATE TABLE IF NOT EXISTS kb_docs (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, source TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
-	sql.exec(`CREATE TABLE IF NOT EXISTS kb_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT, doc_id INTEGER NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL)`);
-	// 向量索引状态（v0.53.0）：1 = 已写入 Vectorize
-	try {
-		sql.exec(`ALTER TABLE kb_chunks ADD COLUMN vectorized INTEGER NOT NULL DEFAULT 0`);
-	} catch {
-		// 列已存在
-	}
-	sql.exec(`CREATE INDEX IF NOT EXISTS kb_chunks_doc ON kb_chunks(doc_id)`);
-	// rowid 复用 kb_chunks.id；标题与正文分列，bm25 可分别加权
-	sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(title_tokens, body_tokens)`);
-	// 目标模式（v0.31.0）：一个会话一个目标，active 时按 token 预算与轮次自动续转
-	sql.exec(`CREATE TABLE IF NOT EXISTS goals (session_id TEXT PRIMARY KEY, objective TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', token_budget INTEGER NOT NULL DEFAULT 200000, baseline_tokens INTEGER NOT NULL DEFAULT 0, tokens_used INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0, max_turns INTEGER NOT NULL DEFAULT 12, summary TEXT NOT NULL DEFAULT '', next_run_at INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
-	// 交互式问答（v0.37.0）：ask_user 工具提出的问题，等用户点选后带回模型
-	sql.exec(`CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, answered_at TEXT)`);
-	// 自定义工具（v0.36.0）：用户贴一段 JS，沙箱执行后成为模型可调用的工具
-	sql.exec(`CREATE TABLE IF NOT EXISTS custom_tools (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', parameters TEXT NOT NULL DEFAULT '{}', code TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)`);
-	// 工具审批（v0.33.0）：待审批请求 + 已授予的放行许可
-	sql.exec(`CREATE TABLE IF NOT EXISTS approvals (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool TEXT NOT NULL, category TEXT NOT NULL, args TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, decided_at TEXT)`);
-	sql.exec(`CREATE TABLE IF NOT EXISTS approval_grants (session_id TEXT NOT NULL, tool TEXT NOT NULL, uses INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, PRIMARY KEY (session_id, tool))`);
-	// LLM 供应商（v0.27.0）：CCswitch 式自定义 OpenAI 兼容端点
-	sql.exec(`CREATE TABLE IF NOT EXISTS providers (id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL, models TEXT NOT NULL, created_at TEXT NOT NULL)`);
-	// pi_mem.source: manual（用户/工具显式保存）或 reflect（会话末自动抽取）。老库补列。
-	try {
-		sql.exec(`ALTER TABLE pi_mem ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`);
-	} catch {
-		// 列已存在
-	}
-};
-
 /** DEEPSEEK_API_KEY / Harness 都从当前请求作用域读取（多 DO 共 isolate 时不能放全局）。 */
 
 /** 全局设置读写（app_settings 表）：目前只有网页搜索开关 web_search。 */
@@ -2745,9 +2650,25 @@ export class SpikeAgent extends DurableObject {
 	private storageRef: { scanConversations(q: object, limit: number, cursor: undefined, context: unknown): Promise<unknown> } | null = null;
 
 	private harness: Harness | null = null;
+	/** DDL 迁移只跑一次：并发的 open()/alarm() 共享同一个 Promise。 */
+	private migrated: Promise<void> | null = null;
+
+	private ensureMigrated(): Promise<void> {
+		this.migrated ??= Promise.resolve()
+			.then(() => {
+				migrate(this.ctx.storage.sql as unknown as SqlHandle);
+			})
+			.catch((err) => {
+				// 迁移抛错不能封死这个 DO：清掉 memo，下次 open()/alarm() 重试（迁移自身可重入）。
+				this.migrated = null;
+				throw err;
+			});
+		return this.migrated;
+	}
 
 	private async open(): Promise<Harness> {
 		if (!this.harness) {
+			await this.ensureMigrated();
 			const models = createModels();
 			// v0.27.0：启用自定义供应商时用它，否则回落到 DeepSeek 官方（env DEEPSEEK_API_KEY）
 			const activeId = activeProviderId();
@@ -2763,7 +2684,6 @@ export class SpikeAgent extends DurableObject {
 			registry.install(toolSearchExtension);
 			// Durable Object SQLite: conversations survive DO restarts and redeploys.
 			const storage = await openDurableObjectSqliteStorage(this.ctx.storage);
-			ensureTables(this.ctx.storage.sql);
 			this.storageRef = storage;
 			// MCP 扩展在表就绪后构建并安装；之后由 /api/mcp 变更时重建。
 			this.mcpExt = (await buildMcpExtension(sqlFacade)) as never;
@@ -2987,7 +2907,6 @@ export class SpikeAgent extends DurableObject {
 	async listSessions(): Promise<{
 		sessions: { id: string; title: string; created_at: string; updated_at: string; model?: string; parent_id?: string | null; fork_at?: number | null }[];
 	}> {
-		ensureTables(sqlFacade!);
 		const harness = await this.open();
 		const root = await this.retryOnSessionError(harness, (h) => h.root(ctx));
 		const rows = sqlFacade!.exec(
@@ -3019,7 +2938,6 @@ export class SpikeAgent extends DurableObject {
 	 * 各 loader 与单端点共用同一实现；collectBootstrap 负责逐字段容错。
 	 */
 	private async readBootstrap(sessionId: string) {
-		ensureTables(sqlFacade!);
 		return collectBootstrap({
 			session: () => ({ ok: true, name: "pi-harness-spike" }),
 			entries: () => this.entries(sessionId),
@@ -3130,6 +3048,8 @@ export class SpikeAgent extends DurableObject {
 
 	/** DO alarm：执行到点的定时任务。 */
 	async alarm(): Promise<void> {
+		// 先迁移再看 app_settings（share_origin），失败交给平台重试 alarm。
+		await this.ensureMigrated();
 		return agentScope.run(
 			{
 				sql: this.ctx.storage.sql as unknown as SqlHandle,
@@ -4132,14 +4052,12 @@ export class SpikeAgent extends DurableObject {
 			if (request.method === "PATCH" && url.pathname === "/sessions") {
 				const { id, title } = (await request.json()) as { id?: string; title?: string };
 				if (!id || !title?.trim()) return Response.json({ error: "缺少 id 或标题" }, { status: 400 });
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec("UPDATE sessions_meta SET title = ?, updated_at = ? WHERE id = ?", title.trim().slice(0, 60), new Date().toISOString(), id);
 				return Response.json({ ok: true });
 			}
 			if (request.method === "DELETE" && url.pathname === "/sessions") {
 				const id = url.searchParams.get("id") ?? "";
 				if (!id) return Response.json({ error: "缺少 id" }, { status: 400 });
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec("UPDATE sessions_meta SET deleted = 1, updated_at = ? WHERE id = ?", new Date().toISOString(), id);
 				sqlFacade!.exec("DELETE FROM vfs_v2 WHERE conversation_id = ?", id);
 				// 目标随会话一起停止，避免继续消耗 token（v0.31.0）
@@ -4151,7 +4069,6 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/files" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				return Response.json({ files: listFiles(sid) });
 			}
@@ -4169,7 +4086,6 @@ export class SpikeAgent extends DurableObject {
 			}
 			// 全部文件（v0.45.0）：当前用户 DO 内所有会话的产物，带会话标题
 			if (url.pathname === "/files/all" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const q = (url.searchParams.get("q") ?? "").trim().slice(0, 100).toLowerCase();
 				const rows = sqlFacade!
 					.exec(
@@ -4185,11 +4101,9 @@ export class SpikeAgent extends DurableObject {
 			}
 			// 用户知识库（v0.45.0）：每人独立 DO，天然隔离
 			if (url.pathname === "/kb" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				return Response.json({ docs: kbListDocs() });
 			}
 			if (url.pathname === "/kb" && request.method === "POST") {
-				ensureTables(sqlFacade!);
 				const body = (await request.json().catch(() => ({}))) as { title?: string; content?: string; source?: string; tags?: string };
 				const title = String(body.title ?? "").trim().slice(0, 120);
 				const content = String(body.content ?? "").trim();
@@ -4200,7 +4114,6 @@ export class SpikeAgent extends DurableObject {
 			}
 			// 知识库导入（v0.56.0）：multipart 文件或 JSON {url}，复用 kbAddDoc 入库
 			if (url.pathname === "/kb/ingest" && request.method === "POST") {
-				ensureTables(sqlFacade!);
 				const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
 				try {
 					if (contentType.includes("application/json")) {
@@ -4252,21 +4165,18 @@ export class SpikeAgent extends DurableObject {
 				}
 			}
 			if (url.pathname === "/kb/doc" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const id = Number(url.searchParams.get("id") ?? 0);
 				const rows = sqlFacade!.exec("SELECT id, title, source, tags, content, created_at AS createdAt, updated_at AS updatedAt FROM kb_docs WHERE id = ?", id).toArray();
 				if (!rows[0]) return Response.json({ error: "文档不存在" }, { status: 404 });
 				return Response.json(rows[0]);
 			}
 			if (url.pathname === "/kb/search" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const q = url.searchParams.get("q") ?? "";
 				if (!q.trim()) return Response.json({ hits: [] });
 				return Response.json({ hits: await kbSearchAsync(q, Number(url.searchParams.get("limit") ?? 8)) });
 			}
 			// 预检索预览（v0.46.0）：返回本轮会注入 instructions 的原文，便于排查
 			if (url.pathname === "/kb/prefetch" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const q = url.searchParams.get("q") ?? "";
 				return Response.json({
 					enabled: getSetting("kb_prefetch", "1") === "1",
@@ -4275,13 +4185,11 @@ export class SpikeAgent extends DurableObject {
 				});
 			}
 			if (url.pathname === "/kb" && request.method === "DELETE") {
-				ensureTables(sqlFacade!);
 				const id = Number(url.searchParams.get("id") ?? 0);
 				if (!id) return Response.json({ error: "缺少文档 id" }, { status: 400 });
 				return Response.json({ ok: await kbDeleteDoc(id) });
 			}
 			if (url.pathname === "/kb/status" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const bindings = kbVectorBindings();
 				const total = Number((sqlFacade!.exec("SELECT COUNT(*) AS n FROM kb_chunks").toArray() as { n: number }[])[0]?.n ?? 0);
 				const indexed = Number((sqlFacade!.exec("SELECT COUNT(*) AS n FROM kb_chunks WHERE vectorized = 1").toArray() as { n: number }[])[0]?.n ?? 0);
@@ -4295,7 +4203,6 @@ export class SpikeAgent extends DurableObject {
 				});
 			}
 			if (url.pathname === "/kb/reindex" && request.method === "POST") {
-				ensureTables(sqlFacade!);
 				if (!kbVectorAvailable()) {
 					return Response.json({ error: "向量检索未启用（缺少 AI / KB_VEC 绑定）" }, { status: 400 });
 				}
@@ -4329,7 +4236,6 @@ export class SpikeAgent extends DurableObject {
 				const fallbackName = (target.split("/").slice(-2, -1)[0] ?? "imported-skill").toLowerCase();
 				const name = (parsed.name || fallbackName).slice(0, 40);
 				const description = parsed.description || "（从社区导入，未提供描述）";
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec(
 					"INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
 					name, description.slice(0, 200), (parsed.body || text).slice(0, 200_000), new Date().toISOString(),
@@ -4337,7 +4243,6 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true, name, description, source: target });
 			}
 			if (url.pathname === "/skills" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				return Response.json({ skills: listSkills() });
 			}
 			if (url.pathname === "/skills" && request.method === "POST") {
@@ -4345,7 +4250,6 @@ export class SpikeAgent extends DurableObject {
 				const name = (body.name ?? "").trim().slice(0, 40);
 				const content = (body.content ?? "").trim();
 				if (!name || !content) return Response.json({ error: "需要名称与内容" }, { status: 400 });
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec(
 					"INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
 					name, (body.description ?? "").trim().slice(0, 120), content, new Date().toISOString(),
@@ -4353,7 +4257,6 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/skills" && request.method === "DELETE") {
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec("DELETE FROM skills WHERE name = ?", url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
 			}
@@ -4433,7 +4336,6 @@ export class SpikeAgent extends DurableObject {
 				});
 			}
 			if (url.pathname === "/automations" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				return Response.json({ automations: listAutomations() });
 			}
 			if (url.pathname === "/automations" && request.method === "POST") {
@@ -4449,7 +4351,6 @@ export class SpikeAgent extends DurableObject {
 				const schedule = body.schedule?.kind === "interval"
 					? { kind: "interval", minutes: Math.max(1, Math.floor(Number(body.schedule.minutes ?? 60))) }
 					: { kind: "daily", time: /^\d{1,2}:\d{2}$/.test(body.schedule?.time ?? "") ? body.schedule!.time! : "09:00" };
-				ensureTables(sqlFacade!);
 				const id = `a${Date.now().toString(36)}`;
 				sqlFacade!.exec(
 					"INSERT INTO automations (id, name, prompt, session_id, schedule, enabled, created_at, next_run_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
@@ -4462,7 +4363,6 @@ export class SpikeAgent extends DurableObject {
 				const body = (await request.json()) as { id?: string; enabled?: boolean };
 				if (!body.id) return Response.json({ error: "缺少 id" }, { status: 400 });
 				const enabled = body.enabled ? 1 : 0;
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec(
 					"UPDATE automations SET enabled = ?, next_run_at = CASE WHEN ? = 1 THEN ? ELSE next_run_at END WHERE id = ?",
 					enabled, enabled, Date.now() + 60_000, body.id,
@@ -4471,7 +4371,6 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/automations" && request.method === "DELETE") {
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec("DELETE FROM automations WHERE id = ?", url.searchParams.get("id") ?? "");
 				await this.scheduleNextAlarm();
 				return Response.json({ ok: true });
@@ -4490,7 +4389,6 @@ export class SpikeAgent extends DurableObject {
 			}
 			/* ---- 提示模板（v0.31.0） ---- */
 			if (url.pathname === "/prompts" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				return Response.json({ prompts: listPrompts() });
 			}
 			if (url.pathname === "/prompts" && request.method === "POST") {
@@ -4498,7 +4396,6 @@ export class SpikeAgent extends DurableObject {
 				const name = (body.name ?? "").trim().slice(0, 40);
 				const content = (body.content ?? "").trim();
 				if (!name || !content) return Response.json({ error: "需要名称与内容" }, { status: 400 });
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec(
 					"INSERT INTO prompts (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
 					name, (body.description ?? "").trim().slice(0, 120), content, new Date().toISOString(),
@@ -4506,13 +4403,11 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/prompts" && request.method === "DELETE") {
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec("DELETE FROM prompts WHERE name = ?", url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
 			}
 			/* ---- 规则文件（v0.31.0） ---- */
 			if (url.pathname === "/rules" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				return Response.json({ rules: ruleViews() });
 			}
 			if (url.pathname === "/rules" && request.method === "POST") {
@@ -4520,7 +4415,6 @@ export class SpikeAgent extends DurableObject {
 				const name = (body.name ?? "").trim().slice(0, 40);
 				const content = (body.content ?? "").trim();
 				if (!name || !content) return Response.json({ error: "需要名称与内容" }, { status: 400 });
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec(
 					"INSERT INTO rules (name, content, enabled, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET content = excluded.content",
 					name, content, body.enabled === false ? 0 : 1, new Date().toISOString(),
@@ -4530,18 +4424,15 @@ export class SpikeAgent extends DurableObject {
 			if (url.pathname === "/rules" && request.method === "PATCH") {
 				const body = (await request.json()) as { name?: string; enabled?: boolean };
 				if (!body.name) return Response.json({ error: "缺少 name" }, { status: 400 });
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec("UPDATE rules SET enabled = ? WHERE name = ?", body.enabled ? 1 : 0, body.name);
 				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/rules" && request.method === "DELETE") {
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec("DELETE FROM rules WHERE name = ?", url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
 			}
 			/* ---- 能力注册表（v0.31.0）：把三类来源汇总成一张表 ---- */
 			if (url.pathname === "/capabilities" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const settings = compactionSettings();
 				const builtin = [
 					{ id: "codemode", name: "Code Mode", description: "QuickJS 沙箱里写 JS 调工具", enabled: true },
@@ -4583,12 +4474,10 @@ export class SpikeAgent extends DurableObject {
 			}
 			/* ---- 交互式问答（v0.37.0） ---- */
 			if (url.pathname === "/questions" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				return Response.json({ questions: listPendingQuestions(sid) });
 			}
 			if (url.pathname === "/questions" && request.method === "POST") {
-				ensureTables(sqlFacade!);
 				const body = (await request.json().catch(() => ({}))) as {
 					id?: number;
 					answers?: { id?: string; choice?: string; text?: string }[];
@@ -4618,11 +4507,9 @@ export class SpikeAgent extends DurableObject {
 			}
 			/* ---- 自定义工具（v0.36.0） ---- */
 			if (url.pathname === "/custom-tools" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				return Response.json({ tools: listCustomTools() });
 			}
 			if (url.pathname === "/custom-tools" && request.method === "POST") {
-				ensureTables(sqlFacade!);
 				const body = (await request.json().catch(() => ({}))) as {
 					name?: string;
 					description?: string;
@@ -4663,7 +4550,6 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true, name, tools: (this.customExt as { tools?: unknown[] } | null)?.tools?.length ?? 0 });
 			}
 			if (url.pathname === "/custom-tools" && request.method === "DELETE") {
-				ensureTables(sqlFacade!);
 				const name = url.searchParams.get("name") ?? "";
 				if (!name) return Response.json({ ok: false, error: "缺少 name" }, { status: 400 });
 				sqlFacade!.exec("DELETE FROM custom_tools WHERE name = ?", name);
@@ -4673,7 +4559,6 @@ export class SpikeAgent extends DurableObject {
 			}
 			/* ---- pi 内核版本（v0.35.0）：当前声明版本 + npm 最新版本（缓存 6 小时） ---- */
 			if (url.pathname === "/kernel" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const current = declaredKernelVersions();
 				const refresh = url.searchParams.get("refresh") === "1";
 				const cachedAt = getSetting("kernel_checked_at", "");
@@ -4724,12 +4609,10 @@ export class SpikeAgent extends DurableObject {
 			}
 			/* ---- 工具审批（v0.33.0） ---- */
 			if (url.pathname === "/approvals" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				return Response.json({ approvals: listPendingApprovals(sid) });
 			}
 			if (url.pathname === "/approvals" && request.method === "POST") {
-				ensureTables(sqlFacade!);
 				const body = (await request.json().catch(() => ({}))) as { id?: number; action?: string };
 				const id = Math.floor(Number(body.id));
 				const action = body.action;
@@ -4766,7 +4649,6 @@ export class SpikeAgent extends DurableObject {
 			}
 			if (url.pathname === "/tools" && request.method === "GET") {
 				await this.open();
-				ensureTables(sqlFacade!);
 				const names = new Set<string>();
 				// 内置扩展（spike / codemode / tool-search）+ 已连接的 MCP 工具
 				for (const ext of [spikeExtension, codemodeExtension, toolSearchExtension, this.mcpExt, this.customExt] as unknown as {
@@ -4785,7 +4667,6 @@ export class SpikeAgent extends DurableObject {
 				});
 			}
 			if (url.pathname === "/settings" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				return Response.json(settingsView());
 			}
 			if (url.pathname === "/settings" && request.method === "POST") {
@@ -4865,18 +4746,15 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true, taskId: String(taskId) });
 			}
 			if (url.pathname === "/plan" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				return Response.json({ steps: readPlan(sid) });
 			}
 			/* ---- 目标模式（v0.31.0）：GET 读 / POST 建立 / DELETE 停止 ---- */
 			if (url.pathname === "/goal" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				return Response.json({ goal: goalInfo(readGoalRow(sid)) });
 			}
 			if (url.pathname === "/goal" && request.method === "POST") {
-				ensureTables(sqlFacade!);
 				const body = (await request.json().catch(() => ({}))) as {
 					sessionId?: string;
 					objective?: string;
@@ -4895,14 +4773,12 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true, goal: goalInfo(readGoalRow(sid)) });
 			}
 			if (url.pathname === "/goal" && request.method === "DELETE") {
-				ensureTables(sqlFacade!);
 				const sid = url.searchParams.get("sessionId") ?? "1";
 				writeGoal(sid, { status: "paused", next_run_at: 0 });
 				await this.scheduleNextAlarm();
 				return Response.json({ ok: true, goal: goalInfo(readGoalRow(sid)) });
 			}
 			if (url.pathname === "/providers" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				const active = activeProviderId();
 				const rows = listProviderRows().map((r) => ({
 					id: r.id,
@@ -4932,7 +4808,6 @@ export class SpikeAgent extends DurableObject {
 					.map((m) => String(m).trim())
 					.filter(Boolean)
 					.slice(0, 20);
-				ensureTables(sqlFacade!);
 				const id =
 					(body.id ?? "").trim() ||
 					baseUrl.replace(/^https?:\/\//, "").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase().slice(0, 24) ||
@@ -4950,7 +4825,6 @@ export class SpikeAgent extends DurableObject {
 			}
 			if (url.pathname === "/providers" && request.method === "DELETE") {
 				const id = url.searchParams.get("id") ?? "";
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec("DELETE FROM providers WHERE id = ?", id);
 				if (activeProviderId() === id) setSetting("active_provider", "");
 				await this.recoverSession();
@@ -4959,7 +4833,6 @@ export class SpikeAgent extends DurableObject {
 			if (url.pathname === "/providers/activate" && request.method === "POST") {
 				const body = (await request.json()) as { id?: string };
 				const id = (body.id ?? "").trim();
-				ensureTables(sqlFacade!);
 				if (id && !listProviderRows().some((r) => r.id === id)) {
 					return Response.json({ error: "供应商不存在" }, { status: 404 });
 				}
@@ -4978,7 +4851,6 @@ export class SpikeAgent extends DurableObject {
 					return Response.json({ error: "不支持的模型" }, { status: 400 });
 				}
 				if (!body.sessionId) return Response.json({ error: "缺少 sessionId" }, { status: 400 });
-				ensureTables(sqlFacade!);
 				sqlFacade!.exec(
 					"INSERT INTO sessions_meta (id, title, created_at, updated_at, model) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET model = excluded.model",
 					body.sessionId, "新会话", new Date().toISOString(), new Date().toISOString(), modelId,
@@ -4986,7 +4858,6 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true, modelId });
 			}
 			if (url.pathname === "/mcp" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				return Response.json({ servers: listMcpServers() });
 			}
 			if (url.pathname === "/mcp" && request.method === "POST") {
@@ -4996,7 +4867,6 @@ export class SpikeAgent extends DurableObject {
 				if (!name || !/^https?:\/\//.test(serverUrl)) {
 					return Response.json({ error: "需要名称与 http(s) 服务器地址" }, { status: 400 });
 				}
-				ensureTables(sqlFacade!);
 				const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || `s${Date.now()}`;
 				sqlFacade!.exec(
 					"INSERT INTO mcp_servers (id, name, url, headers, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, url = excluded.url, headers = excluded.headers",
@@ -5029,13 +4899,11 @@ export class SpikeAgent extends DurableObject {
 				return Response.json({ ok: true, saved });
 			}
 			if (url.pathname === "/memories" && request.method === "GET") {
-				ensureTables(sqlFacade!);
 				return Response.json({ memories: listMemories() });
 			}
 			if (url.pathname === "/memories" && request.method === "DELETE") {
 				// all=1 → 一键清空（v0.26.0）
 				if (url.searchParams.get("all") === "1") {
-					ensureTables(sqlFacade!);
 					const before = (sqlFacade!.exec("SELECT COUNT(*) AS n FROM pi_mem").toArray() as { n: number }[])[0]?.n ?? 0;
 					sqlFacade!.exec("DELETE FROM pi_mem");
 					return Response.json({ ok: true, deleted: before });
