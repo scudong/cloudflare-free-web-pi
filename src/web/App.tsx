@@ -19,6 +19,7 @@ import { LoginGate } from "./components/LoginGate";
 import { Icon } from "./components/Icon";
 import { api, type BootstrapKey } from "./lib/api";
 import { useBootstrap } from "./hooks/useBootstrap";
+import { useSharesAvailable } from "./hooks/useShares";
 import { shareUrlFor } from "./lib/format";
 import { parseEntries, parseKbRefs, truncateOneLine } from "./lib/entries";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
@@ -111,6 +112,8 @@ export default function App() {
 	const [theme, setTheme] = useState<ThemeId>(() => readTheme());
 	const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean; owner?: boolean; demoUrl?: string } | null>(null);
 	const [loginError, setLoginError] = useState<string | null>(null);
+	// 分享入口能力门禁（NERE-56）：登录态确定后探测一次 /api/shares/all，接口没上线就不渲染入口与面板
+	const sharesAvailable = useSharesAvailable(!!auth?.authenticated);
 	const [models, setModels] = useState<string[]>([]);
 	/** 供应商变更后重新拉取模型列表（v0.27.0）。 */
 	const [modelsTick, setModelsTick] = useState(0);
@@ -1385,7 +1388,8 @@ export default function App() {
 	);
 
 	// 邀请用户没有用户管理入口；切回会话栏（v0.43.0）
-	const activeRailView = railView === "users" && !auth?.owner ? "sessions" : railView;
+	const activeRailView =
+		railView === "users" && !auth?.owner ? "sessions" : railView === "shares" && !sharesAvailable ? "sessions" : railView;
 	const leftContent =
 		activeRailView === "sessions" ? (
 			sidebar
@@ -1444,6 +1448,7 @@ export default function App() {
 			newSessionDisabled={resetting}
 			onOpenSettings={() => setSettingsOpen(true)}
 			isOwner={!!auth?.owner}
+			sharesAvailable={sharesAvailable}
 		/>
 	);
 

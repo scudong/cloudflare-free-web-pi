@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ShareRow } from "../../src/web/components/ShareRow";
 import { SharesPanel } from "../../src/web/components/SharesPanel";
-import { insertAt, isAlreadyRevoked, revokeErrorMessage } from "../../src/web/hooks/useShares";
+import { Rail } from "../../src/web/components/Rail";
+import { insertAt, isAlreadyRevoked, probeSharesAvailability, revokeErrorMessage } from "../../src/web/hooks/useShares";
 import { ApiError, api } from "../../src/web/lib/api";
 import { parseShareRecords } from "../../src/web/lib/collections";
 import { formatExpiry, formatOpenedAt } from "../../src/web/lib/format";
@@ -223,5 +224,48 @@ describe("SharesPanel 三态", () => {
 		expect(html).toContain("刷新分享清单");
 		expect((html.match(/animate-pulse/g) ?? []).length).toBe(3);
 		expect(html).not.toContain("还没有分享链接");
+	});
+});
+
+describe("分享入口能力门禁（NERE-56）", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	const railHtml = (sharesAvailable: boolean) =>
+		renderToStaticMarkup(
+			<Rail
+				view="sessions"
+				onViewChange={() => {}}
+				onNewSession={() => {}}
+				onOpenSettings={() => {}}
+				sharesAvailable={sharesAvailable}
+			/>,
+		);
+
+	it("探测失败（404 / 非 JSON / 网络错误）→ 入口不渲染", async () => {
+		const failures: (() => Response | Promise<Response>)[] = [
+			async () => new Response("not found", { status: 404 }),
+			async () => new Response("<html>gateway</html>", { status: 200, headers: { "content-type": "text/html" } }),
+			async () => Promise.reject(new TypeError("Failed to fetch")),
+		];
+		for (const failure of failures) {
+			vi.spyOn(globalThis, "fetch").mockImplementation(failure as typeof fetch);
+			const available = await probeSharesAvailability();
+			expect(available).toBe(false);
+			const html = railHtml(available);
+			expect(html).not.toContain("分享");
+			expect(html).not.toContain("清单加载失败");
+			vi.restoreAllMocks();
+		}
+	});
+
+	it("探测成功（含空清单）→ 入口渲染", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(JSON.stringify({ shares: [] }), { status: 200, headers: { "content-type": "application/json" } }),
+		);
+		const available = await probeSharesAvailability();
+		expect(available).toBe(true);
+		expect(railHtml(available)).toContain("分享");
 	});
 });
