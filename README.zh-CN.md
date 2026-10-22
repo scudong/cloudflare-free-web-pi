@@ -146,8 +146,8 @@ npx wrangler deploy
 | POST | `/api/sessions` | 新建会话 |
 | PATCH / DELETE | `/api/sessions` | 重命名 / 删除（同时清空该会话文件） |
 | POST | `/api/chat` | `{message, sessionId?, images?}` → `{answer, tools}` |
-| POST | `/api/chat/stream` | 同上，SSE：`text` / `tool_start` / `tool_end` / `done` |
-| GET | `/api/entries?sessionId=` | 会话转录 |
+| POST | `/api/chat/stream` | 同上，SSE：`text` / `tool_start` / `tool_end` / `done`；`done` 在本轮命中知识库时透传 `kbRefs`（与 entry 同一份，未命中不带该字段） |
+| GET | `/api/entries?sessionId=` | 会话转录；命中知识库的 assistant entry 带 `kbRefs: {docId, chunkId, chunkSeq, title, source?}[]`，未命中不带该字段 |
 | GET | `/api/files?sessionId=` | 工作台文件列表 |
 | GET | `/api/files/content?sessionId=&name=` | 文件内容 |
 | GET | `/api/files/all?q=` | 当前用户所有会话的文件（跨会话总览） |

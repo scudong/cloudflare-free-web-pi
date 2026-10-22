@@ -23,6 +23,7 @@ import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudfl
 // 构建期注入：内核依赖版本（v0.35.0）
 import packageJson from "../package.json";
 import { collectBootstrap } from "./worker/bootstrap";
+import type { KbRef } from "./worker/lib/kb";
 import { migrate, type SqlHandle } from "./worker/db/migrations";
 import { buildContext, type AppEnv } from "./worker/http/context";
 import { getModel } from "./worker/repo/sessions-repo";
@@ -2292,13 +2293,14 @@ export class SpikeAgent extends DurableObject {
 		const inv = this.skillInvocation(message);
 		const effectiveMessage = inv ? inv.rest || `请按技能「${inv.name}」执行。` : message;
 		// 会话首次创建后 agent 选择会固化在 pi.agent 文档里；幂等重设，保证新扩展开关对老会话也生效。
+		const turn = await this.buildInstructions(inv, sessionId, effectiveMessage);
 		await root.configure(
 			{
 				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 				// 思考档位（v0.22.0）：off 时不产生 thinking 事件，前端自然不显示思考块。
 				thinkingLevel: currentThinkingLevel(),
 				extensions: this.agentExtensions() as never,
-				instructions: await this.buildInstructions(inv, sessionId, effectiveMessage),
+				instructions: turn.instructions,
 			},
 			ctx,
 		);
@@ -2314,6 +2316,7 @@ export class SpikeAgent extends DurableObject {
 			throw new Error(`run failed: ${JSON.stringify(settled).slice(0, 300)}`);
 		}
 		const answer = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), ctx);
+		if (answer) this.sessionService().saveEntryKbRefs(String(root.id), Number(answer.id), turn.kbRefs);
 		const c = answer?.model?.[0]?.content;
 		const text = typeof c === "string" ? c : Array.isArray(c)
 			? c.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).join("")
@@ -2417,7 +2420,7 @@ export class SpikeAgent extends DurableObject {
 				const harness = await this.open();
 				const conversation = await this.conversationFor(harness, sessionId);
 				const page = await conversation.entries({}, 200, undefined, ctx);
-				return page.items;
+				return { conversationId: String(conversation.id), items: page.items };
 			},
 			createConversation: async () => {
 				const harness = await this.open();
@@ -2529,7 +2532,11 @@ export class SpikeAgent extends DurableObject {
 	}
 
 	/** 组装本轮 instructions：基础规则 + 技能索引 + 显式技能 + 进行中的目标 + 知识库预检索（v0.46.0）。 */
-	private async buildInstructions(inv: { name: string; content: string } | null, sessionId?: string, message?: string): Promise<string> {
+	private async buildInstructions(
+		inv: { name: string; content: string } | null,
+		sessionId?: string,
+		message?: string,
+	): Promise<{ instructions: string; kbRefs: KbRef[] }> {
 		const base =
 			"你在 Cloudflare Free Web Pi（GitHub: scudong/cloudflare-free-web-pi，界面名 π Harness）里运行：一个部署在 Cloudflare Workers 上的 pi-durable harness，个人用量在 Cloudflare 免费额度内。被问到本项目时以上面的仓库为准。\n" +
 			"凡是需要计算、批量处理、解析或转换数据时，必须调用 codemode 工具写 JavaScript 执行（脚本内可用 await tools.<name>(args) 调用其它工具），不要心算或声称没有该工具。";
@@ -2539,9 +2546,13 @@ export class SpikeAgent extends DurableObject {
 			goal && goal.status === "active"
 				? `\n\n## 目标模式（进行中）\n目标：${goal.objective}\n进度：第 ${goal.turns + 1} 轮，已用 ${goal.tokens_used} / ${goal.token_budget} tokens。\n- 这一轮必须有实际进展，不要只回复「继续」。\n- 全部达成后调用 complete_goal，并附可核对的证据。\n- 确实无法推进时调用 report_goal 说明阻塞原因。`
 				: "";
-		const kbBlock = message ? await kbService().prefetchBlock(message) : "";
-		if (!inv) return withSkills + goalBlock + kbBlock;
-		return `${withSkills}${goalBlock}\n\n## 用户显式调用的技能：${inv.name}\n下面是该技能的完整说明，请严格按照它执行，不要声称找不到该技能：\n\n${inv.content}${kbBlock}`;
+		const prefetch = message ? await kbService().prefetch(message) : { block: "", refs: [] };
+		// 只有真正注入了检索块才记引用（NERE-40）：未命中/开关关闭时 kbRefs 为空。
+		const kbRefs = prefetch.block ? prefetch.refs : [];
+		const instructions = !inv
+			? withSkills + goalBlock + prefetch.block
+			: `${withSkills}${goalBlock}\n\n## 用户显式调用的技能：${inv.name}\n下面是该技能的完整说明，请严格按照它执行，不要声称找不到该技能：\n\n${inv.content}${prefetch.block}`;
+		return { instructions, kbRefs };
 	}
 
 	/** 会话存储出错后重建 Harness（pi-durable 要求 close + reopen）。 */
@@ -3322,12 +3333,13 @@ export class SpikeAgent extends DurableObject {
 		const root = await this.conversationFor(harness, sessionId);
 		const inv = this.skillInvocation(message);
 		const effectiveMessage = inv ? inv.rest || `请按技能「${inv.name}」执行。` : message;
+		const turn = await this.buildInstructions(inv, sessionId, effectiveMessage);
 		await root.configure(
 			{
 				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 				thinkingLevel: currentThinkingLevel(),
 				extensions: this.agentExtensions() as never,
-				instructions: await this.buildInstructions(inv, sessionId, effectiveMessage),
+				instructions: turn.instructions,
 			},
 			ctx,
 		);
@@ -3412,6 +3424,7 @@ export class SpikeAgent extends DurableObject {
 						break;
 					}
 					const entry = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), ctx);
+					if (entry) this.sessionService().saveEntryKbRefs(sid, Number(entry.id), turn.kbRefs);
 					const c = entry?.model?.[0]?.content;
 					answer =
 						typeof c === "string"
@@ -3473,7 +3486,8 @@ export class SpikeAgent extends DurableObject {
 				} catch (err) {
 					console.warn("session meta update failed", err);
 				}
-				await send("done", { answer, tools });
+				// kbRefs 与 entry 同一份：命中才带字段，未命中保持旧事件形状（NERE-40/41）。
+				await send("done", { answer, tools, ...(turn.kbRefs.length ? { kbRefs: turn.kbRefs } : {}) });
 				this.ctx.waitUntil(this.maybeReflect(root as never, lastId));
 			} catch (err) {
 				await send("error", { message: String(err).slice(0, 300) });
@@ -3589,7 +3603,7 @@ export class SpikeAgent extends DurableObject {
 					installed: this.registryRef?.snapshot().installed().map((e) => e.name) ?? null,
 					// 传 message 时返回本轮 instructions，用于确认技能 / 知识库预检索的注入（v0.46.0）
 					instructions: url.searchParams.get("message")
-						? await this.buildInstructions(null, url.searchParams.get("sessionId") ?? "1", url.searchParams.get("message") ?? "")
+						? (await this.buildInstructions(null, url.searchParams.get("sessionId") ?? "1", url.searchParams.get("message") ?? "")).instructions
 						: undefined,
 				});
 			}

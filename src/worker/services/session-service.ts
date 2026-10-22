@@ -1,4 +1,6 @@
 import type { SqlHandle } from "../db/migrations";
+import type { KbRef } from "../lib/kb";
+import { getMany as getEntryKbRefs, upsert as upsertEntryKbRefs } from "../repo/entry-kb-refs-repo";
 import { get, insertFork, insertIfAbsent, listKnownIds, listVisible, markDeleted, rename } from "../repo/sessions-repo";
 import type { SessionMetaRow } from "../repo/sessions-repo";
 import { removeSession as removeSessionFiles } from "../repo/files-repo";
@@ -10,7 +12,8 @@ import { removeSession as removeSessionFiles } from "../repo/files-repo";
  * Service 只负责元数据读写、标题策略与删除编排，逻辑与旧 `worker.ts` 方法逐字一致。
  */
 export type SessionRuntime = {
-	entries(sessionId?: string): Promise<readonly unknown[]>;
+	/** 会话 id 与实际条目；Service 用它合并 entry 旁路元数据（NERE-40）。 */
+	entries(sessionId?: string): Promise<{ conversationId: string; items: readonly unknown[] }>;
 	createConversation(): Promise<string>;
 	/** 在 `entryId` 之前分叉，返回新会话 id、父会话 id 与实际分叉点。 */
 	forkBefore(sessionId: string, entryId: number): Promise<{ id: string; parentId: string; at: number }>;
@@ -47,6 +50,35 @@ export interface SessionService {
 	/** 删除仍是非级联：标记 deleted、删该会话文件、暂停目标；shares/plans 等不动（R10）。 */
 	remove(id: string): void;
 	entries(sessionId?: string): Promise<readonly unknown[]>;
+	/** 记下一条 assistant entry 本轮注入的知识库命中（NERE-40）；空命中不写。 */
+	saveEntryKbRefs(conversationId: string, entryId: number, refs: readonly KbRef[]): void;
+}
+
+const ASSISTANT_KIND = "pi.assistant";
+
+/**
+ * 把旁路表里的命中合并到 assistant entry（NERE-40）。
+ * 只新增 `kbRefs` 字段，其它 entry 原样返回；老会话没有行时结果与迁移前完全一致。
+ */
+function withKbRefs(sql: SqlHandle, conversationId: string, items: readonly unknown[]): readonly unknown[] {
+	const assistantIds: number[] = [];
+	for (const item of items) {
+		if (!item || typeof item !== "object") continue;
+		const row = item as { id?: unknown; kind?: unknown };
+		if (row.kind !== ASSISTANT_KIND) continue;
+		const id = Number(row.id);
+		if (Number.isFinite(id) && id > 0) assistantIds.push(id);
+	}
+	if (!assistantIds.length) return items;
+	const found = getEntryKbRefs(sql, conversationId, assistantIds);
+	if (!found.size) return items;
+	return items.map((item) => {
+		if (!item || typeof item !== "object") return item;
+		const row = item as { id?: unknown; kind?: unknown };
+		if (row.kind !== ASSISTANT_KIND) return item;
+		const refs = found.get(Number(row.id));
+		return refs ? { ...(item as Record<string, unknown>), kbRefs: refs } : item;
+	});
 }
 
 export function createSessionService({ sql, runtime }: SessionServiceDeps): SessionService {
@@ -99,8 +131,16 @@ export function createSessionService({ sql, runtime }: SessionServiceDeps): Sess
 			runtime.pauseGoal(id);
 		},
 
-		entries(sessionId) {
-			return runtime.entries(sessionId);
+		async entries(sessionId) {
+			const { conversationId, items } = await runtime.entries(sessionId);
+			return withKbRefs(sql, conversationId, items);
+		},
+
+		saveEntryKbRefs(conversationId, entryId, refs) {
+			if (!refs.length) return;
+			const id = Number(entryId);
+			if (!Number.isFinite(id) || id <= 0) return;
+			upsertEntryKbRefs(sql, conversationId, id, refs, new Date().toISOString());
 		},
 	};
 }

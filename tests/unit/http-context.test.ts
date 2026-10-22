@@ -12,7 +12,7 @@ const env = {} as AppEnv;
 /** 只为类型占位：buildContext 不触碰 Harness 成员。 */
 const harness = {} as Harness;
 const sessionRuntime: SessionRuntime = {
-	entries: async () => [],
+	entries: async () => ({ conversationId: "1", items: [] }),
 	createConversation: async () => "1",
 	forkBefore: async () => ({ id: "2", parentId: "1", at: 1 }),
 	rootId: async () => "1",

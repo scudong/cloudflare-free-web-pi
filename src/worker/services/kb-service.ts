@@ -9,6 +9,7 @@ import {
 	kbRrfMerge,
 	kbTokens,
 	type KbHit,
+	type KbRef,
 } from "../lib/kb";
 import {
 	chunksByIds,
@@ -104,6 +105,8 @@ export type KbStatus = {
 	indexed: number;
 };
 export type KbPrefetchPreview = { enabled: boolean; hits: KbHit[]; block: string };
+/** 本轮预检索结果：注入 instructions 的块 + 与之逐条对应的结构化引用（NERE-40）。 */
+export type KbPrefetch = { block: string; refs: KbRef[] };
 
 export type KbServiceDeps = {
 	sql: SqlHandle;
@@ -136,6 +139,8 @@ export interface KbService {
 	status(): KbStatus;
 	reindex(limit?: number): Promise<{ indexed: number; remaining: number }>;
 	prefetchEnabled(): boolean;
+	/** 预检索块与结构化引用；refs 只包含实际写进 block 的片段，逐条对应。 */
+	prefetch(message: string): Promise<KbPrefetch>;
 	prefetchBlock(message: string): Promise<string>;
 	prefetchPreview(query: string): Promise<KbPrefetchPreview>;
 	ingestUrl(rawUrl: unknown): Promise<KbIngestOk>;
@@ -373,6 +378,46 @@ export function createKbService(deps: KbServiceDeps): KbService {
 		}
 	}
 
+	/**
+	 * 本轮预检索：一个检索结果同时产出注入块与结构化引用。
+	 * 引用只覆盖真正写进块的片段（去重与截断规则与旧 prefetchBlock 一致），
+	 * 保证「注入过哪些资料」与「entry 上记了哪些资料」逐条对得上。
+	 */
+	async function prefetch(message: string): Promise<KbPrefetch> {
+		const empty: KbPrefetch = { block: "", refs: [] };
+		if (settings.get("kb_prefetch", "1") !== "1") return empty;
+		const query = message.trim().slice(0, 200);
+		if (query.length < 2) return empty;
+		const hits = await searchAsync(query, KB_PREFETCH_TOP);
+		if (!hits.length) return empty;
+		const seen = new Set<number>();
+		const entries: { line: string; ref: KbRef }[] = [];
+		for (const hit of hits) {
+			if (hit.chunkId) {
+				if (seen.has(hit.chunkId)) continue;
+				seen.add(hit.chunkId);
+			}
+			const text = String(hit.text ?? "").slice(0, KB_PREFETCH_CHARS);
+			if (!text.trim()) continue;
+			const ref: KbRef = {
+				docId: Number(hit.docId),
+				chunkId: Number(hit.chunkId),
+				chunkSeq: Number(hit.chunkSeq),
+				title: String(hit.title ?? ""),
+			};
+			if (hit.source) ref.source = String(hit.source);
+			entries.push({
+				line: `[${entries.length + 1}] ${hit.title}${hit.source ? `（${hit.source}）` : ""} · 片段 ${Number(hit.chunkSeq) + 1}\n${text}`,
+				ref,
+			});
+		}
+		if (!entries.length) return empty;
+		return {
+			block: `\n\n## 知识库参考资料（按当前问题自动检索，可能相关；不相关就忽略）\n${entries.map((entry) => entry.line).join("\n\n---\n\n")}\n\n需要更多内容时调用 kb_search 继续检索；引用资料时注明文档标题。`,
+			refs: entries.map((entry) => entry.ref),
+		};
+	}
+
 	return {
 		listDocs: () => listDocs(sql),
 		getDoc: (id) => getDoc(sql, id),
@@ -438,28 +483,9 @@ export function createKbService(deps: KbServiceDeps): KbService {
 
 		prefetchEnabled: () => settings.get("kb_prefetch", "1") === "1",
 
-		async prefetchBlock(message) {
-			if (settings.get("kb_prefetch", "1") !== "1") return "";
-			const query = message.trim().slice(0, 200);
-			if (query.length < 2) return "";
-			const hits = await searchAsync(query, KB_PREFETCH_TOP);
-			if (!hits.length) return "";
-			const seen = new Set<number>();
-			const lines: string[] = [];
-			for (const hit of hits) {
-				if (hit.chunkId) {
-					if (seen.has(hit.chunkId)) continue;
-					seen.add(hit.chunkId);
-				}
-				const text = String(hit.text ?? "").slice(0, KB_PREFETCH_CHARS);
-				if (!text.trim()) continue;
-				lines.push(
-					`[${lines.length + 1}] ${hit.title}${hit.source ? `（${hit.source}）` : ""} · 片段 ${Number(hit.chunkSeq) + 1}\n${text}`,
-				);
-			}
-			if (!lines.length) return "";
-			return `\n\n## 知识库参考资料（按当前问题自动检索，可能相关；不相关就忽略）\n${lines.join("\n\n---\n\n")}\n\n需要更多内容时调用 kb_search 继续检索；引用资料时注明文档标题。`;
-		},
+		prefetch,
+
+		prefetchBlock: async (message) => (await prefetch(message)).block,
 
 		async prefetchPreview(query) {
 			const q = query.trim();

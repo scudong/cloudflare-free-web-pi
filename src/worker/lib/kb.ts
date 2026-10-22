@@ -21,6 +21,18 @@ export type KbHit = {
 	score: number;
 };
 
+/**
+ * 落库到 assistant entry 的知识库引用（NERE-40 契约）：只留核对答案所需的定位信息，
+ * 不存片段正文。`source` 为空时省略。
+ */
+export type KbRef = {
+	docId: number;
+	chunkId: number;
+	chunkSeq: number;
+	title: string;
+	source?: string;
+};
+
 /** 中文二元组 + 英文/数字词，供 FTS5 使用。 */
 export function kbTokens(text: string): string[] {
 	const tokens: string[] = [];
