@@ -14,6 +14,7 @@ import { AskUserCard } from "./components/AskUserCard";
 import { UsersPanel } from "./components/UsersPanel";
 import { FilesPanel } from "./components/FilesPanel";
 import { KnowledgePanel } from "./components/KnowledgePanel";
+import { SharesPanel } from "./components/SharesPanel";
 import { LoginGate } from "./components/LoginGate";
 import { Icon } from "./components/Icon";
 import { api, type BootstrapKey } from "./lib/api";
@@ -1397,6 +1398,8 @@ export default function App() {
 			/>
 		) : activeRailView === "kb" ? (
 			<KnowledgePanel onCollapse={toggleLeft} focus={kbFocus} />
+		) : activeRailView === "shares" ? (
+			<SharesPanel onCollapse={toggleLeft} />
 		) : activeRailView === "mcp" ? (
 			<McpPanel servers={mcpServers} loading={mcpLoading} error={mcpError} onAdd={handleAddMcp} onDelete={handleDeleteMcp} onCollapse={toggleLeft} />
 		) : activeRailView === "automations" ? (

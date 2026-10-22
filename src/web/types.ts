@@ -56,6 +56,22 @@ export interface KbFocus {
 	nonce: number;
 }
 
+/** 一条分享记录（NERE-42 的 /api/shares/all）。与工具结果里的 ShareLink 不是同一件事。 */
+export interface ShareRecord {
+	token: string;
+	kind: "file" | "conversation";
+	name: string;
+	/** epoch 毫秒；0 = 永久有效。 */
+	expiresAt: number;
+	createdAt: string;
+	openCount: number;
+	/** epoch 毫秒；0 = 从未打开。 */
+	lastOpenedAt: number;
+	sessionId: string;
+	/** 相对路径；渲染前经 lib/format.shareUrlFor 归一化。 */
+	url: string;
+}
+
 /** Message list entry. notice = system hint (stopped / reset failed...); tool = orphan tool activity row. */
 export type ChatMessage =
 	| { id: string; role: "user"; text: string; images?: string[]; /** 后端条目 id（v0.32.0：分支用）。 */ entryId?: number }

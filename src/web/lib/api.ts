@@ -103,6 +103,27 @@ export interface ShareLinkInfo {
 	createdAt: string;
 }
 
+/** GET /api/shares/all 的一条记录（NERE-42）；领域模型是 types.ts 的 ShareRecord。 */
+export interface ShareRecordDto {
+	token: string;
+	kind: "file" | "conversation";
+	name: string;
+	expiresAt: number;
+	theme: string;
+	createdAt: string;
+	openCount: number;
+	lastOpenedAt: number;
+	sessionId: string;
+	url: string;
+}
+
+export interface SharesAllResponse {
+	shares?: ShareRecordDto[];
+}
+
+/** 分享清单默认只取有效链接（NERE-42）：服务端与前端默认值必须一致，只在这里写一次。 */
+export const SHARES_DEFAULT_STATUS = "active" as const;
+
 /** 邀请用户（v0.43.0）。 */
 export interface UserInfo {
 	id: string;
@@ -527,6 +548,14 @@ export const api = {
 		requestJson<{ shares?: ShareLinkInfo[] }>(
 			withQuery("/api/shares", { sessionId, kind, ...(name ? { name } : {}) }),
 		),
+
+	/** 全部有效分享链接（NERE-42）：默认只看 active，避免把过期记录画进面板。 */
+	sharesAll: (status: "active" | "expired" | "all" = SHARES_DEFAULT_STATUS) =>
+		requestJson<SharesAllResponse>(withQuery("/api/shares/all", { status })),
+
+	/** 撤销一条分享（NERE-42）：立即失效。 */
+	revokeShare: (token: string) =>
+		requestJson<{ ok?: boolean }>(`/api/shares/${encodeURIComponent(token)}`, { method: "DELETE" }),
 
 	/** 定时任务写入。 */
 	addAutomation: (name: string, prompt: string, sessionId: string, schedule: { kind: string; time?: string; minutes?: number }) =>
