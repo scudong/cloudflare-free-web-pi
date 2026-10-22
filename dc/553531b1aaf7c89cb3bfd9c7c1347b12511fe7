@@ -1,0 +1,37 @@
+tests/api/api.test.ts
+  dc634a5c5164f968 631-652
+src/worker.ts
+  dc634a5c5164f968 2434,2473-2478,2512-2513,2546,2556,2558,3447-3449,3483,3535,4925-4939
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "dc553531b1aaf7c89cb3bfd9c7c1347b12511fe7",
+  "prompts": {
+    "dc634a5c5164f968": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5b1d176-0e3a-42be-84ee-2374596f5aa3",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 61,
+      "total_deletions": 9,
+      "accepted_lines": 61,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/api/api.test.ts": {
+          "additions": 29,
+          "deletions": 7,
+          "accepted_lines": 29
+        },
+        "src/worker.ts": {
+          "additions": 32,
+          "deletions": 2,
+          "accepted_lines": 32
+        }
+      }
+    }
+  }
+}
