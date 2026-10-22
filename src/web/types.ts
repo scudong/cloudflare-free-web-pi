@@ -211,6 +211,17 @@ export interface SkillInfo {
 	name: string;
 	description: string;
 	content: string;
+	/** 运行时（NERE-59）：prompt / javascript / typescript；缺省表示服务端未提供。 */
+	runtime?: string;
+	/** 审计结论快照（NERE-59）：来自 GET /skills 的 auditStatus。 */
+	auditStatus?: SkillAuditStatus;
+	/** 安装时间（NERE-59）：ISO 字符串，用于「装了 7 天还没用过」的提示。 */
+	createdAt?: string;
+	/**
+	 * 最后一次 load_skill / 显式调用 `/name` 的时间（NERE-59，epoch ms）。
+	 * `null` = 从未使用；`undefined` = 服务端没有埋点数据（整行不渲染）。
+	 */
+	lastInvokedAt?: number | null;
 }
 
 /** Skill Hub 审计结论（NERE-53 契约 §3）：pass 通过 / warn 有风险 / blocked 不可安装。 */

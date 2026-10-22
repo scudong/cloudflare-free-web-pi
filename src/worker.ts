@@ -214,10 +214,6 @@ function listMemories() {
 	return sqlFacade!.exec("SELECT id, content, created_at, source FROM pi_mem ORDER BY id DESC LIMIT 200").toArray();
 }
 
-function listSkills() {
-	return sqlFacade!.exec("SELECT name, description, content, created_at FROM skills ORDER BY name").toArray();
-}
-
 function ruleViews() {
 	return listRules().map((r) => ({ ...r, enabled: Boolean(r.enabled) }));
 }
@@ -1421,6 +1417,11 @@ export class SpikeAgent extends DurableObject {
 		return createFileService({ sql: this.ctx.storage.sql as unknown as SqlHandle });
 	}
 
+	/** 技能域服务：与 GET /api/skills 同一实现，首屏带上 runtime / auditStatus / lastInvokedAt（NERE-59）。 */
+	private skillService() {
+		return createSkillService({ sql: this.ctx.storage.sql as unknown as SqlHandle, settings: { get: getSetting } });
+	}
+
 	private automationService(): AutomationService {
 		return createAutomationService(this.ctx.storage.sql as unknown as SqlHandle);
 	}
@@ -1496,7 +1497,7 @@ export class SpikeAgent extends DurableObject {
 			prompts: () => listPrompts(),
 			rules: () => ruleViews(),
 			customTools: () => customToolsRepo.listAll(sqlFacade!),
-			skills: () => listSkills(),
+			skills: () => this.skillService().listCompat().skills,
 			automations: () => automationsRepo.list(sqlFacade!),
 			mcpServers: () => mcpRepo.list(sqlFacade!),
 			models: () => {

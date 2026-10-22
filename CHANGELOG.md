@@ -11,6 +11,12 @@
 - **R5 关闭**：`customToolNames` 与 `mcpCache` 从模块级搬入 `SpikeAgent` 实例字段，`buildCustomToolsExtension(sql, names)` / `buildMcpExtension(sql, cache)` 显式收缓存；同 isolate 多用户不再串用工具分级与 MCP 连接
 - 端点契约不变：`/settings`、`/providers*`、`/models`、`/model`、`/context`、`/mcp`、`/automations*`、`/goal*`、`/plan`、`/approvals*`、`/questions*`、`/capabilities`、`/tools` 的响应与状态码逐字保留；备份/恢复对这些表的读写也改走仓储
 - 多用户隔离用例：主人创建的 `owner_probe` 不出现在邀请用户的 `/api/custom-tools` 与 `/api/tools`，其分级在主人侧为 `exec`；单测用两个集合/两个缓存验证互不覆盖
+### 已安装技能可见可用：运行时 / 审计 / 上次使用 + 试用（v0.62.0，NERE-59）
+- 左栏「技能 → 已安装」每行新增一行元信息：运行时徽标（提示词 / JS / TS）、审计结论（审计通过 / 有警告 / 不可安装）、上次使用（刚刚 / N 分钟前 / N 天前 / 从未）
+- 新增「试用」按钮：把 `/技能名 ` 写进输入框并把光标移到末尾，**不自动发送**；手机端左栏是抽屉，点完自动回到聊天页
+- 从未使用且安装满 7 天的技能，卡片底部灰字提示「还没用过。试试「试用」，或删掉它保持面板清爽。」
+- 没有埋点数据（服务端不返回 `lastInvokedAt`）时这一行整行不渲染，不报错、不显示 0
+- 首屏聚合的 `skills` 面板改用与 `GET /api/skills` 同一实现（`listCompat`），补齐 `runtime` / `auditStatus` / `lastInvokedAt`，避免左栏与接口口径不一致
 
 ### Skill Hub 后端：目录索引 / 审计引擎 / 能力准入 / 埋点（v0.61.0，NERE-55）
 - 新增迁移 v6/v7：`skills` 增 `version/source/author/license/runtime/tags/content_hash/audit_status/audit_report/manifest/updated_at`（老库回填 `prompt` / `pass` / `local` / `0.0.0`，正文不动、升级后可调用）；建 `skill_audits` 缓存与 `skill_events` 埋点表（与分享计数无关）
