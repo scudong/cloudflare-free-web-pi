@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-22T05:52:02Z",
+  "generatedAt": "2026-10-22T06:10:00Z",
   "entries": [
     {
       "schemaVersion": 1,
@@ -184,6 +184,192 @@
         },
         "auditedAt": "2026-10-22T05:52:02Z",
         "hash": "sha256:b7228df7e310931c816b64d3575af9598f500e416141ae3b26af5cd6a109d7ba",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "bp-diagnose-root",
+      "version": "2.88.9",
+      "description": "用复现、隔离、假设、验证四阶段定位缺陷根因，在证据确认前不给修复方案。",
+      "author": "Daniel",
+      "source": "https://github.com/danielvm-git/bigpowers/tree/main/skills/diagnose-root",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["diagnosis", "debugging", "root-cause"],
+      "requires": {
+        "tools": ["read_file", "list_files"],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/bp-diagnose-root/SKILL.md",
+      "contentHash": "sha256:6056b8888269fbd963b9b56676de7e0daf18c0b3ef25b7fdc23d71931d03abe7",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": ["list_files", "read_file"]
+        },
+        "auditedAt": "2026-10-22T06:10:00Z",
+        "hash": "sha256:6056b8888269fbd963b9b56676de7e0daf18c0b3ef25b7fdc23d71931d03abe7",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "bp-grill-me",
+      "version": "2.88.9",
+      "description": "用连续追问压力测试计划，区分事实与决策，逐个解决关键分歧后再进入实施。",
+      "author": "Daniel",
+      "source": "https://github.com/danielvm-git/bigpowers/tree/main/skills/grill-me",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["planning", "review", "decision"],
+      "requires": {
+        "tools": ["read_file", "list_files", "web_fetch_page"],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/bp-grill-me/SKILL.md",
+      "contentHash": "sha256:1aaf46b88ab4eea86da6361d4fb27983348fafc9aff2bef35db348b02ee5f84a",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": ["list_files", "read_file", "web_fetch_page"]
+        },
+        "auditedAt": "2026-10-22T06:10:00Z",
+        "hash": "sha256:1aaf46b88ab4eea86da6361d4fb27983348fafc9aff2bef35db348b02ee5f84a",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "bp-terse-mode",
+      "version": "2.88.9",
+      "description": "极简表达模式，删掉客套与冗余，只保留技术事实，用于上下文过长的长会话。",
+      "author": "Daniel",
+      "source": "https://github.com/danielvm-git/bigpowers/tree/main/skills/terse-mode",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["communication", "writing", "tokens"],
+      "requires": {
+        "tools": [],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/bp-terse-mode/SKILL.md",
+      "contentHash": "sha256:ebe5e8330471966016ef5081f3e3dac98802039485a91654beade9117b78279d",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": []
+        },
+        "auditedAt": "2026-10-22T06:10:00Z",
+        "hash": "sha256:ebe5e8330471966016ef5081f3e3dac98802039485a91654beade9117b78279d",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "bp-simple-english",
+      "version": "2.88.9",
+      "description": "用简化技术英语规则改写文档和说明，句子短、术语唯一、步骤可执行。",
+      "author": "Daniel",
+      "source": "https://github.com/danielvm-git/bigpowers/tree/main/skills/simple-english",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["writing", "documentation", "english"],
+      "requires": {
+        "tools": [],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/bp-simple-english/SKILL.md",
+      "contentHash": "sha256:311060a051393656553088c4690bccc3ce4638a6c698dd4189acbc6e998630be",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": []
+        },
+        "auditedAt": "2026-10-22T06:10:00Z",
+        "hash": "sha256:311060a051393656553088c4690bccc3ce4638a6c698dd4189acbc6e998630be",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "ponytail",
+      "version": "5.3.2",
+      "description": "懒惰资深开发模式，用最少的新代码完整解决问题，并主动指出被跳过的部分和风险。",
+      "author": "Dietrich Gebert",
+      "source": "https://github.com/DietrichGebert/ponytail/tree/main/skills/ponytail",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["engineering", "simplicity", "yagni"],
+      "requires": {
+        "tools": ["read_file", "list_files"],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/ponytail/SKILL.md",
+      "contentHash": "sha256:eaf2e8333f34fa53547b34b9ddea2fd6cced05a23e41f8b02b6df58b618802ba",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": ["list_files", "read_file"]
+        },
+        "auditedAt": "2026-10-22T06:10:00Z",
+        "hash": "sha256:eaf2e8333f34fa53547b34b9ddea2fd6cced05a23e41f8b02b6df58b618802ba",
+        "rulesVersion": 1,
+        "auditSource": "catalog"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "name": "ponytail-review",
+      "version": "5.3.2",
+      "description": "以正确、安全、负载、测试、速度、精简的顺序评审改动，每个问题都给出具体触发场景。",
+      "author": "Dietrich Gebert",
+      "source": "https://github.com/DietrichGebert/ponytail/tree/main/skills/ponytail-review",
+      "license": "MIT",
+      "runtime": "prompt",
+      "tags": ["engineering", "code-review", "simplicity"],
+      "requires": {
+        "tools": ["read_file", "list_files"],
+        "bindings": [],
+        "network": []
+      },
+      "contentUrl": "https://raw.githubusercontent.com/scudong/cloudflare-free-web-pi/main/skills/ponytail-review/SKILL.md",
+      "contentHash": "sha256:2c898b91dd3f8220a8b4dc68f2be6dcc983c445bae1d67554d5e063b770b3047",
+      "audit": {
+        "status": "pass",
+        "reasons": [],
+        "detected": {
+          "runtime": "prompt",
+          "network": [],
+          "tools": ["list_files", "read_file"]
+        },
+        "auditedAt": "2026-10-22T06:10:00Z",
+        "hash": "sha256:2c898b91dd3f8220a8b4dc68f2be6dcc983c445bae1d67554d5e063b770b3047",
         "rulesVersion": 1,
         "auditSource": "catalog"
       }

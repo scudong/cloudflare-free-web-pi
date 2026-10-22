@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "ponytail",
+  "version": "5.3.2",
+  "description": "懒惰资深开发模式，用最少的新代码完整解决问题，并主动指出被跳过的部分和风险。",
+  "author": "Dietrich Gebert",
+  "source": "https://github.com/DietrichGebert/ponytail/tree/main/skills/ponytail",
+  "license": "MIT",
+  "runtime": "prompt",
+  "tags": ["engineering", "simplicity", "yagni"],
+  "requires": {
+    "tools": ["read_file", "list_files"],
+    "bindings": [],
+    "network": []
+  },
+  "contentHash": "sha256:eaf2e8333f34fa53547b34b9ddea2fd6cced05a23e41f8b02b6df58b618802ba"
+}
