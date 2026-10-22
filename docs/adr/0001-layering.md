@@ -309,9 +309,10 @@ chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./servi
 |---|---|---|
 | 阶段 2 合并后 | NERE-40（W3-1 kbRefs，命中随消息落库） | 阶段 3（NERE-31 分享域） |
 | 阶段 3 合并后 | NERE-42（W3-3 分享打开计数/清单/撤销） | NERE-55（W5-1c Skill Hub 后端） |
-| NERE-42 合并后 | NERE-55（W5-1c Skill Hub 后端：目录索引/审计引擎/能力准入/API） | NERE-47（W4-2 KB 导入去重与版本替换） |
-| NERE-55 合并后 | NERE-47（W4-2 KB 导入去重与版本替换：source + 正文哈希） | 阶段 4（NERE-32） |
+| NERE-42 合并后 | NERE-55（W5-1c Skill Hub 后端：目录索引/审计引擎/能力准入/API） | 阶段 4（NERE-32） |
 | 阶段 4-6 | 不再插入 | — |
+
+当前实际队列（2026-10-22 05:47Z）：`NERE-31（阶段 3）→ NERE-42 → NERE-55 → NERE-32（阶段 4）→ 5 → 6`。NERE-47（W4-2 KB 去重）已提前合入（PR #38，`4cb8363`），不再占队列位置。
 
 阶段 2 的关闭门禁：PR 合入 main 且 issue done 后，先确认 NERE-40 的 wakeup（condition `NERE-30 done`）已触发或已排队；未触发就手动拉起，等它合入后，才提升 NERE-31。
 
@@ -325,6 +326,7 @@ chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./servi
 - 2026-10-22：阶段 2 合并（PR #28，`a46469a`）：`routes/kb.ts` → `kb-service` → `kb-repo`，纯函数进 `lib/kb.ts`；`handleLegacyFetch` 缩到 772 行、`src/worker.ts` 4664 行。NERE-40 的 wakeup 已触发（`fire_count=1`）但 issue 仍在 backlog，已手动置 `todo` 确保开工；NERE-31 未提升。
 - 2026-10-22：operator 更新插入顺序：阶段 3 合并 → NERE-42 → NERE-55（wakeup condition=`NERE-42 done`，已 enabled）→ 阶段 4。NERE-40 评审打回 1 个 blocker（`entry_kb_refs` 的 IN 绑定参数超过 DO 上限 100），修复后重新评审；NERE-31 未提升。
 - 2026-10-22：operator 定稿后端队列（05:41Z）：阶段 3 → NERE-42 → NERE-55 → NERE-47 → 阶段 4 → 5 → 6。wakeup 链已核实：NERE-42←NERE-31、NERE-55←NERE-42、NERE-47←NERE-55，均 `enabled=true`、`fire_count=0`。
+- 2026-10-22：NERE-47（W4-2 KB 去重）提前完成并合入（PR #38，`4cb8363`）；队列缩短为 阶段 3 → NERE-42 → NERE-55 → 阶段 4 → 5 → 6，阶段 4 前置改为 NERE-55 合并。
 - 后续每个阶段完成后在本节追加一行：阶段号、PR、验收命令结果。
 
 ## 后果
