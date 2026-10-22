@@ -1,0 +1,30 @@
+README.md
+  32d9223cc94748ac 59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "4b3a8ce18c7ef1a9215ebc73f06a6ef41677a597",
+  "prompts": {
+    "32d9223cc94748ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3efe4374-fb83-4df8-9e61-51c772309735",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "README.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
