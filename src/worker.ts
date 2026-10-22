@@ -18,7 +18,6 @@ import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/stora
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { watchEvents } from "@earendil-works/pi-durable";
 import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
-import { McpClient, StreamableHttpTransport, toLlmContent } from "@earendil-works/pi-mcp";
 import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
 // 构建期注入：内核依赖版本（v0.35.0）
 import packageJson from "../package.json";
@@ -28,12 +27,63 @@ import { entryText, entryUsage } from "./worker/lib/entries";
 import { demoShareToken, demoShareUrl, shareExpiryLabel } from "./worker/lib/share-render";
 import { migrate, type SqlHandle } from "./worker/db/migrations";
 import { buildContext, type AppEnv } from "./worker/http/context";
-import { USER_ID_RE, type ShareRuntime } from "./worker/http/ports";
+import {
+	USER_ID_RE,
+	type AlarmRuntime,
+	type ContextRuntime,
+	type GoalRuntime,
+	type McpRuntime,
+	type SettingsRuntime,
+	type ShareRuntime,
+	type ToolRuntime,
+} from "./worker/http/ports";
 import { getModel } from "./worker/repo/sessions-repo";
+import * as automationsRepo from "./worker/repo/automations-repo";
+import * as customToolsRepo from "./worker/repo/custom-tools-repo";
+import * as goalsRepo from "./worker/repo/goals-repo";
+import * as mcpRepo from "./worker/repo/mcp-repo";
+import * as plansRepo from "./worker/repo/plans-repo";
+import * as providersRepo from "./worker/repo/providers-repo";
+import * as settingsRepo from "./worker/repo/settings-repo";
 import { createFileService } from "./worker/services/file-service";
-import { createKbService, KB_VECTOR_DEFAULT_INDEX, type WebFetchResult } from "./worker/services/kb-service";
+import {
+	activeModelIds,
+	activeProviderId,
+	compactionSettings,
+	DEFAULT_MODEL_ID,
+	DEFAULT_PROVIDER,
+	settingsView,
+	splitModels,
+	thinkingLevel,
+} from "./worker/services/settings-service";
+import { createAutomationService, type AutomationService } from "./worker/services/automation-service";
+import { approvalSettings, listPending as listPendingApprovals, withApproval, type ToolGateDeps } from "./worker/services/approval-service";
+import {
+	buildExtension as buildCustomToolsExtension,
+	CustomToolApiError,
+	listTools as listCustomTools,
+	removeTool as removeCustomTool,
+	saveTool as saveCustomTool,
+} from "./worker/services/custom-tool-service";
+import {
+	GOAL_MAX_TURNS_DEFAULT,
+	GOAL_ROUNDS_PER_REQUEST,
+	GOAL_TOKEN_BUDGET_DEFAULT,
+	goalContinuePrompt,
+	goalInfo,
+	readGoal,
+	startGoal as startGoalRow,
+	writeGoal as updateGoalRow,
+	type GoalPatch,
+	type GoalRow,
+	type GoalStatus,
+} from "./worker/services/goal-service";
+import { buildExtension as buildMcpExtension, type McpCache } from "./worker/services/mcp-service";
+import { readPlan as readPlanRow, savePlan as savePlanRow, type PlanStep } from "./worker/services/plan-service";
+import { listPending as listPendingQuestions, readPending as readPendingQuestionRow, record as recordQuestionRow, type AskItem, type AskOption, type AskPayload } from "./worker/services/question-service";
+import { createKbService, type WebFetchResult } from "./worker/services/kb-service";
 import { createSessionService, type SessionRuntime } from "./worker/services/session-service";
-import { createShareService, MAX_SHARE_TTL, shareDefaultTtl } from "./worker/services/share-service";
+import { createShareService } from "./worker/services/share-service";
 import { createSkillService, SkillApiError, trackSkillCall } from "./worker/services/skill-service";
 import { normalizeSkillUrl } from "./worker/lib/skill-import";
 import { dispatch } from "./worker/routes";
@@ -77,412 +127,57 @@ const sqlFacade = new Proxy({} as SqlHandle, {
 const fileStore = createFileService({ sql: sqlFacade });
 /** DEEPSEEK_API_KEY / Harness 都从当前请求作用域读取（多 DO 共 isolate 时不能放全局）。 */
 
-/** 全局设置读写（app_settings 表）：目前只有网页搜索开关 web_search。 */
+/** 全局设置读写（`app_settings`）：SQL 在 repo，工具与未迁移端点共用这两个薄包装。 */
 function getSetting(key: string, fallback: string): string {
-	try {
-		const rows = sqlFacade!.exec("SELECT value FROM app_settings WHERE key = ?", key).toArray() as { value: string }[];
-		return rows[0]?.value ?? fallback;
-	} catch {
-		return fallback;
-	}
+	return settingsRepo.get(sqlFacade!, key, fallback);
 }
 
 function setSetting(key: string, value: string): void {
-	sqlFacade!.exec("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+	settingsRepo.set(sqlFacade!, key, value);
 }
 
-/** 思考档位：off / low / high（deepseek-flash 支持 low/high/max，v4-pro 支持 high/max）。 */
-type ThinkingLevel = "off" | "low" | "high";
-const currentThinkingLevel = (): ThinkingLevel => {
-	const v = getSetting("thinking_level", "low");
-	return v === "off" || v === "high" ? v : "low";
-};
+/* ---------------- 计划与目标（服务在 services/plan-service.ts、services/goal-service.ts） ---------------- */
 
-/** 计划步骤（update_plan 工具）。 */
-type PlanStep = { title: string; status: "pending" | "in_progress" | "completed" };
+const readPlan = (conversationId: string): PlanStep[] => readPlanRow(sqlFacade!, conversationId);
 
 function savePlan(conversationId: string, steps: PlanStep[]): void {
-	sqlFacade!.exec(
-		"INSERT INTO plans (conversation_id, steps, updated_at) VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET steps = excluded.steps, updated_at = excluded.updated_at",
-		conversationId, JSON.stringify(steps), new Date().toISOString(),
-	);
+	savePlanRow(sqlFacade!, conversationId, steps);
 }
-
-const readPlan = (conversationId: string): PlanStep[] => {
-	try {
-		const rows = sqlFacade!.exec("SELECT steps FROM plans WHERE conversation_id = ?", conversationId).toArray() as { steps: string }[];
-		const parsed = rows[0] ? (JSON.parse(rows[0].steps) as unknown) : [];
-		return Array.isArray(parsed) ? (parsed as PlanStep[]) : [];
-	} catch {
-		return [];
-	}
-};
-
-/* ---------------- 目标模式（v0.31.0） ---------------- */
-
-type GoalStatus = "active" | "done" | "blocked" | "paused" | "exhausted";
-
-type GoalRow = {
-	session_id: string;
-	objective: string;
-	status: GoalStatus;
-	token_budget: number;
-	baseline_tokens: number;
-	tokens_used: number;
-	turns: number;
-	max_turns: number;
-	summary: string;
-	next_run_at: number;
-	created_at: string;
-	updated_at: string;
-};
-
-const GOAL_TOKEN_BUDGET_DEFAULT = 200_000;
-const GOAL_MAX_TURNS_DEFAULT = 12;
-/** 单次请求内最多自动续转几轮；剩下的交给 alarm 跨请求接续。 */
-const GOAL_ROUNDS_PER_REQUEST = 3;
 
 function readGoalRow(sessionId: string): GoalRow | null {
-	try {
-		const rows = sqlFacade!.exec("SELECT * FROM goals WHERE session_id = ?", sessionId).toArray() as GoalRow[];
-		return rows[0] ?? null;
-	} catch {
-		return null;
-	}
+	return readGoal(sqlFacade!, sessionId);
 }
 
-/** 对外（前端 / SSE）的目标视图。 */
-function goalInfo(row: GoalRow | null) {
-	if (!row) return null;
-	return {
-		objective: row.objective,
-		status: row.status,
-		tokenBudget: row.token_budget,
-		tokensUsed: row.tokens_used,
-		turns: row.turns,
-		maxTurns: row.max_turns,
-		summary: row.summary || undefined,
-		updatedAt: row.updated_at,
-	};
-}
-
-function writeGoal(
-	sessionId: string,
-	patch: Partial<Pick<GoalRow, "status" | "tokens_used" | "turns" | "summary" | "next_run_at" | "baseline_tokens">>,
-): void {
-	const sets: string[] = [];
-	const args: unknown[] = [];
-	for (const [key, value] of Object.entries(patch)) {
-		if (value === undefined) continue;
-		sets.push(`${key} = ?`);
-		args.push(value);
-	}
-	if (!sets.length) return;
-	sets.push("updated_at = ?");
-	args.push(new Date().toISOString(), sessionId);
-	sqlFacade!.exec(`UPDATE goals SET ${sets.join(", ")} WHERE session_id = ?`, ...args);
+function writeGoal(sessionId: string, patch: GoalPatch): void {
+	updateGoalRow(sqlFacade!, sessionId, patch);
 }
 
 /** 建立（或替换）一个会话的目标。baseline 是本轮之前的累计 token，用于计算目标消耗。 */
 function startGoal(sessionId: string, objective: string, tokenBudget: number, maxTurns: number, baseline: number): void {
-	const now = new Date().toISOString();
-	sqlFacade!.exec(
-		`INSERT INTO goals (session_id, objective, status, token_budget, baseline_tokens, tokens_used, turns, max_turns, summary, next_run_at, created_at, updated_at)
-		 VALUES (?, ?, 'active', ?, ?, 0, 0, ?, '', 0, ?, ?)
-		 ON CONFLICT(session_id) DO UPDATE SET objective = excluded.objective, status = 'active', token_budget = excluded.token_budget, baseline_tokens = excluded.baseline_tokens, tokens_used = 0, turns = 0, max_turns = excluded.max_turns, summary = '', next_run_at = 0, updated_at = excluded.updated_at`,
-		sessionId, objective, tokenBudget, baseline, maxTurns, now, now,
-	);
-}
-
-/** 自动续转的提示词：强调「直接做」，避免模型空转。 */
-function goalContinuePrompt(row: GoalRow): string {
-	return [
-		`继续推进目标：${row.objective}`,
-		"",
-		`进度：已完成 ${row.turns} 轮，已用 ${row.tokens_used} / ${row.token_budget} tokens。`,
-		"要求：",
-		"- 先看计划和已有产出，不要重复已经做过的工作，直接做下一步。",
-		"- 不要只回复「继续」之类的话，这一轮必须有实际进展。",
-		"- 全部达成后调用 complete_goal，并给出可核对的验证证据。",
-		"- 确实无法推进时调用 report_goal 说明阻塞原因。",
-	].join("\n");
+	startGoalRow(sqlFacade!, { sessionId, objective, tokenBudget, maxTurns, baseline });
 }
 
 
-/* ---------------- 工具审批（v0.33.0） ---------------- */
+/* ---------------- 工具审批（v0.33.0）：实现在 services/approval-service.ts ---------------- */
 
-type ApprovalCategory = "read" | "write" | "exec";
-type ApprovalPolicy = "allow" | "ask" | "deny";
-
-/** 已知工具的默认分级。MCP 工具按写操作、未知工具按读取处理。 */
-const TOOL_CATEGORY: Record<string, ApprovalCategory> = {
-	now: "read",
-	recall: "read",
-	list_skills: "read",
-	load_skill: "read",
-	install_skill: "write",
-	read_file: "read",
-	list_files: "read",
-	kb_search: "read",
-	kb_list: "read",
-	kb_add: "write",
-	kb_delete: "write",
-	web_search: "read",
-	web_fetch_page: "read",
-	http_fetch: "read",
-	tool_search: "read",
-	update_plan: "read",
-	set_goal: "read",
-	complete_goal: "read",
-	report_goal: "read",
-	write_file: "write",
-	share_file: "write",
-	share_conversation: "write",
-	remember: "write",
-	codemode: "exec",
-	dispatch_tasks: "exec",
-};
-
-const APPROVAL_LABEL: Record<ApprovalCategory, string> = { read: "读取", write: "写入", exec: "执行" };
-
-/** 当前已加载的自定义工具名（构建扩展时刷新），统一按 exec 级处理。 */
-const customToolNames = new Set<string>();
-
-function toolCategory(name: string): ApprovalCategory {
-	const known = TOOL_CATEGORY[name];
-	if (known) return known;
-	if (customToolNames.has(name)) return "exec";
-	if (name.startsWith("mcp__")) return "write";
-	return "read";
-}
-
-/** 三档策略（供设置页读取）。 */
-function approvalSettings(): { read: ApprovalPolicy; write: ApprovalPolicy; exec: ApprovalPolicy } {
-	const pick = (level: ApprovalCategory): ApprovalPolicy => {
-		const value = getSetting(`approval_${level}`, "allow");
-		return value === "ask" || value === "deny" ? value : "allow";
-	};
-	return { read: pick("read"), write: pick("write"), exec: pick("exec") };
-}
-
-/** 生效策略：逐工具覆盖 > 分级策略 > 默认放行。 */
-function toolPolicy(name: string): ApprovalPolicy {
-	const override = getSetting(`approval_tool_${name}`, "follow");
-	if (override === "allow" || override === "ask" || override === "deny") return override;
-	const level = getSetting(`approval_${toolCategory(name)}`, "allow");
-	return level === "ask" || level === "deny" ? level : "allow";
-}
-
-/** 子代理会话在侧栏不可见，没人能点审批：直接放行，避免子任务卡死。 */
-function isHiddenSession(sessionId: string): boolean {
-	try {
-		const rows = sqlFacade!.exec("SELECT hidden FROM sessions_meta WHERE id = ?", sessionId).toArray() as { hidden?: number }[];
-		return Number(rows[0]?.hidden ?? 0) === 1;
-	} catch {
-		return false;
-	}
-}
-
-/** 消耗一次放行许可（uses = -1 表示始终允许）。 */
-function consumeApprovalGrant(sessionId: string, tool: string): boolean {
-	try {
-		const rows = sqlFacade!.exec("SELECT uses FROM approval_grants WHERE session_id = ? AND tool = ?", sessionId, tool).toArray() as {
-			uses: number;
-		}[];
-		const row = rows[0];
-		if (!row) return false;
-		if (row.uses < 0) return true;
-		if (row.uses <= 1) sqlFacade!.exec("DELETE FROM approval_grants WHERE session_id = ? AND tool = ?", sessionId, tool);
-		else sqlFacade!.exec("UPDATE approval_grants SET uses = uses - 1 WHERE session_id = ? AND tool = ?", sessionId, tool);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-/** 记录一条待审批；同一会话同一工具已有待审批时不重复插入。 */
-function recordApproval(sessionId: string, tool: string, category: ApprovalCategory, args: unknown): number | null {
-	try {
-		const existing = sqlFacade!
-			.exec("SELECT id FROM approvals WHERE session_id = ? AND tool = ? AND status = 'pending' ORDER BY id DESC", sessionId, tool)
-			.toArray() as { id: number }[];
-		if (existing[0]) return existing[0].id;
-		const preview = (() => {
-			try {
-				return JSON.stringify(args ?? {}).slice(0, 800);
-			} catch {
-				return "";
-			}
-		})();
-		sqlFacade!.exec(
-			"INSERT INTO approvals (session_id, tool, category, args, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
-			sessionId, tool, category, preview, new Date().toISOString(),
-		);
-		const rows = sqlFacade!.exec("SELECT last_insert_rowid() AS id").toArray() as { id: number }[];
-		return rows[0]?.id ?? null;
-	} catch {
-		return null;
-	}
-}
-
-/** 给工具套上审批闸门：放行 / 询问（无许可时记一条待审批并让模型等待）/ 禁止。 */
-function withApproval<T extends { name: string; execute?: (...args: never[]) => unknown }>(tool: T): T {
-	const original = tool.execute;
-	if (typeof original !== "function") return tool;
-	return {
-		...tool,
-		// 必须把 execute 的全部参数（args, api, context）原样转发：codemode 等工具依赖第三个 context.abortSignal
-		execute: async (...rest: never[]) => {
-			const policy = toolPolicy(tool.name);
-			const run = () => (original as (...a: never[]) => unknown)(...rest);
-			const args = rest[0];
-			const api = rest[1];
-			if (policy === "allow") return run();
-			const sid = String((api as unknown as { conversationId?: unknown })?.conversationId ?? "1");
-			if (isHiddenSession(sid)) return run();
-			const category = toolCategory(tool.name);
-			if (policy === "deny") {
-				return {
-					output: [{
-						type: "text",
-						text: `「${tool.name}」属于${APPROVAL_LABEL[category]}级操作，当前策略为禁止。请告诉用户：可在 设置 → 工具审批 中调整。`,
-					}],
-				};
-			}
-			if (consumeApprovalGrant(sid, tool.name)) return run();
-			const id = recordApproval(sid, tool.name, category, args);
-			return {
-				output: [{
-					type: "text",
-					text: `「${tool.name}」属于${APPROVAL_LABEL[category]}级操作，需要用户确认后才能执行。已提交待审批${id ? `（#${id}）` : ""}：不要重复调用本工具，等用户批准后再继续。`,
-				}],
-			};
-		},
-	} as T;
-}
+/** 模块级工具扩展的审批闸门依赖：SQL 与设置按请求作用域延迟解析。 */
+const toolGate: ToolGateDeps = { sql: () => sqlFacade!, get: getSetting };
 
 
 
-/* ---------------- 交互式问答（v0.37.0）：ask_user ---------------- */
 
-type AskOption = { label: string; description?: string; recommended?: boolean };
-type AskItem = { id: string; question: string; options?: AskOption[]; allowText?: boolean };
-type AskPayload = { title?: string; questions: AskItem[] };
+/* ---------------- 交互式问答（v0.37.0）：实现在 services/question-service.ts ---------------- */
 
 function readPendingQuestion(sessionId: string): { id: number; payload: AskPayload } | null {
-	try {
-		const rows = sqlFacade!
-			.exec("SELECT id, payload FROM questions WHERE session_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1", sessionId)
-			.toArray() as { id: number; payload: string }[];
-		const row = rows[0];
-		if (!row) return null;
-		return { id: row.id, payload: JSON.parse(row.payload) as AskPayload };
-	} catch {
-		return null;
-	}
+	return readPendingQuestionRow(sqlFacade!, sessionId);
 }
 
 function recordQuestion(sessionId: string, payload: AskPayload): number | null {
-	try {
-		sqlFacade!.exec(
-			"INSERT INTO questions (session_id, payload, status, created_at) VALUES (?, ?, 'pending', ?)",
-			sessionId, JSON.stringify(payload), new Date().toISOString(),
-		);
-		const rows = sqlFacade!.exec("SELECT last_insert_rowid() AS id").toArray() as { id: number }[];
-		return rows[0]?.id ?? null;
-	} catch {
-		return null;
-	}
+	return recordQuestionRow(sqlFacade!, sessionId, payload);
 }
 
-/* ---------------- 自定义工具（v0.36.0）：用户 JS → 沙箱工具 ---------------- */
+/* ---------------- 自定义工具（v0.36.0）：实现在 services/custom-tool-service.ts ---------------- */
 
-/** 合法工具名：字母开头，字母数字下划线。 */
-const CUSTOM_TOOL_NAME = /^[a-zA-Z][a-zA-Z0-9_]{1,40}$/;
-/** 保留名：不能覆盖内置工具。 */
-const RESERVED_TOOL_NAMES = new Set([
-	"now", "remember", "recall", "list_skills", "load_skill", "install_skill", "read_file", "list_files", "write_file",
-	"share_file", "share_conversation",
-	"kb_search", "kb_add", "kb_list", "kb_delete",
-	"update_plan", "dispatch_tasks", "web_search", "web_fetch_page", "http_fetch", "tool_search",
-	"codemode", "set_goal", "complete_goal", "report_goal", "ask_user",
-]);
-const CUSTOM_TOOL_CODE_MAX = 8000;
-
-/** 共享的 QuickJS 沙箱：每次 execute 起独立 VM，自定义工具之间互不影响。 */
-let customSandbox: ReturnType<typeof createInlineCodemodeSandbox> | null = null;
-function sandbox(): ReturnType<typeof createInlineCodemodeSandbox> {
-	customSandbox ??= createInlineCodemodeSandbox({ memoryLimitBytes: 32 * 1024 * 1024, timeoutMs: 15_000 });
-	return customSandbox;
-}
-
-type CustomToolRow = { name: string; description: string; parameters: string; code: string };
-
-function listCustomToolRows(): CustomToolRow[] {
-	try {
-		return sqlFacade!
-			.exec("SELECT name, description, parameters, code FROM custom_tools WHERE enabled = 1 ORDER BY name")
-			.toArray() as CustomToolRow[];
-	} catch {
-		return [];
-	}
-}
-
-/** 把用户代码包成函数体执行：`args` 是入参，返回值即工具结果。 */
-async function runCustomTool(code: string, args: unknown): Promise<{ ok: boolean; text: string }> {
-	const source = `async function __custom_tool(args) {\n${code}\n}\nreturn await __custom_tool(load("args"));`;
-	try {
-		const result = await sandbox().execute(source, { store: { args: args ?? {} }, timeoutMs: 15_000 });
-		if (!result.ok) {
-			const detail = (result.error as { message?: unknown } | undefined)?.message;
-			return { ok: false, text: `执行失败：${String(detail ?? JSON.stringify(result.error)).slice(0, 400)}` };
-		}
-		const value = result.value;
-		const text =
-			value === undefined || value === null
-				? "(无返回值)"
-				: typeof value === "string"
-					? value
-					: JSON.stringify(value);
-		return { ok: true, text: text.slice(0, 8000) };
-	} catch (err) {
-		return { ok: false, text: `执行异常：${String(err).slice(0, 300)}` };
-	}
-}
-
-/** 从 custom_tools 表构建扩展；没有启用的工具时返回 null。 */
-function buildCustomToolsExtension(sql: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } }) {
-	const rows = (() => {
-		try {
-			return sql.exec("SELECT name, description, parameters, code FROM custom_tools WHERE enabled = 1 ORDER BY name").toArray() as CustomToolRow[];
-		} catch {
-			return [];
-		}
-	})();
-	customToolNames.clear();
-	const tools = rows.map((row) => {
-		customToolNames.add(row.name);
-		let parameters: object = { type: "object", properties: {} };
-		try {
-			const parsed = JSON.parse(row.parameters) as { type?: unknown };
-			if (parsed && typeof parsed === "object" && parsed.type === "object") parameters = parsed;
-		} catch {
-			// 保持默认空 schema
-		}
-		return withApproval(
-			defineTool({
-				name: row.name,
-				description: `${row.description || row.name}\n（自定义工具：在 QuickJS 沙箱里执行用户提供的 JavaScript，入参是 args 对象，返回值即结果）`.slice(0, 400),
-				parameters: Type.Unsafe(parameters as never),
-				execute: async (args: unknown) => {
-					const r = await runCustomTool(row.code, args);
-					return { output: [{ type: "text", text: r.text }], ...(r.ok ? {} : { isError: true }) };
-				},
-			}) as never,
-		);
-	});
-	return defineExtension({ name: "custom-tools", tools: tools as never });
-}
 
 /* ---------------- 提示模板与规则（v0.31.0） ---------------- */
 
@@ -519,60 +214,12 @@ function listMemories() {
 	return sqlFacade!.exec("SELECT id, content, created_at, source FROM pi_mem ORDER BY id DESC LIMIT 200").toArray();
 }
 
-function listPendingApprovals(sessionId: string) {
-	return sqlFacade!
-		.exec(
-			"SELECT id, tool, category, args, created_at FROM approvals WHERE session_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 20",
-			sessionId,
-		)
-		.toArray();
-}
-
-function listPendingQuestions(sessionId: string) {
-	const rows = sqlFacade!
-		.exec("SELECT id, payload, created_at FROM questions WHERE session_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 5", sessionId)
-		.toArray() as { id: number; payload: string; created_at: string }[];
-	return rows.map((row) => ({ id: row.id, created_at: row.created_at, ...(JSON.parse(row.payload) as AskPayload) }));
-}
-
 function listSkills() {
 	return sqlFacade!.exec("SELECT name, description, content, created_at FROM skills ORDER BY name").toArray();
 }
 
-function listCustomTools() {
-	return sqlFacade!
-		.exec("SELECT name, description, parameters, code, enabled, created_at FROM custom_tools ORDER BY created_at DESC")
-		.toArray();
-}
-
-function listAutomations() {
-	return sqlFacade!
-		.exec("SELECT id, name, prompt, session_id, schedule, enabled, last_run_at, next_run_at FROM automations ORDER BY created_at DESC")
-		.toArray();
-}
-
-function listMcpServers() {
-	return sqlFacade!.exec("SELECT id, name, url, created_at FROM mcp_servers ORDER BY created_at ASC").toArray();
-}
-
 function ruleViews() {
 	return listRules().map((r) => ({ ...r, enabled: Boolean(r.enabled) }));
-}
-
-/** GET /settings 的响应体；POST /settings 与 /bootstrap 复用，避免键漂移。 */
-function settingsView() {
-	const kb = kbService();
-	return {
-		webSearch: getSetting("web_search", "1") === "1",
-		kbPrefetch: getSetting("kb_prefetch", "1") === "1",
-		kbRetrieval: kb.retrievalMode(),
-		kbVector: { available: kb.vectorAvailable(), index: KB_VECTOR_DEFAULT_INDEX },
-		thinkingLevel: currentThinkingLevel(),
-		compaction: compactionSettings(),
-		approval: approvalSettings(),
-		displayName: getSetting("display_name", ""),
-		shareTtlSeconds: shareDefaultTtl({ get: getSetting }),
-	};
 }
 
 /* ---------------- pi 内核版本（v0.35.0） ---------------- */
@@ -629,58 +276,14 @@ async function fetchLatestVersion(name: string): Promise<string | null> {
 	}
 }
 
-/* ---------------- 上下文压缩策略（v0.30.0） ---------------- */
+/* ---------------- 上下文压缩策略（v0.30.0）：实现在 services/settings-service.ts ---------------- */
 
-/** 与 pi-durable 内置默认一致，作为设置项的回落值。 */
-const DEFAULT_COMPACTION = { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000, backgroundTokens: 32768 };
 
-function compactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number; backgroundTokens: number } {
-	const num = (key: string, fallback: number, min: number) => {
-		const value = Number(getSetting(key, String(fallback)));
-		return Number.isFinite(value) && value >= min ? Math.floor(value) : fallback;
-	};
-	return {
-		enabled: getSetting("compaction_enabled", "1") === "1",
-		reserveTokens: num("compaction_reserve", DEFAULT_COMPACTION.reserveTokens, 1024),
-		keepRecentTokens: num("compaction_keep_recent", DEFAULT_COMPACTION.keepRecentTokens, 0),
-		backgroundTokens: num("compaction_background", DEFAULT_COMPACTION.backgroundTokens, 0),
-	};
-}
+/* ---------------- LLM 供应商（v0.27.0）：实现在 services/settings-service.ts ---------------- */
 
-/* ---------------- LLM 供应商（v0.27.0） ---------------- */
+type ProviderRow = providersRepo.ProviderRow;
 
-/** 内置默认供应商（DeepSeek 官方，走 DEEPSEEK_API_KEY）。 */
-const DEFAULT_PROVIDER = { id: "deepseek", name: "DeepSeek 官方", models: ["deepseek-flash", "deepseek-v4-pro"] };
-
-type ProviderRow = { id: string; name: string; base_url: string; api_key: string; models: string };
-
-function listProviderRows(): ProviderRow[] {
-	try {
-		return sqlFacade!.exec("SELECT id, name, base_url, api_key, models FROM providers ORDER BY created_at ASC").toArray() as ProviderRow[];
-	} catch {
-		return [];
-	}
-}
-
-/** 当前启用的供应商 id；空串 = 默认 DeepSeek。 */
-const activeProviderId = (): string => getSetting("active_provider", "");
-
-function splitModels(raw: string): string[] {
-	return raw
-		.split(/[,，\s]+/)
-		.map((s) => s.trim())
-		.filter(Boolean)
-		.slice(0, 20);
-}
-
-/** 当前可用的模型 id 列表。 */
-function activeModelIds(): string[] {
-	const id = activeProviderId();
-	if (!id) return DEFAULT_PROVIDER.models;
-	const row = listProviderRows().find((r) => r.id === id);
-	const models = row ? splitModels(row.models) : [];
-	return models.length ? models : DEFAULT_PROVIDER.models;
-}
+const listProviderRows = () => providersRepo.list(sqlFacade!);
 
 /** 把一条供应商记录构造成 pi-ai 的 Provider（OpenAI 兼容端点）。 */
 function buildCustomProvider(row: ProviderRow): unknown {
@@ -1124,7 +727,7 @@ const baseSpikeExtension = defineExtension({
 				if (!tasks.length) return { output: [{ type: "text", text: "没有有效的子任务。" }] };
 
 				// 沿用父会话的模型；取不到就用当前供应商的第一个模型
-				let model = { provider: activeProviderId() || DEFAULT_PROVIDER.id, modelId: activeModelIds()[0] ?? DEFAULT_MODEL_ID };
+				let model = { provider: activeProviderId(sqlFacade!) || DEFAULT_PROVIDER.id, modelId: activeModelIds(sqlFacade!)[0] ?? DEFAULT_MODEL_ID };
 				try {
 					const parent = await harness.conversation(api.conversationId, ctx);
 					const agent = parent ? await parent.agent(ctx) : null;
@@ -1473,7 +1076,7 @@ const baseSpikeExtension = defineExtension({
 /** 带审批闸门的扩展（v0.33.0）：工具名与描述不变，只在 execute 外按 read/write/exec 策略判断。 */
 const spikeExtension = {
 	...baseSpikeExtension,
-	tools: (baseSpikeExtension.tools ?? []).map((tool) => withApproval(tool as never)),
+	tools: (baseSpikeExtension.tools ?? []).map((tool) => withApproval(tool as never, toolGate)),
 };
 
 /** 把 data URL 解析成 pi-ai 的图片块；不合法的丢弃。 */
@@ -1499,14 +1102,8 @@ function userContent(message: string, images: string[] | undefined): string | { 
 const baseToolSearchExtension = createToolSearchExtension();
 const toolSearchExtension = {
 	...baseToolSearchExtension,
-	tools: (baseToolSearchExtension.tools ?? []).map((tool) => withApproval(tool as never)),
+	tools: (baseToolSearchExtension.tools ?? []).map((tool) => withApproval(tool as never, toolGate)),
 };
-/** MCP 工具总数达到该阈值时改为延迟披露，避免工具列表撑爆上下文。 */
-const DEFER_MCP_THRESHOLD = 12;
-
-/** 可选模型（pi-ai deepseek provider 的目录）。 */
-const AVAILABLE_MODELS = ["deepseek-flash", "deepseek-v4-pro"];
-const DEFAULT_MODEL_ID = "deepseek-flash";
 
 /** Code mode 扩展：单例即可（沙箱无状态，脚本每次执行新建 VM）。 */
 const baseCodemodeExtension = createCodemodeExtension({
@@ -1516,67 +1113,10 @@ const baseCodemodeExtension = createCodemodeExtension({
 /** 同样套审批闸门（v0.33.0）：codemode 属 exec 级。 */
 const codemodeExtension = {
 	...baseCodemodeExtension,
-	tools: (baseCodemodeExtension.tools ?? []).map((tool) => withApproval(tool as never)),
+	tools: (baseCodemodeExtension.tools ?? []).map((tool) => withApproval(tool as never, toolGate)),
 };
 
-/** 已连接的 MCP 客户端缓存：同一 DO 实例内复用，配置变更时清空。 */
-const mcpCache = new Map<string, { client: McpClient; tools: { name: string; description?: string; inputSchema?: unknown }[] }>();
-
-/** 读取配置的 MCP 服务器，连接并包装成 pi-durable 工具（惰性、失败静默）。 */
-async function buildMcpExtension(sql: { exec(q: string, ...b: unknown[]): { toArray(): unknown[] } }) {
-	const servers = sql.exec("SELECT id, name, url, headers FROM mcp_servers ORDER BY created_at ASC").toArray() as {
-		id: string;
-		name: string;
-		url: string;
-		headers: string;
-	}[];
-	if (!servers.length) return null;
-
-	// 第一遍：连接所有服务器并拿到工具清单（已缓存的直接复用）。
-	const connected: { server: { id: string; name: string }; entry: { client: McpClient; tools: { name: string; description?: string; inputSchema?: unknown }[] } }[] = [];
-	for (const server of servers) {
-		try {
-			let entry = mcpCache.get(server.id);
-			if (!entry) {
-				const client = new McpClient({ name: "pi-harness", version: "1.0.0" });
-				const headers = JSON.parse(server.headers || "{}") as Record<string, string>;
-				await client.connect(new StreamableHttpTransport({ url: server.url, headers }));
-				const listed = await client.listTools();
-				entry = { client, tools: listed as never };
-				mcpCache.set(server.id, entry);
-			}
-			connected.push({ server, entry });
-		} catch (err) {
-			console.warn(`MCP server ${server.name} unavailable`, String(err));
-		}
-	}
-	const total = connected.reduce((n, item) => n + item.entry.tools.length, 0);
-	// 工具多时改为延迟披露：模型先用 tool_search 搜索，再按需加载。
-	const defer = total > DEFER_MCP_THRESHOLD;
-
-	const tools = [];
-	for (const { server, entry } of connected) {
-		for (const tool of entry.tools) {
-			const jsName = `mcp__${server.id}__${tool.name}`.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 60);
-			tools.push(
-				defineTool({
-					name: jsName,
-					...(defer ? { deferred: true as const } : {}),
-					description: `[${server.name}] ${tool.description ?? tool.name}`.slice(0, 400),
-					parameters: Type.Unsafe((tool.inputSchema as object) ?? { type: "object", properties: {} }),
-					execute: async (args: unknown) => {
-						const res = await entry.client.callTool(tool.name, (args ?? {}) as Record<string, unknown>);
-						const content = toLlmContent(res as never) as { type: string; text?: string }[];
-						const text = content.map((c) => c.text ?? "").join("\n").slice(0, 8000);
-						return { output: [{ type: "text", text: text || "(空结果)" }] };
-					},
-				}),
-			);
-		}
-	}
-	// MCP 工具默认按写入处理（外部服务可能有副作用），统一套审批闸门（v0.33.0）
-	return defineExtension({ name: "mcp", tools: tools.map((tool) => withApproval(tool as never)) });
-}
+/* MCP 连接缓存与扩展构建在 services/mcp-service.ts（R5：缓存按 DO 实例传入）。 */
 
 export class SpikeAgent extends DurableObject {
 	/** pi-durable 的存储句柄，用来枚举会话（Harness 本身不提供列表 API）。 */
@@ -1586,6 +1126,10 @@ export class SpikeAgent extends DurableObject {
 	private mcpExt: { name: string; tools?: unknown[] } | null = null;
 	/** 自定义工具扩展（v0.36.0）：增删后重建并重新 install。 */
 	private customExt: { name: string; tools?: unknown[] } | null = null;
+	/** R5：已加载的自定义工具名，按 DO 实例隔离（同 isolate 多用户不串用）。 */
+	private customToolNames = new Set<string>();
+	/** R5：MCP 客户端缓存，按 DO 实例隔离；配置变更时清空。 */
+	private mcpCache: McpCache = new Map();
 	/** 注册表引用：MCP 扩展在运行时安装（install 按名替换）。 */
 	private registryRef: { install(ext: unknown): void; snapshot(): { installed(): readonly { name: string }[] } } | null = null;
 	private storageRef: { scanConversations(q: object, limit: number, cursor: undefined, context: unknown): Promise<unknown> } | null = null;
@@ -1614,7 +1158,7 @@ export class SpikeAgent extends DurableObject {
 			await this.ensureMigrated();
 			const models = createModels();
 			// v0.27.0：启用自定义供应商时用它，否则回落到 DeepSeek 官方（env DEEPSEEK_API_KEY）
-			const activeId = activeProviderId();
+			const activeId = activeProviderId(sqlFacade!);
 			const providerRow = activeId ? listProviderRows().find((r) => r.id === activeId) : undefined;
 			if (providerRow) models.setProvider(buildCustomProvider(providerRow) as never);
 			else models.setProvider(deepseekProvider());
@@ -1628,13 +1172,13 @@ export class SpikeAgent extends DurableObject {
 			// Durable Object SQLite: conversations survive DO restarts and redeploys.
 			const storage = await openDurableObjectSqliteStorage(this.ctx.storage);
 			this.storageRef = storage;
-			// MCP 扩展在表就绪后构建并安装；之后由 /api/mcp 变更时重建。
-			this.mcpExt = (await buildMcpExtension(sqlFacade)) as never;
-				if (this.mcpExt) registry.install(this.mcpExt);
+			// MCP 扩展在表就绪后构建并安装；之后由 /api/mcp 变更时重建（缓存按实例传入，R5）。
+			this.mcpExt = (await buildMcpExtension(sqlFacade!, this.mcpCache)) as never;
+			if (this.mcpExt) registry.install(this.mcpExt);
 			// 自定义工具（v0.36.0）：同样必须在 Harness.open 之前 install
-			this.customExt = buildCustomToolsExtension(sqlFacade!) as never;
+			this.customExt = buildCustomToolsExtension(sqlFacade!, this.customToolNames) as never;
 			if (this.customExt) registry.install(this.customExt as never);
-			this.harness = await Harness.open(storage, { models, registry, settings: { compaction: compactionSettings() } }, ctx);
+			this.harness = await Harness.open(storage, { models, registry, settings: { compaction: compactionSettings(getSetting) } }, ctx);
 			this.harnessOpens++;
 			scope().harness = this.harness;
 			this.harness.resume();
@@ -1675,7 +1219,7 @@ export class SpikeAgent extends DurableObject {
 			{
 				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
 				// 思考档位（v0.22.0）：off 时不产生 thinking 事件，前端自然不显示思考块。
-				thinkingLevel: currentThinkingLevel(),
+				thinkingLevel: thinkingLevel(getSetting),
 				extensions: this.agentExtensions() as never,
 				instructions: turn.instructions,
 			},
@@ -1731,16 +1275,16 @@ export class SpikeAgent extends DurableObject {
 
 	/** 会话当前模型（未设置时用默认）。 */
 	private providerId(): string {
-		return activeProviderId() || DEFAULT_PROVIDER.id;
+		return activeProviderId(sqlFacade!) || DEFAULT_PROVIDER.id;
 	}
 
 	/** 当前供应商的第一个模型。 */
 	private defaultModelId(): string {
-		return activeModelIds()[0] ?? DEFAULT_MODEL_ID;
+		return activeModelIds(sqlFacade!)[0] ?? DEFAULT_MODEL_ID;
 	}
 
 	private modelFor(sessionId?: string): string {
-		const available = activeModelIds();
+		const available = activeModelIds(sqlFacade!);
 		if (!sessionId) return available[0] ?? DEFAULT_MODEL_ID;
 		try {
 			const model = getModel(this.ctx.storage.sql as unknown as SqlHandle, sessionId);
@@ -1877,6 +1421,62 @@ export class SpikeAgent extends DurableObject {
 		return createFileService({ sql: this.ctx.storage.sql as unknown as SqlHandle });
 	}
 
+	private automationService(): AutomationService {
+		return createAutomationService(this.ctx.storage.sql as unknown as SqlHandle);
+	}
+
+	private settingsRuntime(): SettingsRuntime {
+		return { recover: () => this.recoverSession() };
+	}
+
+	private alarmRuntime(): AlarmRuntime {
+		return { schedule: () => this.scheduleNextAlarm() };
+	}
+
+	private contextRuntime(): ContextRuntime {
+		return { usage: (sessionId) => this.contextUsage(sessionId) };
+	}
+
+	private goalRuntime(): GoalRuntime {
+		return {
+			baselineTokens: async (sessionId) => {
+				const harness = await this.open();
+				const conversation = await this.conversationFor(harness, sessionId);
+				return this.goalTokens(harness, conversation.id);
+			},
+		};
+	}
+
+	/** R5：工具清单与自定义工具名都按实例取，不读模块级集合。 */
+	private toolRuntime(): ToolRuntime {
+		return {
+			names: () => {
+				const names = new Set<string>();
+				for (const ext of [spikeExtension, codemodeExtension, toolSearchExtension, this.mcpExt, this.customExt] as unknown as {
+					tools?: { name?: string }[];
+				}[]) {
+					for (const tool of ext?.tools ?? []) if (tool.name) names.add(tool.name);
+				}
+				return [...names];
+			},
+			customNames: () => [...this.customToolNames],
+		};
+	}
+
+	private mcpRuntime(): McpRuntime {
+		return {
+			rebuild: async () => {
+				this.mcpCache.clear();
+				const rebuilt = await buildMcpExtension(sqlFacade!, this.mcpCache);
+				if (rebuilt) {
+					this.mcpExt = rebuilt as never;
+					if (this.registryRef) this.registryRef.install(rebuilt);
+				}
+				return rebuilt?.tools?.length ?? 0;
+			},
+		};
+	}
+
 	/**
 	 * 首屏聚合（NERE-23）：一次读取所有只读面板。
 	 * 各 loader 与单端点共用同一实现；collectBootstrap 负责逐字段容错。
@@ -1888,19 +1488,19 @@ export class SpikeAgent extends DurableObject {
 			sessions: async () => (await this.sessionService().list()).sessions,
 			files: () => this.fileService().list(sessionId),
 			memories: () => listMemories(),
-			approvals: () => listPendingApprovals(sessionId),
-			settings: () => settingsView(),
+			approvals: () => listPendingApprovals(sqlFacade!, sessionId),
+			settings: () => settingsView(getSetting, this.env as AppEnv),
 			plan: () => readPlan(sessionId),
 			goal: () => goalInfo(readGoalRow(sessionId)),
-			questions: () => listPendingQuestions(sessionId),
+			questions: () => listPendingQuestions(sqlFacade!, sessionId),
 			prompts: () => listPrompts(),
 			rules: () => ruleViews(),
-			customTools: () => listCustomTools(),
+			customTools: () => customToolsRepo.listAll(sqlFacade!),
 			skills: () => listSkills(),
-			automations: () => listAutomations(),
-			mcpServers: () => listMcpServers(),
+			automations: () => automationsRepo.list(sqlFacade!),
+			mcpServers: () => mcpRepo.list(sqlFacade!),
 			models: () => {
-				const models = activeModelIds();
+				const models = activeModelIds(sqlFacade!);
 				return { models, default: models[0] ?? DEFAULT_MODEL_ID };
 			},
 		});
@@ -1961,20 +1561,11 @@ export class SpikeAgent extends DurableObject {
 		this.harness = null;
 	}
 
-	/** 下一次闹钟时间：定时任务与待续转目标里最早的一个。 */
+	/** 下一次闹钟时间：定时任务与待续转目标里最早的一个（判断在 automation-service）。 */
 	private async scheduleNextAlarm(): Promise<void> {
 		try {
-			const rows = sqlFacade!
-				.exec(
-					`SELECT MIN(t) AS next FROM (
-						SELECT MIN(next_run_at) AS t FROM automations WHERE enabled = 1 AND next_run_at > 0
-						UNION ALL
-						SELECT MIN(next_run_at) FROM goals WHERE status = 'active' AND next_run_at > 0
-					)`,
-				)
-				.toArray() as { next: number | null }[];
-			const next = rows[0]?.next;
-			if (typeof next === "number" && Number.isFinite(next)) {
+			const next = this.automationService().nextAlarmAt();
+			if (next !== null) {
 				const at = Math.max(Date.now() + 5_000, next);
 				await this.ctx.storage.setAlarm(at);
 			} else {
@@ -1983,22 +1574,6 @@ export class SpikeAgent extends DurableObject {
 		} catch (err) {
 			console.warn("scheduleNextAlarm failed", err);
 		}
-	}
-
-	/** 计算下一次执行时间（毫秒）。 */
-	private nextRunAt(schedule: { kind: string; time?: string; minutes?: number }, now = Date.now()): number {
-		if (schedule.kind === "interval") {
-			const minutes = Math.max(1, Math.floor(Number(schedule.minutes ?? 60)));
-			return now + minutes * 60_000;
-		}
-		// daily：按 UTC+8 的 HH:MM 计算下一次
-		const [hh, mm] = String(schedule.time ?? "09:00").split(":").map((v) => Number(v) || 0);
-		const offsetMs = 8 * 3600_000;
-		const local = new Date(now + offsetMs);
-		const target = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), hh, mm, 0));
-		let at = target.getTime() - offsetMs;
-		if (at <= now) at += 24 * 3600_000;
-		return at;
 	}
 
 	/** DO alarm：执行到点的定时任务。 */
@@ -2023,15 +1598,13 @@ export class SpikeAgent extends DurableObject {
 		try {
 			await this.open();
 			const now = Date.now();
-			const due = sqlFacade!.exec(
-				"SELECT id, prompt, session_id, schedule FROM automations WHERE enabled = 1 AND next_run_at <= ?",
-				now,
-			).toArray() as { id: string; prompt: string; session_id: string; schedule: string }[];
+			const automations = this.automationService();
+			const due = automations.due(now);
 			for (const job of due) {
 				try {
 					// 会话正忙时跳过这一轮，避免并发 submit 破坏会话状态（v0.17.1）
 					if (this.activeChats.has(job.session_id || "1")) {
-						sqlFacade!.exec("UPDATE automations SET next_run_at = ? WHERE id = ?", now + 5 * 60_000, job.id);
+						automations.defer(job.id, now);
 						continue;
 					}
 					await this.chat(job.prompt, job.session_id || undefined);
@@ -2039,37 +1612,25 @@ export class SpikeAgent extends DurableObject {
 					console.warn(`automation ${job.id} failed`, String(err).slice(0, 200));
 					await this.recoverSession();
 				}
-				let schedule: { kind: string; time?: string; minutes?: number } = { kind: "daily", time: "09:00" };
-				try {
-					schedule = JSON.parse(job.schedule) as typeof schedule;
-				} catch {
-					// 保持默认
-				}
-				sqlFacade!.exec(
-					"UPDATE automations SET last_run_at = ?, next_run_at = ? WHERE id = ?",
-					now, this.nextRunAt(schedule, Date.now()), job.id,
-				);
+				automations.markRun(job, now);
 			}
-			if (due.length) sqlFacade!.exec("UPDATE automations SET next_run_at = ? WHERE enabled = 1 AND next_run_at <= ?", now + 60_000, now);
+			if (due.length) automations.rescheduleOverdue(now);
 
 			// 目标自动续转（v0.31.0）：到点的目标推进一轮
-			const dueGoals = sqlFacade!
-				.exec("SELECT session_id FROM goals WHERE status = 'active' AND next_run_at > 0 AND next_run_at <= ?", now)
-				.toArray() as { session_id: string }[];
-			for (const goal of dueGoals) {
-				if (this.activeChats.has(goal.session_id)) {
-					writeGoal(goal.session_id, { next_run_at: now + 60_000 });
+			for (const sessionId of automations.dueGoals(now)) {
+				if (this.activeChats.has(sessionId)) {
+					automations.deferGoal(sessionId, now);
 					continue;
 				}
 				try {
-					this.activeChats.add(goal.session_id);
-					await this.goalTick(goal.session_id);
+					this.activeChats.add(sessionId);
+					await this.goalTick(sessionId);
 				} catch (err) {
-					console.warn(`goal ${goal.session_id} tick failed`, String(err).slice(0, 200));
+					console.warn(`goal ${sessionId} tick failed`, String(err).slice(0, 200));
 					await this.recoverSession();
-					writeGoal(goal.session_id, { next_run_at: now + 60_000 });
+					automations.deferGoal(sessionId, now);
 				} finally {
-					this.activeChats.delete(goal.session_id);
+					this.activeChats.delete(sessionId);
 				}
 			}
 		} catch (err) {
@@ -2159,17 +1720,17 @@ export class SpikeAgent extends DurableObject {
 			data: {
 				memories: q("SELECT id, content, created_at, source FROM pi_mem ORDER BY id"),
 				files: q("SELECT conversation_id, name, content, updated_at FROM vfs_v2 ORDER BY conversation_id, name"),
-				automations: q("SELECT id, name, prompt, session_id, schedule, enabled, next_run_at FROM automations"),
-				mcpServers: q("SELECT id, name, url, headers FROM mcp_servers"),
+				automations: automationsRepo.listForBackup(sqlFacade!),
+				mcpServers: mcpRepo.listForBackup(sqlFacade!),
 				sessions: q("SELECT id, title, created_at, updated_at, model FROM sessions_meta WHERE deleted = 0"),
 				shares: q("SELECT token, kind, session_id, name, expires_at, theme, created_at FROM shares"),
 				skills: q("SELECT name, description, content FROM skills ORDER BY name"),
-				settings: q("SELECT key, value FROM app_settings"),
-				plans: q("SELECT conversation_id, steps, updated_at FROM plans"),
-				providers: q("SELECT id, name, base_url, api_key, models FROM providers"),
+				settings: settingsRepo.listAll(sqlFacade!),
+				plans: plansRepo.listForBackup(sqlFacade!),
+				providers: providersRepo.listForBackup(sqlFacade!),
 				prompts: q("SELECT name, description, content FROM prompts"),
 				rules: q("SELECT name, content, enabled FROM rules"),
-				goals: q("SELECT session_id, objective, status, token_budget, baseline_tokens, tokens_used, turns, max_turns, summary, next_run_at, created_at, updated_at FROM goals"),
+				goals: goalsRepo.listForBackup(sqlFacade!),
 				kbDocs: kbService().backupDocs(),
 			},
 		};
@@ -2208,10 +1769,18 @@ export class SpikeAgent extends DurableObject {
 		for (const a of rows("automations")) {
 			const id = str(a.id);
 			if (!id) continue;
-			sqlFacade!.exec(
-				"INSERT INTO automations (id, name, prompt, session_id, schedule, enabled, created_at, next_run_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, prompt = excluded.prompt, schedule = excluded.schedule, enabled = excluded.enabled",
-				id, str(a.name), str(a.prompt), str(a.session_id), str(a.schedule) || '{"kind":"daily","time":"09:00"}',
-				num(a.enabled) ? 1 : 0, new Date().toISOString(), num(a.next_run_at) || Date.now() + 60_000,
+			automationsRepo.restoreRow(
+				sqlFacade!,
+				{
+					id,
+					name: str(a.name),
+					prompt: str(a.prompt),
+					session_id: str(a.session_id),
+					schedule: str(a.schedule) || '{"kind":"daily","time":"09:00"}',
+					enabled: num(a.enabled) ? 1 : 0,
+					next_run_at: num(a.next_run_at) || Date.now() + 60_000,
+				},
+				new Date().toISOString(),
 			);
 			counts.automations = (counts.automations ?? 0) + 1;
 		}
@@ -2237,14 +1806,15 @@ export class SpikeAgent extends DurableObject {
 		for (const s of rows("mcpServers")) {
 			const id = str(s.id);
 			if (!id) continue;
-			sqlFacade!.exec(
-				"INSERT INTO mcp_servers (id, name, url, headers, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, url = excluded.url, headers = excluded.headers",
-				id, str(s.name), str(s.url), str(s.headers) || "{}", new Date().toISOString(),
+			mcpRepo.restoreRow(
+				sqlFacade!,
+				{ id, name: str(s.name), url: str(s.url), headers: str(s.headers) || "{}" },
+				new Date().toISOString(),
 			);
 			counts.mcpServers = (counts.mcpServers ?? 0) + 1;
 		}
-		mcpCache.clear();
-		const rebuilt = await buildMcpExtension(sqlFacade!);
+		this.mcpCache.clear();
+		const rebuilt = await buildMcpExtension(sqlFacade!, this.mcpCache);
 		if (rebuilt) {
 			this.mcpExt = rebuilt as never;
 			if (this.registryRef) this.registryRef.install(rebuilt);
@@ -2252,7 +1822,7 @@ export class SpikeAgent extends DurableObject {
 		for (const s of rows("settings")) {
 			const key = str(s.key).trim();
 			if (!key) continue;
-			setSetting(key, str(s.value));
+			settingsRepo.restoreRow(sqlFacade!, { key, value: str(s.value) });
 			counts.settings = (counts.settings ?? 0) + 1;
 		}
 		for (const pr of rows("prompts")) {
@@ -2277,32 +1847,43 @@ export class SpikeAgent extends DurableObject {
 			const sid = str(g.session_id).trim();
 			const objective = str(g.objective).trim();
 			if (!sid || !objective) continue;
-			sqlFacade!.exec(
-				`INSERT INTO goals (session_id, objective, status, token_budget, baseline_tokens, tokens_used, turns, max_turns, summary, next_run_at, created_at, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				 ON CONFLICT(session_id) DO UPDATE SET objective = excluded.objective, status = excluded.status, token_budget = excluded.token_budget, baseline_tokens = excluded.baseline_tokens, tokens_used = excluded.tokens_used, turns = excluded.turns, max_turns = excluded.max_turns, summary = excluded.summary, next_run_at = excluded.next_run_at`,
-				sid, objective, str(g.status) || "paused", num(g.token_budget) || GOAL_TOKEN_BUDGET_DEFAULT,
-				num(g.baseline_tokens), num(g.tokens_used), num(g.turns), num(g.max_turns) || GOAL_MAX_TURNS_DEFAULT,
-				str(g.summary), num(g.next_run_at), str(g.created_at) || new Date().toISOString(), new Date().toISOString(),
+			goalsRepo.restoreRow(
+				sqlFacade!,
+				{
+					session_id: sid,
+					objective,
+					status: str(g.status) || "paused",
+					token_budget: num(g.token_budget) || GOAL_TOKEN_BUDGET_DEFAULT,
+					baseline_tokens: num(g.baseline_tokens),
+					tokens_used: num(g.tokens_used),
+					turns: num(g.turns),
+					max_turns: num(g.max_turns) || GOAL_MAX_TURNS_DEFAULT,
+					summary: str(g.summary),
+					next_run_at: num(g.next_run_at),
+					created_at: str(g.created_at) || new Date().toISOString(),
+				},
+				new Date().toISOString(),
 			);
 			counts.goals = (counts.goals ?? 0) + 1;
 		}
 		for (const p of rows("providers")) {
-			const pid = str(p.id).trim();
-			if (!pid) continue;
-			sqlFacade!.exec(
-				"INSERT INTO providers (id, name, base_url, api_key, models, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, base_url = excluded.base_url, api_key = excluded.api_key, models = excluded.models",
-				pid, str(p.name), str(p.base_url), str(p.api_key), str(p.models), new Date().toISOString(),
+			const id = str(p.id).trim();
+			if (!id) continue;
+			providersRepo.restoreRow(
+				sqlFacade!,
+				{ id, name: str(p.name), base_url: str(p.base_url), api_key: str(p.api_key), models: str(p.models) },
+				new Date().toISOString(),
 			);
 			counts.providers = (counts.providers ?? 0) + 1;
 		}
 		for (const p of rows("plans")) {
-			const cid = str(p.conversation_id);
-			if (!cid) continue;
-			sqlFacade!.exec(
-				"INSERT INTO plans (conversation_id, steps, updated_at) VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET steps = excluded.steps",
-				cid, str(p.steps) || "[]", str(p.updated_at) || new Date().toISOString(),
-			);
+			const conversation_id = str(p.conversation_id);
+			if (!conversation_id) continue;
+			plansRepo.restoreRow(sqlFacade!, {
+				conversation_id,
+				steps: str(p.steps) || "[]",
+				updated_at: str(p.updated_at) || new Date().toISOString(),
+			});
 			counts.plans = (counts.plans ?? 0) + 1;
 		}
 		for (const s of rows("sessions")) {
@@ -2583,7 +2164,7 @@ export class SpikeAgent extends DurableObject {
 		await root.configure(
 			{
 				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
-				thinkingLevel: currentThinkingLevel(),
+				thinkingLevel: thinkingLevel(getSetting),
 				extensions: this.agentExtensions() as never,
 				instructions: turn.instructions,
 			},
@@ -2802,6 +2383,12 @@ export class SpikeAgent extends DurableObject {
 					sessionRuntime: this.sessionRuntime(),
 					shareRuntime: this.shareRuntime(),
 					settings: { get: getSetting },
+					settingsRuntime: this.settingsRuntime(),
+					alarmRuntime: this.alarmRuntime(),
+					contextRuntime: this.contextRuntime(),
+					goalRuntime: this.goalRuntime(),
+					toolRuntime: this.toolRuntime(),
+					mcpRuntime: this.mcpRuntime(),
 					webFetch: (target) => webFetchPageContent(target, env.DEEPSEEK_API_KEY ?? null),
 				});
 				return dispatch(context);
@@ -2833,9 +2420,9 @@ export class SpikeAgent extends DurableObject {
 			if (request.method === "GET" && url.pathname === "/debug/agent") {
 				const harness = await this.open();
 				const root = await this.retryOnSessionError(harness, (h) => h.root(ctx));
-				const mcpExtDbg = await buildMcpExtension(sqlFacade!);
+				const mcpExtDbg = await buildMcpExtension(sqlFacade!, this.mcpCache);
 				if (mcpExtDbg && this.registryRef) this.registryRef.install(mcpExtDbg);
-				if (!this.customExt) this.customExt = buildCustomToolsExtension(sqlFacade!) as never;
+				if (!this.customExt) this.customExt = buildCustomToolsExtension(sqlFacade!, this.customToolNames) as never;
 				await root.configure({ extensions: this.agentExtensions() as never }, ctx);
 				const agent = await root.agent(ctx);
 				const a = agent as unknown as {
@@ -2884,46 +2471,6 @@ export class SpikeAgent extends DurableObject {
 				} catch (err) {
 					return Response.json({ error: String(err).slice(0, 200) }, { status: 400 });
 				}
-			}
-			if (url.pathname === "/automations" && request.method === "GET") {
-				return Response.json({ automations: listAutomations() });
-			}
-			if (url.pathname === "/automations" && request.method === "POST") {
-				const body = (await request.json()) as {
-					name?: string;
-					prompt?: string;
-					sessionId?: string;
-					schedule?: { kind?: string; time?: string; minutes?: number };
-				};
-				const name = (body.name ?? "").trim().slice(0, 40);
-				const prompt = (body.prompt ?? "").trim().slice(0, 2000);
-				if (!name || !prompt) return Response.json({ error: "需要名称与提示词" }, { status: 400 });
-				const schedule = body.schedule?.kind === "interval"
-					? { kind: "interval", minutes: Math.max(1, Math.floor(Number(body.schedule.minutes ?? 60))) }
-					: { kind: "daily", time: /^\d{1,2}:\d{2}$/.test(body.schedule?.time ?? "") ? body.schedule!.time! : "09:00" };
-				const id = `a${Date.now().toString(36)}`;
-				sqlFacade!.exec(
-					"INSERT INTO automations (id, name, prompt, session_id, schedule, enabled, created_at, next_run_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
-					id, name, prompt, body.sessionId ?? "", JSON.stringify(schedule), new Date().toISOString(), this.nextRunAt(schedule),
-				);
-				await this.scheduleNextAlarm();
-				return Response.json({ ok: true, id, nextRunAt: this.nextRunAt(schedule) });
-			}
-			if (url.pathname === "/automations" && request.method === "PATCH") {
-				const body = (await request.json()) as { id?: string; enabled?: boolean };
-				if (!body.id) return Response.json({ error: "缺少 id" }, { status: 400 });
-				const enabled = body.enabled ? 1 : 0;
-				sqlFacade!.exec(
-					"UPDATE automations SET enabled = ?, next_run_at = CASE WHEN ? = 1 THEN ? ELSE next_run_at END WHERE id = ?",
-					enabled, enabled, Date.now() + 60_000, body.id,
-				);
-				await this.scheduleNextAlarm();
-				return Response.json({ ok: true });
-			}
-			if (url.pathname === "/automations" && request.method === "DELETE") {
-				sqlFacade!.exec("DELETE FROM automations WHERE id = ?", url.searchParams.get("id") ?? "");
-				await this.scheduleNextAlarm();
-				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/export" && request.method === "GET") {
 				const data = await this.exportMarkdown(url.searchParams.get("sessionId") ?? undefined);
@@ -2981,131 +2528,39 @@ export class SpikeAgent extends DurableObject {
 				sqlFacade!.exec("DELETE FROM rules WHERE name = ?", url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true });
 			}
-			/* ---- 能力注册表（v0.31.0）：把三类来源汇总成一张表 ---- */
-			if (url.pathname === "/capabilities" && request.method === "GET") {
-				const settings = compactionSettings();
-				const builtin = [
-					{ id: "codemode", name: "Code Mode", description: "QuickJS 沙箱里写 JS 调工具", enabled: true },
-					{ id: "tool_search", name: "工具搜索", description: "工具多时按需检索加载", enabled: true },
-					{ id: "compaction", name: "上下文压缩", description: "接近上下文上限时自动摘要旧内容", enabled: settings.enabled, detail: `保留 ${settings.keepRecentTokens} tokens / 预留 ${settings.reserveTokens}` },
-					{ id: "plan", name: "计划清单", description: "update_plan 维护分步计划", enabled: true },
-					{ id: "share", name: "分享链接", description: "share_file / share_conversation 生成只读链接", enabled: true },
-					{ id: "subagents", name: "子代理", description: "dispatch_tasks 并行分派子任务", enabled: true },
-					{ id: "goal", name: "目标模式", description: "目标 + token 预算 + 自动续转 + 完成校验", enabled: true },
-					...((): { id: string; name: string; description: string; enabled: boolean; detail?: string }[] => {
-						const a = approvalSettings();
-						const on = a.read !== "allow" || a.write !== "allow" || a.exec !== "allow";
-						return [{
-							id: "approval",
-							name: "工具审批",
-							description: "read/write/exec 三档 + 逐工具覆盖",
-							enabled: on,
-							detail: `读 ${a.read} / 写 ${a.write} / 执行 ${a.exec}`,
-						}];
-					})(),
-					{ id: "web_search", name: "联网搜索", description: "web_search / web_fetch_page", enabled: getSetting("web_search", "1") === "1" },
-				];
-				const data = [
-					{ id: "skills", name: "技能", description: "SKILL.md 说明书，按需 load_skill", enabled: true, count: this.skillIndex().length },
-					{ id: "prompts", name: "提示模板", description: "输入 / 展开的常用指令", enabled: true, count: listPrompts().length },
-					{ id: "rules", name: "规则文件", description: "每轮注入的项目约定", enabled: true, count: listRules().filter((r) => r.enabled).length },
-				];
-				const protocol = [
-					{ id: "mcp", name: "MCP 服务器", description: "Streamable HTTP 工具接入", enabled: true, count: sqlFacade!.exec("SELECT COUNT(*) AS n FROM mcp_servers").toArray()[0] ? Number((sqlFacade!.exec("SELECT COUNT(*) AS n FROM mcp_servers").toArray()[0] as { n: number }).n) : 0 },
-					{ id: "providers", name: "模型供应商", description: "OpenAI 兼容端点", enabled: true, count: listProviderRows().length },
-				];
-				return Response.json({
-					groups: [
-						{ key: "builtin", label: "内置能力", items: builtin },
-						{ key: "data", label: "数据能力", items: data },
-						{ key: "protocol", label: "协议接入", items: protocol },
-					],
-				});
-			}
-			/* ---- 交互式问答（v0.37.0） ---- */
-			if (url.pathname === "/questions" && request.method === "GET") {
-				const sid = url.searchParams.get("sessionId") ?? "1";
-				return Response.json({ questions: listPendingQuestions(sid) });
-			}
-			if (url.pathname === "/questions" && request.method === "POST") {
-				const body = (await request.json().catch(() => ({}))) as {
-					id?: number;
-					answers?: { id?: string; choice?: string; text?: string }[];
-				};
-				const id = Math.floor(Number(body.id));
-				if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false, error: "缺少问题 id" }, { status: 400 });
-				const rows = sqlFacade!.exec("SELECT id, session_id, payload, status FROM questions WHERE id = ?", id).toArray() as {
-					id: number; session_id: string; payload: string; status: string;
-				}[];
-				const row = rows[0];
-				if (!row) return Response.json({ ok: false, error: "问题不存在" }, { status: 404 });
-				if (row.status !== "pending") return Response.json({ ok: false, error: "该问题已回答" }, { status: 409 });
-				const payload = JSON.parse(row.payload) as AskPayload;
-				const given = Array.isArray(body.answers) ? body.answers : [];
-				const lines: string[] = [];
-				for (const q of payload.questions) {
-					const hit = given.find((a) => String(a.id ?? "") === q.id);
-					const choice = String(hit?.choice ?? "").trim();
-					const text = String(hit?.text ?? "").trim();
-					const answer = text || choice || "（未回答）";
-					lines.push(`- ${q.id}「${q.question}」：${answer}`);
-				}
-				if (!lines.length) return Response.json({ ok: false, error: "没有有效回答" }, { status: 400 });
-				sqlFacade!.exec("UPDATE questions SET status = 'answered', answered_at = ? WHERE id = ?", new Date().toISOString(), id);
-				const resume = `用户回答了你的问题${payload.title ? `（${payload.title}）` : ""}：\n${lines.join("\n")}\n\n请据此继续。`;
-				return Response.json({ ok: true, id, resume });
-			}
-			/* ---- 自定义工具（v0.36.0） ---- */
+			/* ---- 自定义工具（v0.36.0）：SQL/校验在 custom-tool-service ---- */
 			if (url.pathname === "/custom-tools" && request.method === "GET") {
-				return Response.json({ tools: listCustomTools() });
+				return Response.json({ tools: listCustomTools(sqlFacade!) });
 			}
 			if (url.pathname === "/custom-tools" && request.method === "POST") {
-				const body = (await request.json().catch(() => ({}))) as {
-					name?: string;
-					description?: string;
-					parameters?: string;
-					code?: string;
-				};
-				const name = String(body.name ?? "").trim();
-				const code = String(body.code ?? "").trim();
-				if (!CUSTOM_TOOL_NAME.test(name)) {
-					return Response.json({ ok: false, error: "工具名只能字母开头，含字母数字下划线，2–41 字符" }, { status: 400 });
-				}
-				if (RESERVED_TOOL_NAMES.has(name)) {
-					return Response.json({ ok: false, error: `「${name}」是内置工具名，换一个` }, { status: 400 });
-				}
-				if (!code) return Response.json({ ok: false, error: "代码不能为空" }, { status: 400 });
-				if (code.length > CUSTOM_TOOL_CODE_MAX) {
-					return Response.json({ ok: false, error: `代码最长 ${CUSTOM_TOOL_CODE_MAX} 字符` }, { status: 400 });
-				}
-				let parameters = "{\"type\":\"object\",\"properties\":{}}";
-				if (body.parameters && String(body.parameters).trim()) {
-					try {
-						const parsed = JSON.parse(String(body.parameters)) as { type?: unknown };
-						if (!parsed || typeof parsed !== "object" || parsed.type !== "object") {
-							return Response.json({ ok: false, error: "参数 schema 必须是 {\"type\":\"object\", ...} 的 JSON" }, { status: 400 });
-						}
-						parameters = JSON.stringify(parsed);
-					} catch {
-						return Response.json({ ok: false, error: "参数 schema 不是合法 JSON" }, { status: 400 });
+				try {
+					const saved = saveCustomTool(
+						sqlFacade!,
+						(await request.json().catch(() => ({}))) as never,
+						this.customToolNames,
+					);
+					this.customExt = saved.extension as never;
+					if (this.registryRef) this.registryRef.install(this.customExt as never);
+					return Response.json({ ok: true, name: saved.name, tools: saved.extension.tools?.length ?? 0 });
+				} catch (err) {
+					if (err instanceof CustomToolApiError) {
+						return Response.json({ ok: false, error: err.message }, { status: err.status });
 					}
+					throw err;
 				}
-				sqlFacade!.exec(
-					`INSERT INTO custom_tools (name, description, parameters, code, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)
-					 ON CONFLICT(name) DO UPDATE SET description = excluded.description, parameters = excluded.parameters, code = excluded.code, enabled = 1`,
-					name, String(body.description ?? "").trim().slice(0, 200), parameters, code, new Date().toISOString(),
-				);
-				this.customExt = buildCustomToolsExtension(sqlFacade!) as never;
-				if (this.registryRef) this.registryRef.install(this.customExt as never);
-				return Response.json({ ok: true, name, tools: (this.customExt as { tools?: unknown[] } | null)?.tools?.length ?? 0 });
 			}
 			if (url.pathname === "/custom-tools" && request.method === "DELETE") {
-				const name = url.searchParams.get("name") ?? "";
-				if (!name) return Response.json({ ok: false, error: "缺少 name" }, { status: 400 });
-				sqlFacade!.exec("DELETE FROM custom_tools WHERE name = ?", name);
-				this.customExt = buildCustomToolsExtension(sqlFacade!) as never;
-				if (this.registryRef) this.registryRef.install(this.customExt as never);
-				return Response.json({ ok: true, tools: (this.customExt as { tools?: unknown[] } | null)?.tools?.length ?? 0 });
+				try {
+					const removed = removeCustomTool(sqlFacade!, url.searchParams.get("name") ?? "", this.customToolNames);
+					this.customExt = removed.extension as never;
+					if (this.registryRef) this.registryRef.install(this.customExt as never);
+					return Response.json({ ok: true, tools: removed.extension.tools?.length ?? 0 });
+				} catch (err) {
+					if (err instanceof CustomToolApiError) {
+						return Response.json({ ok: false, error: err.message }, { status: err.status });
+					}
+					throw err;
+				}
 			}
 			/* ---- pi 内核版本（v0.35.0）：当前声明版本 + npm 最新版本（缓存 6 小时） ---- */
 			if (url.pathname === "/kernel" && request.method === "GET") {
@@ -3157,135 +2612,6 @@ export class SpikeAgent extends DurableObject {
 					return Response.json({ ok: false, error: String(err).slice(0, 200) }, { status: 500 });
 				}
 			}
-			/* ---- 工具审批（v0.33.0） ---- */
-			if (url.pathname === "/approvals" && request.method === "GET") {
-				const sid = url.searchParams.get("sessionId") ?? "1";
-				return Response.json({ approvals: listPendingApprovals(sid) });
-			}
-			if (url.pathname === "/approvals" && request.method === "POST") {
-				const body = (await request.json().catch(() => ({}))) as { id?: number; action?: string };
-				const id = Math.floor(Number(body.id));
-				const action = body.action;
-				if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false, error: "缺少待审批 id" }, { status: 400 });
-				if (action !== "once" && action !== "always" && action !== "deny") {
-					return Response.json({ ok: false, error: "action 必须是 once / always / deny" }, { status: 400 });
-				}
-				const rows = sqlFacade!.exec("SELECT id, session_id, tool, status FROM approvals WHERE id = ?", id).toArray() as {
-					id: number; session_id: string; tool: string; status: string;
-				}[];
-				const row = rows[0];
-				if (!row) return Response.json({ ok: false, error: "待审批不存在" }, { status: 404 });
-				if (row.status === "pending") {
-					const now = new Date().toISOString();
-					if (action === "deny") {
-						sqlFacade!.exec("UPDATE approvals SET status = 'denied', decided_at = ? WHERE id = ?", now, id);
-						sqlFacade!.exec("DELETE FROM approval_grants WHERE session_id = ? AND tool = ?", row.session_id, row.tool);
-					} else {
-						sqlFacade!.exec("UPDATE approvals SET status = 'approved', decided_at = ? WHERE id = ?", now, id);
-						sqlFacade!.exec(
-							`INSERT INTO approval_grants (session_id, tool, uses, created_at) VALUES (?, ?, ?, ?)
-							 ON CONFLICT(session_id, tool) DO UPDATE SET uses = CASE WHEN approval_grants.uses < 0 THEN -1 ELSE excluded.uses END`,
-							row.session_id, row.tool, action === "always" ? -1 : 1, now,
-						);
-					}
-				}
-				const resume =
-					action === "deny"
-						? row.tool === "share_file" || row.tool === "share_conversation"
-							? `用户拒绝了对工具「${row.tool}」的调用，本次分享已取消：不要声称链接已生成，简短回复「已取消分享」即可。`
-							: `用户拒绝了对工具「${row.tool}」的调用，请不要再用它，改换方案或向用户说明。`
-						: `已批准工具「${row.tool}」（${action === "always" ? "以后允许" : "本次"}），请继续刚才的操作。`;
-				return Response.json({ ok: true, id, action, tool: row.tool, resume });
-			}
-			if (url.pathname === "/tools" && request.method === "GET") {
-				await this.open();
-				const names = new Set<string>();
-				// 内置扩展（spike / codemode / tool-search）+ 已连接的 MCP 工具
-				for (const ext of [spikeExtension, codemodeExtension, toolSearchExtension, this.mcpExt, this.customExt] as unknown as {
-					tools?: { name?: string }[];
-				}[]) {
-					for (const tool of ext?.tools ?? []) if (tool.name) names.add(tool.name);
-				}
-				return Response.json({
-					approval: approvalSettings(),
-					tools: [...names].sort().map((name) => ({
-						name,
-						category: toolCategory(name),
-						policy: toolPolicy(name),
-						override: getSetting(`approval_tool_${name}`, "follow"),
-					})),
-				});
-			}
-			if (url.pathname === "/settings" && request.method === "GET") {
-				return Response.json(settingsView());
-			}
-			if (url.pathname === "/settings" && request.method === "POST") {
-				const body = (await request.json()) as {
-					webSearch?: boolean;
-					kbPrefetch?: boolean;
-					kbRetrieval?: string;
-					thinkingLevel?: string;
-					displayName?: string;
-					shareTtlSeconds?: number;
-				};
-				if (typeof body.webSearch === "boolean") setSetting("web_search", body.webSearch ? "1" : "0");
-				// 知识库预检索开关（v0.46.0）
-				if (typeof body.kbPrefetch === "boolean") setSetting("kb_prefetch", body.kbPrefetch ? "1" : "0");
-				// 检索模式（v0.53.0）：fts / vector / hybrid
-				if (body.kbRetrieval === "fts" || body.kbRetrieval === "vector" || body.kbRetrieval === "hybrid") {
-					setSetting("kb_retrieval", body.kbRetrieval);
-				}
-				if (body.thinkingLevel === "off" || body.thinkingLevel === "low" || body.thinkingLevel === "high") {
-					setSetting("thinking_level", body.thinkingLevel);
-				}
-				// 分享页署名与默认有效期（v0.55.0）
-				if (typeof body.displayName === "string") setSetting("display_name", body.displayName.trim().slice(0, 40));
-				if (typeof body.shareTtlSeconds === "number" && Number.isFinite(body.shareTtlSeconds) && body.shareTtlSeconds >= 0) {
-					setSetting("share_ttl_seconds", String(Math.min(Math.floor(body.shareTtlSeconds), MAX_SHARE_TTL)));
-				}
-				// 工具审批（v0.33.0）：三档策略 + 逐工具覆盖
-				const ap = (body as { approval?: Record<string, unknown> }).approval;
-				if (ap && typeof ap === "object") {
-					for (const level of ["read", "write", "exec"] as const) {
-						const value = ap[level];
-						if (value === "allow" || value === "ask" || value === "deny") setSetting(`approval_${level}`, value);
-					}
-				}
-				const apTools = (body as { approvalTools?: Record<string, unknown> }).approvalTools;
-				if (apTools && typeof apTools === "object") {
-					for (const [name, value] of Object.entries(apTools)) {
-						if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(name)) continue;
-						if (value === "follow" || value === "allow" || value === "ask" || value === "deny") {
-							setSetting(`approval_tool_${name}`, value);
-						}
-					}
-				}
-				const c = (body as { compaction?: Record<string, unknown> }).compaction;
-				let compactionChanged = false;
-				if (c && typeof c === "object") {
-					if (typeof c.enabled === "boolean") {
-						setSetting("compaction_enabled", c.enabled ? "1" : "0");
-						compactionChanged = true;
-					}
-					for (const [patchKey, settingKey, min] of [
-						["reserveTokens", "compaction_reserve", 1024],
-						["keepRecentTokens", "compaction_keep_recent", 0],
-						["backgroundTokens", "compaction_background", 0],
-					] as const) {
-						const raw = Number(c[patchKey]);
-						if (Number.isFinite(raw) && raw >= min) {
-							setSetting(settingKey, String(Math.floor(raw)));
-							compactionChanged = true;
-						}
-					}
-				}
-				// 压缩策略在 Harness.open 时读取，改了要重建
-				if (compactionChanged) await this.recoverSession();
-				return Response.json({ ok: true, ...settingsView() });
-			}
-			if (url.pathname === "/context" && request.method === "GET") {
-				return Response.json(await this.contextUsage(url.searchParams.get("sessionId") ?? undefined));
-			}
 			if (url.pathname === "/compact" && request.method === "POST") {
 				const body = (await request.json().catch(() => ({}))) as { sessionId?: string; instructions?: string };
 				const harness = await this.open();
@@ -3294,151 +2620,6 @@ export class SpikeAgent extends DurableObject {
 					compact(instructions: string | undefined, c: unknown): Promise<unknown>;
 				}).compact(typeof body.instructions === "string" ? body.instructions : undefined, ctx);
 				return Response.json({ ok: true, taskId: String(taskId) });
-			}
-			if (url.pathname === "/plan" && request.method === "GET") {
-				const sid = url.searchParams.get("sessionId") ?? "1";
-				return Response.json({ steps: readPlan(sid) });
-			}
-			/* ---- 目标模式（v0.31.0）：GET 读 / POST 建立 / DELETE 停止 ---- */
-			if (url.pathname === "/goal" && request.method === "GET") {
-				const sid = url.searchParams.get("sessionId") ?? "1";
-				return Response.json({ goal: goalInfo(readGoalRow(sid)) });
-			}
-			if (url.pathname === "/goal" && request.method === "POST") {
-				const body = (await request.json().catch(() => ({}))) as {
-					sessionId?: string;
-					objective?: string;
-					tokenBudget?: number;
-					maxTurns?: number;
-				};
-				const objective = String(body.objective ?? "").trim().slice(0, 300);
-				if (!objective) return Response.json({ ok: false, error: "目标不能为空。" }, { status: 400 });
-				const sid = String(body.sessionId ?? "1");
-				const budget = Math.max(10_000, Math.floor(Number(body.tokenBudget ?? GOAL_TOKEN_BUDGET_DEFAULT) || GOAL_TOKEN_BUDGET_DEFAULT));
-				const turns = Math.min(50, Math.max(1, Math.floor(Number(body.maxTurns ?? GOAL_MAX_TURNS_DEFAULT) || GOAL_MAX_TURNS_DEFAULT)));
-				const harness = await this.open();
-				const conversation = await this.conversationFor(harness, sid);
-				const baseline = await this.goalTokens(harness, conversation.id);
-				startGoal(sid, objective, budget, turns, baseline);
-				return Response.json({ ok: true, goal: goalInfo(readGoalRow(sid)) });
-			}
-			if (url.pathname === "/goal" && request.method === "DELETE") {
-				const sid = url.searchParams.get("sessionId") ?? "1";
-				writeGoal(sid, { status: "paused", next_run_at: 0 });
-				await this.scheduleNextAlarm();
-				return Response.json({ ok: true, goal: goalInfo(readGoalRow(sid)) });
-			}
-			if (url.pathname === "/providers" && request.method === "GET") {
-				const active = activeProviderId();
-				const rows = listProviderRows().map((r) => ({
-					id: r.id,
-					name: r.name,
-					baseUrl: r.base_url,
-					models: splitModels(r.models),
-					hasKey: Boolean(r.api_key),
-					keyHint: r.api_key ? "••••" + r.api_key.slice(-4) : "",
-					active: r.id === active,
-				}));
-				return Response.json({ active, default: DEFAULT_PROVIDER, providers: rows });
-			}
-			if (url.pathname === "/providers" && request.method === "POST") {
-				const body = (await request.json()) as {
-					id?: string;
-					name?: string;
-					baseUrl?: string;
-					apiKey?: string;
-					models?: string | string[];
-				};
-				const name = (body.name ?? "").trim().slice(0, 40);
-				const baseUrl = (body.baseUrl ?? "").trim().replace(/\/+$/, "");
-				if (!name || !/^https?:\/\//.test(baseUrl)) {
-					return Response.json({ error: "需要名称与 http(s) 地址" }, { status: 400 });
-				}
-				const modelList = (Array.isArray(body.models) ? body.models : splitModels(String(body.models ?? "")))
-					.map((m) => String(m).trim())
-					.filter(Boolean)
-					.slice(0, 20);
-				const id =
-					(body.id ?? "").trim() ||
-					baseUrl.replace(/^https?:\/\//, "").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase().slice(0, 24) ||
-					"p" + Date.now().toString(36);
-				const existing = listProviderRows().find((r) => r.id === id);
-				// 编辑时 apiKey 留空 = 保留原密钥
-				const apiKey = (body.apiKey ?? "").trim() || existing?.api_key || "";
-				if (!apiKey) return Response.json({ error: "需要 API Key" }, { status: 400 });
-				sqlFacade!.exec(
-					"INSERT INTO providers (id, name, base_url, api_key, models, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, base_url = excluded.base_url, api_key = excluded.api_key, models = excluded.models",
-					id, name, baseUrl, apiKey, modelList.join(","), new Date().toISOString(),
-				);
-				if (activeProviderId() === id) await this.recoverSession();
-				return Response.json({ ok: true, id, models: modelList });
-			}
-			if (url.pathname === "/providers" && request.method === "DELETE") {
-				const id = url.searchParams.get("id") ?? "";
-				sqlFacade!.exec("DELETE FROM providers WHERE id = ?", id);
-				if (activeProviderId() === id) setSetting("active_provider", "");
-				await this.recoverSession();
-				return Response.json({ ok: true });
-			}
-			if (url.pathname === "/providers/activate" && request.method === "POST") {
-				const body = (await request.json()) as { id?: string };
-				const id = (body.id ?? "").trim();
-				if (id && !listProviderRows().some((r) => r.id === id)) {
-					return Response.json({ error: "供应商不存在" }, { status: 404 });
-				}
-				setSetting("active_provider", id);
-				await this.recoverSession();
-				return Response.json({ ok: true, active: id, provider: this.providerId(), models: activeModelIds() });
-			}
-			if (url.pathname === "/models" && request.method === "GET") {
-				const available = activeModelIds();
-				return Response.json({ models: available, default: available[0] ?? DEFAULT_MODEL_ID, provider: this.providerId() });
-			}
-			if (url.pathname === "/model" && request.method === "POST") {
-				const body = (await request.json()) as { sessionId?: string; modelId?: string };
-				const modelId = body.modelId ?? "";
-				if (!activeModelIds().includes(modelId)) {
-					return Response.json({ error: "不支持的模型" }, { status: 400 });
-				}
-				if (!body.sessionId) return Response.json({ error: "缺少 sessionId" }, { status: 400 });
-				sqlFacade!.exec(
-					"INSERT INTO sessions_meta (id, title, created_at, updated_at, model) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET model = excluded.model",
-					body.sessionId, "新会话", new Date().toISOString(), new Date().toISOString(), modelId,
-				);
-				return Response.json({ ok: true, modelId });
-			}
-			if (url.pathname === "/mcp" && request.method === "GET") {
-				return Response.json({ servers: listMcpServers() });
-			}
-			if (url.pathname === "/mcp" && request.method === "POST") {
-				const body = (await request.json()) as { name?: string; url?: string; headers?: Record<string, string> };
-				const name = (body.name ?? "").trim();
-				const serverUrl = (body.url ?? "").trim();
-				if (!name || !/^https?:\/\//.test(serverUrl)) {
-					return Response.json({ error: "需要名称与 http(s) 服务器地址" }, { status: 400 });
-				}
-				const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || `s${Date.now()}`;
-				sqlFacade!.exec(
-					"INSERT INTO mcp_servers (id, name, url, headers, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, url = excluded.url, headers = excluded.headers",
-					id, name, serverUrl, JSON.stringify(body.headers ?? {}), new Date().toISOString(),
-				);
-				mcpCache.clear();
-				const rebuilt = await buildMcpExtension(sqlFacade!);
-				if (rebuilt) {
-					this.mcpExt = rebuilt as never;
-					if (this.registryRef) this.registryRef.install(rebuilt);
-				}
-				return Response.json({ ok: true, id, tools: rebuilt?.tools?.length ?? 0 });
-			}
-			if (url.pathname === "/mcp" && request.method === "DELETE") {
-				sqlFacade!.exec("DELETE FROM mcp_servers WHERE id = ?", url.searchParams.get("id") ?? "");
-				mcpCache.clear();
-				const rebuilt = await buildMcpExtension(sqlFacade!);
-				if (rebuilt) {
-					this.mcpExt = rebuilt as never;
-					if (this.registryRef) this.registryRef.install(rebuilt);
-				}
-				return Response.json({ ok: true, tools: rebuilt?.tools?.length ?? 0 });
 			}
 			if (url.pathname === "/reflect" && request.method === "POST") {
 				const body = (await request.json().catch(() => ({}))) as { sessionId?: string };

@@ -4,6 +4,14 @@
 
 ## 2026-10-22
 
+### 设置/供应商/MCP/自动化/审批/问答分层收口 + R5 全局状态（NERE-32）
+- 后端五个域按 ADR-0001 拆分：路由 `routes/settings|automations|approvals|capabilities.ts` → 用例 `services/settings|automation|goal|plan|approval|question|mcp|custom-tool|capability-service.ts` → 仓储 `repo/settings|providers|mcp|automations|goals|plans|approvals|questions|custom-tools|panels-repo.ts`
+- `alarm()` 仍是 DO 入口并包 `agentScope.run`；到点筛选、下一次执行时间、忙时顺延、目标续转与 `nextAlarmAt` 判断搬入 `automation-service`，Service 不依赖 DO 全局
+- 审批闸门读取收口到 `approval-service`：三档策略 + 逐工具覆盖；扣 `uses` 与删行仍是 `approvals-repo.consumeGrant` 的同一条 SQL 路径，不引入读-改-写竞态
+- **R5 关闭**：`customToolNames` 与 `mcpCache` 从模块级搬入 `SpikeAgent` 实例字段，`buildCustomToolsExtension(sql, names)` / `buildMcpExtension(sql, cache)` 显式收缓存；同 isolate 多用户不再串用工具分级与 MCP 连接
+- 端点契约不变：`/settings`、`/providers*`、`/models`、`/model`、`/context`、`/mcp`、`/automations*`、`/goal*`、`/plan`、`/approvals*`、`/questions*`、`/capabilities`、`/tools` 的响应与状态码逐字保留；备份/恢复对这些表的读写也改走仓储
+- 多用户隔离用例：主人创建的 `owner_probe` 不出现在邀请用户的 `/api/custom-tools` 与 `/api/tools`，其分级在主人侧为 `exec`；单测用两个集合/两个缓存验证互不覆盖
+
 ### Skill Hub 后端：目录索引 / 审计引擎 / 能力准入 / 埋点（v0.61.0，NERE-55）
 - 新增迁移 v6/v7：`skills` 增 `version/source/author/license/runtime/tags/content_hash/audit_status/audit_report/manifest/updated_at`（老库回填 `prompt` / `pass` / `local` / `0.0.0`，正文不动、升级后可调用）；建 `skill_audits` 缓存与 `skill_events` 埋点表（与分享计数无关）
 - 新增纯函数审计引擎 `lib/skill-audit.ts`：契约 §4 的 M/L/C/I/S/X 规则、去注释/字符串扫描、prompt 只扫 fence/shebang/命令行避免「Python 不受支持」误伤；契约 §8 五个样例的 `contentHash` 逐字节对齐
