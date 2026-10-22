@@ -1,0 +1,82 @@
+tests/unit/railSelect.test.ts
+  228f8f0932377444 1-55
+tests/unit/kbRefs.test.tsx
+  228f8f0932377444 5,75-105
+src/web/lib/layout.ts
+  228f8f0932377444 1-19
+src/web/lib/rich.tsx
+  228f8f0932377444 319-360
+tests/unit/messageListPerf.test.tsx
+  228f8f0932377444 1-73
+src/web/lib/panels.ts
+  228f8f0932377444 1-47
+src/web/App.tsx
+  228f8f0932377444 1,31-32,35,96-100,860,1084,1091,1093,1097-1099,1105-1108,1525-1536,1541,1719
+src/web/components/MessageList.tsx
+  228f8f0932377444 1,3,14-18,60,62,101,107,109,111
+src/web/components/KnowledgePanel.tsx
+  228f8f0932377444 20-28,147,154-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "0f7b70b9ddfdeec79ba7667c69a16d63b368aaee",
+  "prompts": {
+    "228f8f0932377444": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "10857dff-9e74-4c8d-a751-f6c20fe62e0c",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 339,
+      "total_deletions": 38,
+      "accepted_lines": 330,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/layout.ts": {
+          "additions": 19,
+          "accepted_lines": 19
+        },
+        "src/web/components/KnowledgePanel.tsx": {
+          "additions": 12,
+          "deletions": 2,
+          "accepted_lines": 12
+        },
+        "src/web/components/MessageList.tsx": {
+          "additions": 13,
+          "deletions": 9,
+          "accepted_lines": 13
+        },
+        "src/web/App.tsx": {
+          "additions": 36,
+          "deletions": 17,
+          "accepted_lines": 35
+        },
+        "tests/unit/messageListPerf.test.tsx": {
+          "additions": 73,
+          "accepted_lines": 73
+        },
+        "src/web/lib/panels.ts": {
+          "additions": 47,
+          "accepted_lines": 47
+        },
+        "src/web/lib/rich.tsx": {
+          "additions": 42,
+          "accepted_lines": 42
+        },
+        "tests/unit/kbRefs.test.tsx": {
+          "additions": 35,
+          "deletions": 3,
+          "accepted_lines": 34
+        },
+        "tests/unit/railSelect.test.ts": {
+          "additions": 62,
+          "deletions": 7,
+          "accepted_lines": 55
+        }
+      }
+    }
+  }
+}
