@@ -9,10 +9,12 @@ import {
 	type WebFetchResult,
 } from "../../src/worker/services/kb-service";
 
-/** 与 migrations.test.ts 相同的 SqlHandle 包装：DDL 走 exec，查询走 prepare().all()。 */
+/** 与 migrations.test.ts 相同的 SqlHandle 包装：DDL 走 exec，查询走 prepare().all()。
+ *  绑定参数上限 100 与 SQLite-backed DO 对齐（NERE-66）：超出即抛错，批量路径必须自己分批。 */
 function sqlHandle(db: DatabaseSync): SqlHandle {
 	return {
 		exec(query, ...bindings) {
+			if (bindings.length > 100) throw new Error(`too many SQL variables (max 100, got ${bindings.length})`);
 			if (!bindings.length && /^\s*(CREATE|ALTER|DROP)\b/i.test(query)) {
 				db.exec(query);
 				return { toArray: () => [] };
@@ -103,6 +105,11 @@ const DOC = {
 	source: "金标用例",
 	tags: "固收",
 };
+
+/** 直接造未向量化分块：reindex 只读 kb_chunks，不需要文档行。 */
+function seedChunks(sql: SqlHandle, count: number): void {
+	for (let i = 0; i < count; i++) sql.exec("INSERT INTO kb_chunks (doc_id, seq, text) VALUES (?, ?, ?)", 1, i, `未向量化片段 ${i}`);
+}
 
 const hybridSettings: KbSettings = { get: (key, fallback) => (key === "kb_retrieval" ? "hybrid" : fallback) };
 
@@ -199,6 +206,27 @@ describe("kb-service：向量端口", () => {
 
 			await kb.remove(added.id);
 			expect(vec.deleted.sort()).toEqual(vec.upserts.map((row) => row.id).sort());
+		}),
+	);
+});
+
+describe("kb-service：向量索引重建分批（NERE-66）", () => {
+	it(
+		"reindex 500 条与默认 200 条批量都不超绑定参数上限，计数同步",
+		withDb(async (sql) => {
+			const ai = fakeAi();
+			const vec = fakeVector();
+			const kb = service(sql, { env: { AI: ai, KB_VEC: vec }, settings: hybridSettings });
+
+			seedChunks(sql, 500);
+			expect(await kb.reindex(500)).toEqual({ indexed: 500, remaining: 0 });
+			expect(vec.upserts).toHaveLength(500);
+			expect(kb.status()).toMatchObject({ total: 500, indexed: 500 });
+
+			seedChunks(sql, 200);
+			expect(await kb.reindex()).toEqual({ indexed: 200, remaining: 0 });
+			expect(vec.upserts).toHaveLength(700);
+			expect(kb.status()).toMatchObject({ total: 700, indexed: 700 });
 		}),
 	);
 });

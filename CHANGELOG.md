@@ -4,6 +4,11 @@
 
 ## 2026-10-22
 
+### 知识库重建向量索引支持大批量：`IN` 列表分批（NERE-66）
+- `repo/kb-repo.ts` 的 `markVectorized` / `chunksByIds` 改用 `db/sql-batch.ts` 的 `chunkIds`（去重后每 90 个 id 一批）：SQLite-backed DO 每条查询最多 100 个绑定参数，默认 200 / 上限 500 的重建批次原先会在 `IN (?,…)` 处失败
+- 设置页「重建向量索引」不再报错；`KB_VECTOR_BATCH` 默认值与检索逻辑未改
+- 测试：`unit/kb-service.test.ts` 的 SqlHandle 包装按 DO 上限（100）拒绝超限绑定，新增 500 条 + 默认 200 条重建用例
+
 ### 定时任务可编辑：PATCH /api/automations 支持改名称/提示词/时间/会话（NERE-64）
 - `PATCH /api/automations` 接受 `{id, name?, prompt?, schedule?, sessionId?, enabled?}`：只传 `enabled` 时与旧启停语义完全一致（启用 → `next_run_at = now+60s`，停用不动）；带编辑字段时保留原 `next_run_at`，只有改 `schedule` 才按新调度重算（daily 按 UTC+8）
 - 校验与创建同口径：名称 1–40、提示词 1–2000、daily `HH:MM`、interval 整数分钟 ≥ 1；非法输入 400 且原记录不变，未知 id 404
