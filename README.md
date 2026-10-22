@@ -25,11 +25,11 @@ One Worker and Durable Objects. No server, no external database.
 ## Three things it does
 
 <p align="center">
-  <img src="docs/assets/v1/skill-hub.png" width="32%" alt="Skill Hub modal listing installed skills with runtime and audit badges">
+  <img src="docs/assets/v1/skill-hub.png" width="32%" alt="Skills modal listing installed skills with runtime and audit badges">
   <img src="docs/assets/v1/knowledge-base.png" width="32%" alt="Knowledge base modal with a search box and a document list">
   <img src="docs/assets/v1/share-page.png" width="32%" alt="Public share page for a weekly report with a read-only demo banner and a print button">
 </p>
-<p align="center"><sub><b>Skill Hub</b> — audit before install · <b>Knowledge base</b> — per-user FTS5 search · <b>Share page</b> — read-only, on your own domain</sub></p>
+<p align="center"><sub><b>Skills</b> — audit before install · <b>Knowledge base</b> — per-user FTS5 search · <b>Share page</b> — read-only, on your own domain</sub></p>
 
 ## Why this exists
 
