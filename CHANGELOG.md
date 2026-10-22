@@ -4,6 +4,12 @@
 
 ## 2026-10-22
 
+### 定时任务可编辑：PATCH /api/automations 支持改名称/提示词/时间/会话（NERE-64）
+- `PATCH /api/automations` 接受 `{id, name?, prompt?, schedule?, sessionId?, enabled?}`：只传 `enabled` 时与旧启停语义完全一致（启用 → `next_run_at = now+60s`，停用不动）；带编辑字段时保留原 `next_run_at`，只有改 `schedule` 才按新调度重算（daily 按 UTC+8）
+- 校验与创建同口径：名称 1–40、提示词 1–2000、daily `HH:MM`、interval 整数分钟 ≥ 1；非法输入 400 且原记录不变，未知 id 404
+- 响应 `{ok:true, automation:{id,name,prompt,schedule,sessionId,enabled,last_run_at,next_run_at}}`；路由只解析/状态码，校验与 `nextRunAt` 在 `automation-service`，UPDATE 在 `automations-repo`；成功后 `alarmRuntime.schedule()` 重挂 alarm
+- 测试：`unit/automation-patch.test.ts`（字段组合 / next_run_at 重算 / 边界）+ `api/api.test.ts`「定时任务编辑」（落库、400 不落库、启停兼容）
+
 ### 后端分层收口：删除兼容层，分层变成 CI 硬约束（NERE-34，阶段 6）
 - 删除 `handleLegacyFetch`、`RequestContext.legacy()`、`sqlFacade` 代理、`scope()` / `agentScope`；`src/worker.ts` 2654 → **1165 行**，只剩鉴权、`SpikeAgent` / `UserRegistry` 组合根、Harness 生命周期与 `alarm`
 - 12 个遗留路径按域拆出：`routes/system.ts`（version/bootstrap/debug/kernel）、`routes/data.ts`（backup/restore/export/memories/reflect）、`routes/prompts.ts`（prompts/rules/custom-tools）；对应新增 `services/bootstrap|kernel|data|memory|reflect|prompts|context-service.ts` 与 `repo/memory|prompts-repo.ts`。`/backup`、`/restore`、`/export` 的 JSON 结构与状态码逐字不变

@@ -1,6 +1,6 @@
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
-import { createAutomationService, AutomationApiError, type AutomationService } from "../services/automation-service";
+import { createAutomationService, AutomationApiError, type AutomationPatchInput, type AutomationService } from "../services/automation-service";
 import { createGoalService } from "../services/goal-service";
 import { readPlan } from "../services/plan-service";
 
@@ -44,10 +44,10 @@ export const automationRoutes: readonly Route[] = [
 		needsHarness: true,
 		handle: async (ctx) => {
 			try {
-				const body = (await ctx.req.json()) as { id?: string; enabled?: boolean };
-				automations(ctx).setEnabled(body.id ?? "", Boolean(body.enabled));
+				const body = (await ctx.req.json()) as { id?: string } & AutomationPatchInput;
+				const automation = automations(ctx).update(body.id ?? "", body);
 				await ctx.alarmRuntime.schedule();
-				return Response.json({ ok: true });
+				return Response.json({ ok: true, automation });
 			} catch (err) {
 				return failure(err);
 			}

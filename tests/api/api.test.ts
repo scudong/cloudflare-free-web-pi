@@ -26,6 +26,9 @@ async function api(path: string, init?: RequestInit) {
 const post = (path: string, body: unknown) =>
 	api(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
+const patch = (path: string, body: unknown) =>
+	api(path, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
 async function waitForServer(timeoutMs = 90_000) {
 	const started = Date.now();
 	while (Date.now() - started < timeoutMs) {
@@ -984,6 +987,133 @@ describe("工具审批", () => {
 	it("待审批列表默认空", async () => {
 		const { json } = await api("/api/approvals?sessionId=1");
 		expect(Array.isArray(json.approvals)).toBe(true);
+	});
+});
+
+describe("定时任务编辑（NERE-64）", () => {
+	const ids: string[] = [];
+
+	/** 与后端同口径：daily 按 UTC+8 解释。 */
+	function nextDaily(time: string, now = Date.now()): number {
+		const [hour, minute] = time.split(":").map(Number);
+		const offset = 8 * 3600_000;
+		const local = new Date(now + offset);
+		const at = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), hour!, minute!, 0) - offset;
+		return at > now ? at : at + 24 * 3600_000;
+	}
+
+	async function create(schedule: unknown, name = "编辑测试") {
+		const created = await post("/api/automations", { name, prompt: "旧提示", sessionId: "1", schedule });
+		expect(created.json.ok).toBe(true);
+		ids.push(created.json.id as string);
+		return created.json.id as string;
+	}
+
+	async function row(id: string) {
+		const { json } = await api("/api/automations");
+		return json.automations.find((item: { id: string }) => item.id === id);
+	}
+
+	afterAll(async () => {
+		for (const id of ids) await api(`/api/automations?id=${id}`, { method: "DELETE" });
+	});
+
+	it("改名称 / 提示词 / 会话：GET 列表立即反映，next_run_at 保留", async () => {
+		const id = await create({ kind: "interval", minutes: 30 });
+		const before = await row(id);
+
+		const res = await patch("/api/automations", { id, name: "  每日科技日报 ", prompt: " 新的提示词 ", sessionId: "2991" });
+		expect(res.status).toBe(200);
+		expect(res.json.ok).toBe(true);
+		expect(res.json.automation).toMatchObject({
+			id,
+			name: "每日科技日报",
+			prompt: "新的提示词",
+			sessionId: "2991",
+			schedule: { kind: "interval", minutes: 30 },
+			enabled: true,
+			next_run_at: before.next_run_at,
+		});
+
+		const after = await row(id);
+		expect(after).toMatchObject({
+			name: "每日科技日报",
+			prompt: "新的提示词",
+			session_id: "2991",
+			schedule: JSON.stringify({ kind: "interval", minutes: 30 }),
+			next_run_at: before.next_run_at,
+		});
+	});
+
+	it("改 daily 08:03 → next_run_at 为下一个 08:03（UTC+8）", async () => {
+		const id = await create({ kind: "interval", minutes: 30 });
+		const res = await patch("/api/automations", { id, schedule: { kind: "daily", time: "08:03" }, enabled: true });
+		expect(res.status).toBe(200);
+		expect(res.json.automation.schedule).toEqual({ kind: "daily", time: "08:03" });
+
+		const next = Number(res.json.automation.next_run_at);
+		expect(next).toBe(nextDaily("08:03"));
+		// 同一断言换个角度：UTC+8 的时分就是 08:03，且落在未来 24 小时内
+		const local = new Date(next + 8 * 3600_000);
+		expect([local.getUTCHours(), local.getUTCMinutes()]).toEqual([8, 3]);
+		expect(next).toBeGreaterThan(Date.now());
+		expect(next).toBeLessThanOrEqual(Date.now() + 24 * 3600_000);
+	});
+
+	it("改 interval 5 → next_run_at = now + 5 分钟", async () => {
+		const id = await create({ kind: "daily", time: "09:00" });
+		const before = Date.now();
+		const res = await patch("/api/automations", { id, schedule: { kind: "interval", minutes: 5 }, enabled: true });
+		const after = Date.now();
+		expect(res.status).toBe(200);
+		const next = Number(res.json.automation.next_run_at);
+		expect(next).toBeGreaterThanOrEqual(before + 5 * 60_000);
+		expect(next).toBeLessThanOrEqual(after + 5 * 60_000);
+	});
+
+	it("只传 enabled=false：只停用，其他字段与下一次时间不动", async () => {
+		const id = await create({ kind: "interval", minutes: 30 });
+		const before = await row(id);
+
+		const res = await patch("/api/automations", { id, enabled: false });
+		expect(res.status).toBe(200);
+		expect(res.json.automation).toMatchObject({ id, name: before.name, prompt: before.prompt, sessionId: before.session_id, enabled: false, next_run_at: before.next_run_at });
+
+		const after = await row(id);
+		expect(after).toMatchObject({ ...before, enabled: 0 });
+	});
+
+	it("编辑带回 enabled=true 不会把任务提前到 60 秒后", async () => {
+		const id = await create({ kind: "daily", time: "09:00" });
+		const before = await row(id);
+		const res = await patch("/api/automations", { id, name: "改名不改时间", enabled: true });
+		expect(res.status).toBe(200);
+		expect(res.json.automation.next_run_at).toBe(before.next_run_at);
+	});
+
+	it("非法 schedule / 空名称 / 超长提示词 → 400，原记录不变", async () => {
+		const id = await create({ kind: "interval", minutes: 30 });
+		const before = await row(id);
+		const invalid = [
+			{ id, schedule: { kind: "daily", time: "24:00" } },
+			{ id, schedule: { kind: "interval", minutes: 0 } },
+			{ id, schedule: { kind: "weekly" } },
+			{ id, name: "   " },
+			{ id, name: "x".repeat(41) },
+			{ id, prompt: "" },
+			{ id, prompt: "x".repeat(2001) },
+			{ name: "缺少 id" },
+			{ id, enabled: "false" },
+		];
+		for (const body of invalid) {
+			const res = await patch("/api/automations", body);
+			expect(res.status).toBe(400);
+			expect(typeof res.json.error).toBe("string");
+		}
+		expect(await row(id)).toEqual(before);
+
+		const missing = await patch("/api/automations", { id: "a-not-exist", name: "x" });
+		expect(missing.status).toBe(404);
 	});
 });
 

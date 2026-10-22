@@ -40,16 +40,50 @@ export function insert(
 	);
 }
 
-/** 启停：启用时把 next_run_at 推到 now+60s（旧行为），停用不动。 */
-export function setEnabled(sql: SqlHandle, id: string, enabled: boolean, nextRunAt: number): void {
-	const value = enabled ? 1 : 0;
-	sql.exec(
-		"UPDATE automations SET enabled = ?, next_run_at = CASE WHEN ? = 1 THEN ? ELSE next_run_at END WHERE id = ?",
-		value,
-		value,
-		nextRunAt,
-		id,
-	);
+export function get(sql: SqlHandle, id: string): AutomationRow | null {
+	const rows = sql.exec(`${SELECT} WHERE id = ?`, id).toArray() as AutomationRow[];
+	return rows[0] ?? null;
+}
+
+/** 编辑（NERE-64）：只写传入的字段；`nextRunAt` 由 service 决定后一并写入。 */
+export type AutomationUpdate = {
+	name?: string;
+	prompt?: string;
+	sessionId?: string;
+	schedule?: string;
+	enabled?: boolean;
+	nextRunAt?: number;
+};
+
+export function update(sql: SqlHandle, id: string, patch: AutomationUpdate): void {
+	const sets: string[] = [];
+	const values: unknown[] = [];
+	if (patch.name !== undefined) {
+		sets.push("name = ?");
+		values.push(patch.name);
+	}
+	if (patch.prompt !== undefined) {
+		sets.push("prompt = ?");
+		values.push(patch.prompt);
+	}
+	if (patch.sessionId !== undefined) {
+		sets.push("session_id = ?");
+		values.push(patch.sessionId);
+	}
+	if (patch.schedule !== undefined) {
+		sets.push("schedule = ?");
+		values.push(patch.schedule);
+	}
+	if (patch.enabled !== undefined) {
+		sets.push("enabled = ?");
+		values.push(patch.enabled ? 1 : 0);
+	}
+	if (patch.nextRunAt !== undefined) {
+		sets.push("next_run_at = ?");
+		values.push(patch.nextRunAt);
+	}
+	if (!sets.length) return;
+	sql.exec(`UPDATE automations SET ${sets.join(", ")} WHERE id = ?`, ...values, id);
 }
 
 export function remove(sql: SqlHandle, id: string): void {
