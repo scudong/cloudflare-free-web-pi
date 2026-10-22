@@ -14,6 +14,14 @@ export function shareTokenPrefix(userKey: string): string {
 	return USER_ID_RE.test(userKey) ? `${userKey}.` : "";
 }
 
+/** 从 token 解出所属邀请用户 id；主人 / 旧链接（无前缀）返回 undefined。 */
+export function shareTokenOwner(token: string): string | undefined {
+	const dot = token.indexOf(".");
+	if (dot < 0) return undefined;
+	const candidate = token.slice(0, dot);
+	return USER_ID_RE.test(candidate) ? candidate : undefined;
+}
+
 /**
  * 分享域的 Harness 端口（阶段 3）：由 DO 组合根实现。
  * 只有确实要读会话条目时才会 open()；文件分享、失效/过期 token 不碰它。

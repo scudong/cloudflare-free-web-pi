@@ -30,6 +30,14 @@ describe("matchRoute", () => {
 		expect(matchRoute([route("GET", "/s/")], "GET", "/shares")).toBeNull();
 	});
 
+	it("/shares/ 前缀命中撤销路径，/shares/all 走精确路由", () => {
+		const revoke = route("DELETE", "/shares/");
+		const all = route("GET", "/shares/all");
+		expect(matchRoute([revoke], "DELETE", "/shares/abc123")).toBe(revoke);
+		expect(matchRoute([all], "GET", "/shares/all")).toBe(all);
+		expect(matchRoute([revoke], "GET", "/shares/abc123")).toBeNull();
+	});
+
 	it("返回第一个命中的路由", () => {
 		const first = route("GET", "/s/");
 		const second = route("GET", "/s/");

@@ -198,4 +198,33 @@ describe("migrate", () => {
 			db.close();
 		}
 	});
+
+	it("v5 给老库 shares 补打开计数字段，旧行取默认值且重跑幂等", () => {
+		const db = new DatabaseSync(":memory:");
+		try {
+			// 补列前的最小 shares 形状（连 expires_at/theme 都没有）
+			db.exec(
+				"CREATE TABLE shares (token TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)",
+			);
+			db.exec(
+				"INSERT INTO shares (token, kind, session_id, name, created_at) VALUES ('old', 'file', '1', 'a.md', '2026-01-01T00:00:00Z')",
+			);
+			const sql = sqlHandle(db);
+			migrate(sql);
+			expect(columnsOf(db, "shares")).toEqual(
+				expect.arrayContaining(["open_count", "last_opened_at", "opened_ip_hash"]),
+			);
+			expect(db.prepare("SELECT open_count, last_opened_at, opened_ip_hash FROM shares WHERE token = 'old'").all()).toEqual([
+				{ open_count: 0, last_opened_at: 0, opened_ip_hash: "" },
+			]);
+
+			// 账本丢失 / 重跑：ensureColumn 幂等，不抛也不重复计数
+			expect(migrate(sql)).toBe(0);
+			db.exec("DELETE FROM schema_migrations WHERE version = 5");
+			expect(migrate(sql)).toBe(1);
+			expect(db.prepare("SELECT open_count FROM shares WHERE token = 'old'").all()).toEqual([{ open_count: 0 }]);
+		} finally {
+			db.close();
+		}
+	});
 });

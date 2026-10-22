@@ -25,8 +25,9 @@ const initialSchema: Migration = {
 		sql.exec(`CREATE TABLE IF NOT EXISTS vfs_v2 (conversation_id TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (conversation_id, name))`);
 		sql.exec(`CREATE TABLE IF NOT EXISTS sessions_meta (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 		sql.exec(`CREATE TABLE IF NOT EXISTS skills (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)`);
-		// 只读分享（v0.9.0）；v0.38.0 起支持过期时间，v0.39.1 起记录分享时的主题
-		sql.exec(`CREATE TABLE IF NOT EXISTS shares (token TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0, theme TEXT NOT NULL DEFAULT 'dark', created_at TEXT NOT NULL)`);
+		// 只读分享（v0.9.0）；v0.38.0 起支持过期时间，v0.39.1 起记录分享时的主题，
+		// NERE-42 起记录打开次数 / 最近打开时间 / 最近计入打开的 IP 哈希（不存原始 IP）
+		sql.exec(`CREATE TABLE IF NOT EXISTS shares (token TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0, theme TEXT NOT NULL DEFAULT 'dark', created_at TEXT NOT NULL, open_count INTEGER NOT NULL DEFAULT 0, last_opened_at INTEGER NOT NULL DEFAULT 0, opened_ip_hash TEXT NOT NULL DEFAULT '')`);
 		sql.exec(`CREATE TABLE IF NOT EXISTS automations (id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_run_at INTEGER, next_run_at INTEGER NOT NULL)`);
 		sql.exec(`CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)`);
 		sql.exec(`CREATE TABLE IF NOT EXISTS reflect_state (conversation_id TEXT PRIMARY KEY, last_entry_id INTEGER NOT NULL, updated_at TEXT NOT NULL)`);
@@ -116,7 +117,28 @@ const kbSourceIndex: Migration = {
 	},
 };
 
-export const MIGRATIONS: readonly Migration[] = [initialSchema, vfsRootConversation, entryKbRefs, kbSourceIndex];
+/**
+ * v5：分享打开记录（NERE-42）。老库补三列，新库由 v1 建表语句直接带上；
+ * 幂等靠 ensureColumn（重跑或账本丢失都不会失败）。
+ */
+const shareOpenTracking: Migration = {
+	version: 5,
+	name: "share-open-tracking",
+	up(sql) {
+		ensureColumn(sql, "shares", `open_count INTEGER NOT NULL DEFAULT 0`);
+		ensureColumn(sql, "shares", `last_opened_at INTEGER NOT NULL DEFAULT 0`);
+		// 最近一次计入打开数的客户端 IP 的哈希；原始 IP 不落库
+		ensureColumn(sql, "shares", `opened_ip_hash TEXT NOT NULL DEFAULT ''`);
+	},
+};
+
+export const MIGRATIONS: readonly Migration[] = [
+	initialSchema,
+	vfsRootConversation,
+	entryKbRefs,
+	kbSourceIndex,
+	shareOpenTracking,
+];
 
 // 版本号是账本的唯一真源：重复或乱序会被 INSERT OR IGNORE 静默跳过，模块加载时就暴露。
 const migrationVersions = MIGRATIONS.map((migration) => migration.version);

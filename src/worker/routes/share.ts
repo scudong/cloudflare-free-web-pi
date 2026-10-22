@@ -15,6 +15,13 @@ function service(ctx: RequestContext) {
 	});
 }
 
+/** 打开来源：Cloudflare 优先，其次反代 XFF 的第一跳；都没有时留下空串（仍按同一指纹去重）。 */
+function clientIp(req: Request): string {
+	const cloudflare = req.headers.get("cf-connecting-ip")?.trim();
+	if (cloudflare) return cloudflare;
+	return (req.headers.get("x-forwarded-for") ?? "").split(",")[0]?.trim() ?? "";
+}
+
 export const shareRoutes: readonly Route[] = [
 	{
 		method: "POST",
@@ -45,6 +52,16 @@ export const shareRoutes: readonly Route[] = [
 		},
 	},
 	{
+		// NERE-42：全量清单（active|expired|all，缺省 active）；不读会话，不启动 Harness。
+		method: "GET",
+		path: "/shares/all",
+		needsHarness: false,
+		handle: async (ctx) => {
+			const shares = service(ctx).listAll(ctx.url.searchParams.get("status"));
+			return Response.json({ shares });
+		},
+	},
+	{
 		method: "GET",
 		path: "/shares",
 		needsHarness: true,
@@ -62,11 +79,32 @@ export const shareRoutes: readonly Route[] = [
 		},
 	},
 	{
+		// NERE-42：撤销（立即失效）。404 = 本用户库里不存在；403 = token 前缀属于其他用户。
+		method: "DELETE",
+		path: "/shares/",
+		needsHarness: false,
+		handle: async (ctx) => {
+			const raw = ctx.url.pathname.slice("/shares/".length);
+			let token = raw;
+			try {
+				token = decodeURIComponent(raw);
+			} catch {
+				// 非法百分号编码按原样处理，最终落到 404
+			}
+			service(ctx).revoke(token);
+			return Response.json({ ok: true });
+		},
+	},
+	{
 		method: "GET",
 		path: "/s/",
 		needsHarness: false,
 		handle: async (ctx) => {
-			const page = await service(ctx).render(ctx.url.pathname.slice(3), ctx.url.searchParams.get("theme"));
+			const page = await service(ctx).render(
+				ctx.url.pathname.slice(3),
+				ctx.url.searchParams.get("theme"),
+				clientIp(ctx.req),
+			);
 			if (!page) {
 				return new Response("分享链接不存在或已失效", {
 					status: 404,
