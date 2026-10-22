@@ -164,8 +164,10 @@ npx wrangler deploy
 | GET | `/api/plan?sessionId=` | 当前会话的分步计划 |
 | GET | `/api/context?sessionId=` | 上下文占用估算（百分比 / 窗口） |
 | GET / POST / PATCH / DELETE | `/api/automations` | 定时任务 |
-| POST | `/api/share` · GET `/s/<token>` | 只读分享（`kind=conversation/file`，`ttlSeconds` 可选，不传用 `shareTtlSeconds` 设置、0 = 永久；`theme` 记录分享页配色；页脚署名 + 生成时间） |
+| POST | `/api/share` · GET `/s/<token>` | 只读分享（`kind=conversation/file`，`ttlSeconds` 可选，不传用 `shareTtlSeconds` 设置、0 = 永久；`theme` 记录分享页配色；页脚署名 + 生成时间）。每次有效打开计入 `openCount` / `lastOpenedAt`；同一 IP（`CF-Connecting-IP`，反代看 `X-Forwarded-For` 首跳）1 小时内只计 1 次，库里只存哈希 |
 | GET | `/api/shares?sessionId=&kind=&name=` | 未过期的分享链接（打开弹窗时复用） |
+| GET | `/api/shares/all?status=active\|expired\|all` | 全量分享清单（缺省 `active`）：`{ shares: [{ token, kind, name, expiresAt, theme, createdAt, openCount, lastOpenedAt, sessionId, url }] }`，`url` 为相对路径 `/s/<token>` |
+| DELETE | `/api/shares/<token>` | 撤销分享 → `{ ok: true }`，立即生效（原链接 404）；越权 403，不存在 404 |
 | GET | `/api/export?format=md` | 导出 Markdown |
 | GET / POST | `/api/backup` · `/api/restore` | 全量备份 / 合并恢复 |
 | GET | `/api/version` | 线上构建号（CI 注入 git SHA） |

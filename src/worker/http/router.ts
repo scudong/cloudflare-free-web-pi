@@ -8,10 +8,11 @@ export type Route = {
 	handle(ctx: RequestContext): Promise<Response>;
 };
 
-/** "/s/" 是前缀路由：/s/<token>、/s/<token>/<file> 都归分享域。 */
+/** 以 "/" 结尾的路由是前缀路由：`/s/<token>`、`/shares/<token>`；历史 `/s` 同等对待。 */
 function pathMatches(routePath: string, pathname: string): boolean {
 	if (routePath === pathname) return true;
-	if (routePath === "/s" || routePath === "/s/") return pathname.startsWith("/s/");
+	if (routePath === "/s") return pathname.startsWith("/s/");
+	if (routePath.endsWith("/") && pathname.startsWith(routePath)) return true;
 	return false;
 }
 

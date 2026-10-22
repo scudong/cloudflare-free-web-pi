@@ -4,6 +4,13 @@
 
 ## 2026-10-22
 
+### 分享打开计数 / 全量清单 / 撤销（v0.60.0，NERE-42）
+- `GET /s/<token>` 命中有效链接时累计 `openCount` 与 `lastOpenedAt`：同一 IP（`CF-Connecting-IP`，反代回落 `X-Forwarded-For` 首跳）1 小时内只计 1 次；IP 以 `SHA-256(token + IP)` 落库，不存原始地址；未知/过期链接不计数
+- 新增 `GET /api/shares/all?status=active|expired|all`（缺省 `active`）：返回 `token/kind/name/expiresAt/theme/createdAt/openCount/lastOpenedAt/sessionId/url`，`url` 为相对路径 `/s/<token>`
+- 新增 `DELETE /api/shares/<token>`：立即删行，原链接随即 404；token 前缀不属于当前用户时 403；不存在 404。路由改为通用 `/` 结尾前缀匹配
+- 新增迁移 v5：`shares` 补 `open_count` / `last_opened_at` / `opened_ip_hash`（`ensureColumn` 幂等，老库补列、新库由 v1 建表直接带上）
+- 单测覆盖：同 IP 去重、换 IP / 过窗再计、过期与未知 token 不计数、状态过滤、撤销与越权 403、老库迁移幂等
+
 ### 知识库导入去重与版本替换（v0.59.0，NERE-47）
 - `POST /api/kb/ingest`（文件与链接）、`POST /api/kb`、`kb_add` 统一按「source + 正文」查重：同来源同正文复用原 `docId`、不写库、不重建向量，响应 `updated:false`
 - 同来源正文变化时原地替换：保留 `docId` 与 `created_at`，删除旧分块 / FTS / 向量后按新正文重建，`updated_at` 刷新，响应 `updated:true`

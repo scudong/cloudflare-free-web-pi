@@ -1,5 +1,6 @@
 import type { SqlHandle } from "../db/migrations";
-import { shareTokenPrefix, type SettingsPort, type ShareRuntime } from "../http/ports";
+import { AppError } from "../http/errors";
+import { shareTokenOwner, shareTokenPrefix, type SettingsPort, type ShareRuntime } from "../http/ports";
 import { entryText } from "../lib/entries";
 import {
 	expiredSharePage,
@@ -16,13 +17,17 @@ import {
 import { getContent } from "../repo/files-repo";
 import { get as getSession } from "../repo/sessions-repo";
 import {
+	deleteByToken,
 	getByToken,
 	insert,
 	latestTokenForFile,
+	listAll as listAllRows,
 	listUnexpired,
 	purgeExpired,
+	recordOpen,
 	type ShareKind,
 	type ShareRow,
+	type ShareStatus,
 } from "../repo/shares-repo";
 
 /**
@@ -38,6 +43,20 @@ export type ShareRecord = {
 	expiresAt: number;
 	theme: string;
 	createdAt: string;
+};
+
+/** `/api/shares/all` 的一行（NERE-42）：相对 `url` 由前端按当前域名拼绝对地址。 */
+export type ShareSummary = {
+	token: string;
+	kind: ShareKind;
+	name: string;
+	expiresAt: number;
+	theme: string;
+	createdAt: string;
+	openCount: number;
+	lastOpenedAt: number;
+	sessionId: string;
+	url: string;
 };
 
 export type ShareServiceDeps = {
@@ -67,12 +86,22 @@ export type ToolShare = { share: ShareRecord; reused: boolean };
 export interface ShareService {
 	create(input: CreateShareInput): Promise<{ token: string; expiresAt: number }>;
 	list(sessionId: string | undefined, kind: ShareKind, name?: string): Promise<ShareRecord[]>;
-	/** 分享页（服务端渲染，只读）。html 文件原样输出，其余按 Markdown 渲染。 */
-	render(token: string, themeOverride?: string | null): Promise<SharePage | null>;
+	/** 当前用户的全量分享清单（NERE-42），`status` 缺省 active。 */
+	listAll(status?: string | null): ShareSummary[];
+	/** 撤销当前用户自己的分享（NERE-42）：立即删行，链接随即 404；越权 403。 */
+	revoke(token: string): void;
+	/** 分享页（服务端渲染，只读）。html 文件原样输出，其余按 Markdown 渲染。
+	 * `openerIp` 只用于去重计数，落库前哈希，原始地址不持久化。 */
+	render(token: string, themeOverride?: string | null, openerIp?: string): Promise<SharePage | null>;
 	/** 模型工具入口：会话 id 已知，先复用未过期链接，否则按解析后的 TTL 新建。 */
 	shareForTool(kind: ShareKind, conversationId: string, name: string, ttlValue: unknown): ToolShare;
 	urlFor(token: string): string;
 	sessionTitle(conversationId: string): string;
+}
+
+/** `status` 只认契约里的三个值；缺省/未知一律按 active（与前端默认值一致）。 */
+export function normalizeShareStatus(value: unknown): ShareStatus {
+	return value === "expired" || value === "all" ? value : "active";
 }
 
 /** 分享默认有效期（秒）：0 = 永久；与分享弹窗默认的 7 天一致。 */
@@ -122,12 +151,44 @@ function toRecord(row: ShareRow): ShareRecord {
 	};
 }
 
+/**
+ * 打开者指纹（NERE-42）：SHA-256(token + IP)，以 token 作盐，
+ * 同一 IP 在不同链接上得到不同值，库里不出现原始地址。
+ */
+async function openerFingerprint(token: string, ip: string): Promise<string> {
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${token}\n${ip.trim()}`));
+	return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function createShareService(deps: ShareServiceDeps): ShareService {
 	const { sql, settings, origin } = deps;
 	const now = deps.now ?? Date.now;
 	const demoToken = deps.demoToken ?? "";
 	const runtime = deps.runtime;
 	const tokenPrefix = shareTokenPrefix(deps.userKey);
+
+	/** 撤销归属：带前缀的 token 必须属于当前用户；无前缀旧链接只属于主人（userKey 不是邀请用户）。 */
+	function assertRevocable(token: string): void {
+		const owner = shareTokenOwner(token);
+		const mine = owner ? `${owner}.` === tokenPrefix : tokenPrefix === "";
+		if (!mine) throw new AppError("forbidden", 403, "无权撤销该分享");
+	}
+
+	function toSummary(row: ShareRow): ShareSummary {
+		return {
+			token: row.token,
+			kind: row.kind === "file" ? "file" : "conversation",
+			name: row.name,
+			expiresAt: Number(row.expiresAt ?? 0),
+			theme: row.theme ?? "dark",
+			createdAt: row.createdAt,
+			openCount: Number(row.openCount ?? 0),
+			lastOpenedAt: Number(row.lastOpenedAt ?? 0),
+			sessionId: row.sessionId,
+			// 契约要求相对路径：服务端可能部署在反代后，origin 不可靠。
+			url: `/s/${row.token}`,
+		};
+	}
 
 	function conversationRuntime(): ShareRuntime {
 		if (!runtime) throw new Error("分享服务缺少会话端口");
@@ -199,6 +260,16 @@ export function createShareService(deps: ShareServiceDeps): ShareService {
 			return unexpired(conversationId, kind, name);
 		},
 
+		listAll(status) {
+			return listAllRows(sql, normalizeShareStatus(status), now()).map(toSummary);
+		},
+
+		revoke(token) {
+			if (!token) throw new AppError("not_found", 404, "分享链接不存在");
+			assertRevocable(token);
+			if (!deleteByToken(sql, token)) throw new AppError("not_found", 404, "分享链接不存在");
+		},
+
 		shareForTool(kind, conversationId, name, ttlValue) {
 			const ttl = shareTtlSeconds(ttlValue, settings);
 			const explicit = ttlValue !== undefined && ttlValue !== null && ttlValue !== "";
@@ -221,7 +292,7 @@ export function createShareService(deps: ShareServiceDeps): ShareService {
 			}
 		},
 
-		async render(token, themeOverride) {
+		async render(token, themeOverride, openerIp = "") {
 			const row = getByToken(sql, token);
 			if (!row) return null;
 			// ?theme= 可临时覆盖；否则用分享时记录的主题，老链接回落深色
@@ -232,6 +303,8 @@ export function createShareService(deps: ShareServiceDeps): ShareService {
 					: "dark";
 			const expiresAt = Number(row.expiresAt ?? 0);
 			if (expiresAt > 0 && expiresAt <= now()) return expiredSharePage(row.name, expiresAt, theme);
+			// NERE-42：有效链接的打开才计数；同一 IP 指纹 1 小时内只计 1 次（repo 层判重）。
+			recordOpen(sql, token, await openerFingerprint(token, openerIp), now());
 			// 登录页「看一个真实对话」落到的那条分享：顶部加一条只读样例说明（NERE-46）。
 			const demo = demoToken !== "" && demoToken === token;
 
