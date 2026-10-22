@@ -1,16 +1,24 @@
 import type { RequestContext } from "../http/context";
+import { toResponse } from "../http/errors";
 import { matchRoute, type Route } from "../http/router";
+import { fileRoutes } from "./files";
+import { sessionRoutes } from "./session";
 
 /**
- * 路由表（ADR-0001 §9.1）：阶段 0b 不迁移业务域，各域在阶段 1-5 追加。
- * 未迁移端点不在这里登记，dispatch 直接走 legacy 委托，行为与旧 handleFetch 相同。
+ * 路由表（ADR-0001 §9.1）：已迁移的域在这里登记，未登记的端点继续走 legacy 委托。
+ * 阶段 1：会话与文件域。
  */
-export const ROUTES: readonly Route[] = [];
+export const ROUTES: readonly Route[] = [...sessionRoutes, ...fileRoutes];
 
 export async function dispatch(ctx: RequestContext, routes: readonly Route[] = ROUTES): Promise<Response> {
 	const route = matchRoute(routes, ctx.req.method, ctx.url.pathname);
 	if (!route) return ctx.legacy();
-	await ctx.ready();
-	if (route.needsHarness) await ctx.harness();
-	return route.handle(ctx);
+	try {
+		await ctx.ready();
+		if (route.needsHarness) await ctx.harness();
+		return await route.handle(ctx);
+	} catch (err) {
+		// AppError 走 §9.3 映射；未知异常仍是 500 + String(e).slice(0, 500)。
+		return toResponse(err);
+	}
 }

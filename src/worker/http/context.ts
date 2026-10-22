@@ -1,5 +1,6 @@
 import type { Harness } from "@earendil-works/pi-durable";
 import type { SqlHandle } from "../db/migrations";
+import type { SessionRuntime } from "../services/session-service";
 
 /** Worker 绑定（ADR-0001 §9.2）；只在 Http 层按需读取，不落库。 */
 export type AppEnv = {
@@ -30,6 +31,8 @@ export type RequestContext = {
 	harness(): Promise<Harness>;
 	/** 阶段 0-4 的过渡委托：未迁移端点原样走旧 handleFetch。 */
 	legacy(): Promise<Response>;
+	/** 会话域的 Harness 端口（open/重试/模型配置在 DO 组合根）；由路由注入 session-service。 */
+	readonly sessionRuntime: SessionRuntime;
 };
 
 export type BuildContextInput = {
@@ -42,6 +45,7 @@ export type BuildContextInput = {
 	ensureMigrated(): Promise<void>;
 	open(): Promise<Harness>;
 	legacy(): Promise<Response>;
+	sessionRuntime: SessionRuntime;
 };
 
 export function buildContext(input: BuildContextInput): RequestContext {
@@ -56,5 +60,6 @@ export function buildContext(input: BuildContextInput): RequestContext {
 		ready: () => input.ensureMigrated(),
 		harness: () => input.open(),
 		legacy: () => input.legacy(),
+		sessionRuntime: input.sessionRuntime,
 	};
 }
