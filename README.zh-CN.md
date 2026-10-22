@@ -182,9 +182,9 @@ npx wrangler deploy
 
 ## 内置工具
 
-`now` · `remember` · `recall` · `kb_search` · `kb_add` · `kb_list` · `kb_delete` · `update_plan` · `dispatch_tasks` · `list_skills` · `load_skill` · `install_skill` · `web_search` · `web_fetch_page` · `http_fetch` · `write_file` · `read_file` · `list_files` · `codemode` · `tool_search` · `set_goal` · `complete_goal` · `report_goal` · `ask_user`，以及所有已配置 MCP 服务器的工具（`mcp__<服务器>__<工具>`）。
+`now` · `remember` · `recall` · `kb_search` · `kb_add` · `kb_list` · `kb_delete` · `update_plan` · `dispatch_tasks` · `list_skills` · `load_skill` · `install_skill` · `web_search` · `web_fetch_page` · `http_fetch` · `write_file` · `read_file` · `list_files` · `codemode` · `tool_search` · `set_goal` · `complete_goal` · `report_goal` · `share_file` · `share_conversation` · `ask_user`，以及所有已配置 MCP 服务器的工具（`mcp__<服务器>__<工具>`）。
 
-共 24 个内置工具；另可在左栏「技能 → 自定义工具」用 JS 写自定义工具。
+共 26 个内置工具；另可在左栏「技能 → 自定义工具」用 JS 写自定义工具。
 
 ---
 
@@ -216,9 +216,9 @@ CHANGELOG.md             # 逐版本更新记录
 
 ## 版本
 
-完整记录见 [CHANGELOG.md](./CHANGELOG.md)。里程碑：
+完整记录见 [CHANGELOG.md](./CHANGELOG.md)，v1.0.0 的社区说明见 [docs/release-notes-v1.0.0.md](./docs/release-notes-v1.0.0.md)。里程碑：
 
-`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏 · `v0.22` 思考/计划/轨迹 · `v0.23` 输入框调用技能 · `v0.24` 四套主题 · `v0.25` Arco 色卡 · `v0.26` 设置分 tab · `v0.27` 模型供应商 · `v0.28` 金标回归 · `v0.29` 子代理编排 · `v0.30` 能力注册表 · `v0.49` README 英文首页 · `v0.50` 流量计划与素材 · `v0.51` 前 7 天逐日文案 · `v0.52` 独立域名分享 · `v0.53` 知识库向量检索
+`v0.10` 访问密码 · `v0.11` 主题 · `v0.12` 图片输入 · `v0.13` 工具搜索 · `v0.14` 备份恢复 · `v0.15` 技能/预览 · `v0.16` 右栏可伸缩 · `v0.17` 社区技能 · `v0.18` Browserbase 云端浏览器 · `v0.19` 服务端停止 · `v0.20` 设置页/联网搜索 · `v0.21` 左栏工具栏 · `v0.22` 思考/计划/轨迹 · `v0.23` 输入框调用技能 · `v0.24` 四套主题 · `v0.25` Arco 色卡 · `v0.26` 设置分 tab · `v0.27` 模型供应商 · `v0.28` 金标回归 · `v0.29` 子代理编排 · `v0.30` 能力注册表 · `v0.49` README 英文首页 · `v0.50` 流量计划与素材 · `v0.51` 前 7 天逐日文案 · `v0.52` 独立域名分享 · `v0.53` 知识库向量检索 · `v1.0` Skill Hub 审计、分享面板、知识库导入去重、8/8 架构阶段
 
 ## 致谢
 
