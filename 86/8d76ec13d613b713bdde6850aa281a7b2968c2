@@ -1,0 +1,88 @@
+tests/unit/skillHub.test.tsx
+  32d2ea63adf8d95e 1-332
+src/web/components/SkillHubRow.tsx
+  32d2ea63adf8d95e 1-160
+src/web/components/SkillHubPanel.tsx
+  32d2ea63adf8d95e 1-185
+docs/frontend-map.md
+  32d2ea63adf8d95e 38,83
+src/web/components/LeftPanels.tsx
+  32d2ea63adf8d95e 5,359-360,394-414,668-670,675-680
+src/web/lib/collections.ts
+  32d2ea63adf8d95e 22-23,27,44
+src/web/types.ts
+  32d2ea63adf8d95e 216-251
+src/web/lib/api.ts
+  32d2ea63adf8d95e 127-159,456-466
+src/web/lib/skill-hub.ts
+  32d2ea63adf8d95e 1-223
+src/web/hooks/useSkillHub.ts
+  32d2ea63adf8d95e 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "868d76ec13d613b713bdde6850aa281a7b2968c2",
+  "prompts": {
+    "32d2ea63adf8d95e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8634b447-f4fb-4cb8-9f89-df7a5ad18012",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 1130,
+      "total_deletions": 10,
+      "accepted_lines": 1124,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/SkillHubRow.tsx": {
+          "additions": 161,
+          "deletions": 1,
+          "accepted_lines": 160
+        },
+        "src/web/lib/skill-hub.ts": {
+          "additions": 223,
+          "accepted_lines": 223
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 34,
+          "deletions": 1,
+          "accepted_lines": 34
+        },
+        "src/web/lib/api.ts": {
+          "additions": 44,
+          "accepted_lines": 44
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 4,
+          "deletions": 3,
+          "accepted_lines": 4
+        },
+        "src/web/hooks/useSkillHub.ts": {
+          "additions": 104,
+          "accepted_lines": 104
+        },
+        "src/web/components/SkillHubPanel.tsx": {
+          "additions": 189,
+          "deletions": 4,
+          "accepted_lines": 185
+        },
+        "tests/unit/skillHub.test.tsx": {
+          "additions": 333,
+          "deletions": 1,
+          "accepted_lines": 332
+        },
+        "src/web/types.ts": {
+          "additions": 36,
+          "accepted_lines": 36
+        },
+        "docs/frontend-map.md": {
+          "additions": 2,
+          "accepted_lines": 2
+        }
+      }
+    }
+  }
+}

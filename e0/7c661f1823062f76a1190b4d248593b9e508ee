@@ -1,0 +1,50 @@
+src/web/App.tsx
+  b7956eff625fd7e7 22,115-116,1391-1392,1451
+tests/unit/shares.test.tsx
+  b7956eff625fd7e7 5-6,229-271
+src/web/components/Rail.tsx
+  b7956eff625fd7e7 13-14,21,54
+src/web/hooks/useShares.ts
+  b7956eff625fd7e7 7,47-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "e07c661f1823062f76a1190b4d248593b9e508ee",
+  "prompts": {
+    "b7956eff625fd7e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3298799-b1f7-4f6d-9384-e3b596e9eba0",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 94,
+      "total_deletions": 4,
+      "accepted_lines": 94,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/components/Rail.tsx": {
+          "additions": 4,
+          "deletions": 2,
+          "accepted_lines": 4
+        },
+        "src/web/hooks/useShares.ts": {
+          "additions": 39,
+          "accepted_lines": 39
+        },
+        "src/web/App.tsx": {
+          "additions": 6,
+          "deletions": 1,
+          "accepted_lines": 6
+        },
+        "tests/unit/shares.test.tsx": {
+          "additions": 45,
+          "deletions": 1,
+          "accepted_lines": 45
+        }
+      }
+    }
+  }
+}
