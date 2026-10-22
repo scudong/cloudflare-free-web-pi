@@ -5,6 +5,7 @@
 用途：回答「这个页面由哪些组件拼成、状态属于谁、数据从哪个接口来」。评审时用它判断改动是否越层。
 
 分层与命名规则见 [`docs/adr/0002-frontend-layering.md`](./adr/0002-frontend-layering.md)。
+当前迭代的数据契约与组件落点见 [`docs/frontend-contract-w3.md`](./frontend-contract-w3.md)（NERE-44，W3 参考资料条 / 分享面板）。
 
 ## 1. 目录即分层
 
