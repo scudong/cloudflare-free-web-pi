@@ -5,7 +5,7 @@ import { AutomationEditDialog } from "./AutomationEditDialog";
 import { Icon } from "./Icon";
 import { SkillCard } from "./SkillCard";
 import { SkillHubPanel } from "./SkillHubPanel";
-import type { AutomationInfo, AutomationPatch, AutomationRunStatus, CustomToolInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo } from "../types";
+import type { AutomationInfo, AutomationPatch, AutomationRunStatus, CustomToolInfo, McpServerInfo, PromptInfo, RuleInfo, SkillInfo, SkillInstallOutcome } from "../types";
 
 /** 左栏面板头部（NERE-43 起导出复用）：标题 + 可选操作 / 计数 / 收起。 */
 export function PanelHeader({
@@ -422,7 +422,7 @@ export function SkillPanel({
 	error: string | null;
 	onAdd: (name: string, description: string, content: string) => Promise<boolean>;
 	onDelete: (name: string) => Promise<boolean>;
-	onImport: (url: string) => Promise<boolean>;
+	onImport: (url: string) => Promise<SkillInstallOutcome>;
 	/** 「试用」（NERE-59）：把 `/技能名 ` 写进输入框并聚焦，不自动发送。 */
 	onTry: (name: string) => void;
 	/** 提示模板与规则（v0.31.0）。 */
@@ -444,6 +444,8 @@ export function SkillPanel({
 	const [importUrl, setImportUrl] = useState("");
 	const [community, setCommunity] = useState<{ name: string; description: string; needsLocal?: boolean; url: string }[]>([]);
 	const [busyImport, setBusyImport] = useState<string | null>(null);
+	/** 导入 / 社区安装的失败首因（NERE-69）：弹窗里就地显示，不再写进被盖住的聊天流。 */
+	const [importError, setImportError] = useState<string | null>(null);
 	const [description, setDescription] = useState("");
 	const [content, setContent] = useState("");
 	const [openName, setOpenName] = useState<string | null>(null);
@@ -554,9 +556,11 @@ export function SkillPanel({
 							onClick={() => {
 								if (!importUrl.trim()) return;
 								setBusyImport(importUrl);
+								setImportError(null);
 								void (async () => {
-									const ok = await onImport(importUrl.trim());
-									if (ok) setImportUrl("");
+									const result = await onImport(importUrl.trim());
+									if (result.ok) setImportUrl("");
+									else setImportError(result.message);
 									setBusyImport(null);
 								})();
 							}}
@@ -566,6 +570,11 @@ export function SkillPanel({
 							{busyImport ? "导入中…" : "导入"}
 						</button>
 					</div>
+					{importError && (
+						<p role="alert" className="break-all text-[11px] leading-relaxed text-rose-300">
+							安装失败：{importError}
+						</p>
+					)}
 					{community.length > 0 && (
 						<details className="rounded-md border border-slate-700/70 bg-slate-800/30 px-2 py-1.5">
 							<summary className="cursor-pointer text-xs text-slate-300">从社区安装（badlogic/pi-skills）</summary>
@@ -585,8 +594,10 @@ export function SkillPanel({
 												type="button"
 												onClick={() => {
 													setBusyImport(item.name);
+													setImportError(null);
 													void (async () => {
-														await onImport(item.url);
+														const result = await onImport(item.url);
+														if (!result.ok) setImportError(result.message);
 														setBusyImport(null);
 													})();
 												}}
@@ -736,7 +747,7 @@ export function SkillPanel({
 				</details>
 			</div>
 			) : (
-				<SkillHubPanel installed={items.map((skill) => skill.name)} onInstall={onImport} />
+				<SkillHubPanel installed={items.map((skill) => skill.name)} onInstall={onImport} onTry={onTry} />
 			)}
 		</div>
 	);

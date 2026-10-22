@@ -305,6 +305,12 @@ export interface SkillHubEntry {
 	installUrl?: string;
 }
 
+/**
+ * 技能安装结果（NERE-69）：Hub 行内要展示失败原因，`onInstall` 不能只回布尔。
+ * `message` 优先取 `details.audit.reasons[0].message`，缺失时回退到接口 `error`。
+ */
+export type SkillInstallOutcome = { ok: true; name?: string } | { ok: false; message: string };
+
 /** 全部文件总览条目（v0.45.0）：文件 + 所属会话。 */
 export interface AllFileInfo extends FileInfo {
 	sessionId: string;

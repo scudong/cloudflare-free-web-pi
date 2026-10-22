@@ -3,6 +3,7 @@
  *
  * - 取数只经 `useSkillHub`，组件不拼接口、不直接 fetch。
  * - 安装复用现有导入流（`onInstall` → App 的 handleImportSkill）；blocked 条目按钮禁用。
+ * - 安装结果留在弹窗内（NERE-69）：成功 → 行内「已安装 · 试用」；失败 → 行内红字取首条审计原因。
  * - 三态：首次加载骨架 / 失败可重试 / 筛选后空态；旧数据在刷新失败时保留。
  */
 
@@ -17,7 +18,7 @@ import {
 	hubEntryInstallUrl,
 	type SkillHubFilters,
 } from "../lib/skill-hub";
-import type { SkillHubEntry } from "../types";
+import type { SkillHubEntry, SkillInstallOutcome } from "../types";
 import { Icon } from "./Icon";
 import { SkillHubRow } from "./SkillHubRow";
 
@@ -58,11 +59,14 @@ const viewMemory = { filters: EMPTY_SKILL_HUB_FILTERS };
 export function SkillHubPanel({
 	installed,
 	onInstall,
+	onTry,
 }: {
 	/** 已安装的技能名：用于「已安装 / 重新安装」标记。 */
 	installed: string[];
-	/** 现有导入流（App.handleImportSkill），返回是否成功。 */
-	onInstall: (url: string) => Promise<boolean>;
+	/** 现有导入流（App.handleImportSkill），返回结构化结果供行内反馈。 */
+	onInstall: (url: string) => Promise<SkillInstallOutcome>;
+	/** 「试用」（NERE-69）：由页面层关弹窗并预填 `/技能名 `。 */
+	onTry: (name: string) => void;
 }) {
 	const [filters, setFilters] = useState<SkillHubFilters>(viewMemory.filters);
 	useEffect(() => {
@@ -71,7 +75,14 @@ export function SkillHubPanel({
 	const { items, facets, catalogStale, status, error, rawCount, reload } = useSkillHub(filters);
 	const [openName, setOpenName] = useState<string | null>(null);
 	const [installing, setInstalling] = useState<string | null>(null);
-	const installedSet = useMemo(() => new Set(installed), [installed]);
+	/** 本次会话刚装成功的名字：面板不重取，立即把行切到「已安装 · 试用」。 */
+	const [installedHere, setInstalledHere] = useState<ReadonlySet<string>>(() => new Set());
+	/** 本次会话的安装失败首因：按技能名保留，重试时清掉。 */
+	const [installErrors, setInstallErrors] = useState<Readonly<Record<string, string>>>({});
+	const installedSet = useMemo(
+		() => new Set([...installed, ...installedHere]),
+		[installed, installedHere],
+	);
 	const loading = status === "loading";
 	const filtersActive = hasActiveHubFilters(filters);
 	const firstLoad = loading && rawCount === 0;
@@ -83,10 +94,29 @@ export function SkillHubPanel({
 	const install = (entry: SkillHubEntry) => {
 		if (installing || !canInstallHubEntry(entry)) return;
 		const url = hubEntryInstallUrl(entry);
-		setInstalling(entry.name);
+		const name = entry.name;
+		setInstalling(name);
+		setInstallErrors((previous) => {
+			if (!(name in previous)) return previous;
+			const next = { ...previous };
+			delete next[name];
+			return next;
+		});
 		void (async () => {
-			await onInstall(url);
-			setInstalling((current) => (current === entry.name ? null : current));
+			try {
+				const result = await onInstall(url);
+				if (result.ok) {
+					setInstalledHere((previous) => new Set(previous).add(name));
+				} else {
+					setInstallErrors((previous) => ({ ...previous, [name]: result.message }));
+				}
+			} catch (err) {
+				const message = err instanceof Error && err.message ? err.message : String(err);
+				setInstallErrors((previous) => ({ ...previous, [name]: message }));
+			} finally {
+				// 失败也要恢复可点（验收 3）：不卡在「安装中…」。
+				setInstalling((current) => (current === name ? null : current));
+			}
 		})();
 	};
 
@@ -166,9 +196,12 @@ export function SkillHubPanel({
 								entry={entry}
 								expanded={openName === entry.name}
 								installed={installedSet.has(entry.name)}
+								installedNow={installedHere.has(entry.name)}
 								installing={installing === entry.name}
+								installError={installErrors[entry.name] ?? null}
 								onToggle={(name) => setOpenName((current) => (current === name ? null : name))}
 								onInstall={install}
+								onTry={onTry}
 							/>
 						))}
 					</ul>

@@ -20,6 +20,7 @@ import { LoginGate } from "./components/LoginGate";
 import { Icon } from "./components/Icon";
 import { api, ApiError, type BootstrapKey } from "./lib/api";
 import { mergeAutomationUpdate, parseAutomationUpdate } from "./lib/automation-edit";
+import { installFailureMessage } from "./lib/skill-hub";
 import { useBootstrap } from "./hooks/useBootstrap";
 import { useSharesAvailable } from "./hooks/useShares";
 import { shareUrlFor } from "./lib/format";
@@ -27,7 +28,7 @@ import { parseEntries, parseKbRefs, truncateOneLine } from "./lib/entries";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { ApprovalInfo, AskQuestion, AutomationInfo, AutomationPatch, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, KbFocus, KbRef, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLink, SkillInfo, ToolCallInfo } from "./types";
+import type { ApprovalInfo, AskQuestion, AutomationInfo, AutomationPatch, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, KbFocus, KbRef, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLink, SkillInfo, SkillInstallOutcome, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -785,29 +786,23 @@ export default function App() {
 		}
 	}, []);
 
-	const handleImportSkill = useCallback(async (url: string) => {
+	/**
+	 * 技能导入（NERE-53 / NERE-69）：结果回给调用方做行内反馈，不再往聊天流写 notice。
+	 * 弹窗盖住聊天区，写在下面的 notice 用户看不见；Hub 行内直接展示成功 / 失败原因。
+	 */
+	const handleImportSkill = useCallback(async (url: string): Promise<SkillInstallOutcome> => {
 		try {
 			const result = await api.importSkill(url);
 			if (result.ok) {
-				setMessages((prev) => [
-					...prev,
-					{ id: nextId(), role: "notice", text: `已安装技能：${result.name ?? "（未命名）"}` },
-				]);
 				setPanelTick((tick) => tick + 1);
-				return true;
+				return { ok: true, ...(result.name ? { name: result.name } : {}) };
 			}
-			const reasonText = result.reasons && result.reasons.length > 0 ? `：${result.reasons.join("；")}` : "";
-			setMessages((prev) => [
-				...prev,
-				{ id: nextId(), role: "notice", text: `安装失败：${result.error ?? "未知错误"}${reasonText}` },
-			]);
-			return false;
+			return { ok: false, message: installFailureMessage(result) };
 		} catch (err) {
-			const detail = err instanceof Error ? err.message : String(err);
-			setMessages((prev) => [...prev, { id: nextId(), role: "notice", text: `安装失败：${detail}` }]);
-			return false;
+			const detail = err instanceof Error && err.message ? err.message : String(err);
+			return { ok: false, message: detail };
 		}
-	}, [nextId]);
+	}, []);
 
 	/** 起步卡与「试用」共用：写草稿 + 递增 nonce，让重复点同一个技能也会重新聚焦。 */
 	const applyComposerDraft = useCallback((text: string) => {
@@ -816,11 +811,13 @@ export default function App() {
 	}, []);
 
 	/**
-	 * 「试用」（NERE-59）：把 `/技能名 ` 写进输入框并聚焦，不自动发送。
+	 * 「试用」（NERE-59 / NERE-69）：把 `/技能名 ` 写进输入框并聚焦，不自动发送。
+	 * 先关掉技能弹窗：ModalShell 打开时 #root 是 inert，不关的话输入框既看不见也拿不到焦点。
 	 * 手机端左栏是抽屉，点完要回到聊天页才看得到输入框。
 	 */
 	const handleTrySkill = useCallback(
 		(name: string) => {
+			setActivePanel(null);
 			applyComposerDraft(`/${name} `);
 			if (!isDesktop) {
 				setDrawerOpen(false);

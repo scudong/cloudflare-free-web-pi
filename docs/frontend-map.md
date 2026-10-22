@@ -58,7 +58,7 @@ App（页面层，1736 行）
 │  ├─ 连接 · MCP ModalShell md（720px）→ McpPanel
 │  └─ 技能 ModalShell xl（960px）→ SkillPanel
 │     ├─ SkillCard         已安装技能行：运行时 / 审计 / 上次使用 / 试用（NERE-59）
-│     └─ SkillHubPanel     技能 Hub（已安装 / Hub 两个视图，自取数）
+│     └─ SkillHubPanel     技能 Hub（已安装 / Hub 两个视图，自取数；安装结果行内反馈 + 一键试用，NERE-69）
 ├─ GoalDialog          设定目标
 └─ SettingsDialog      设置（主题 / 聊天 / 模型 / 知识库 / 部署自检 / 分享 / 备份）
    └─ ShareDialog      文件分享链接弹窗
@@ -100,7 +100,7 @@ App（页面层，1736 行）
 | `App` | `leftOpen`/`rightOpen`/`leftWidth`/`rightWidth`/`mobileTab`/`drawerOpen`/`settingsOpen`/`railView`/`activePanel` | 纯 UI，已用 `localStorage` 记住尺寸；`activePanel` 是知识库 / MCP / 技能三个弹窗的唯一开关（`RailPanel \| null`，同一时刻最多一个） |
 | `KnowledgePanel` | `viewMemory.query`（模块级） | 纯 UI：只保留检索词，重开弹窗时回填；结果 / 草稿 / 正在查看的文档关闭即丢 |
 | `SkillPanel` | `skillViewMemory.view`（模块级） | 纯 UI：记住「已安装 / Hub」tab |
-| `SkillHubPanel` | `viewMemory.filters`（模块级） | 纯 UI：记住 Hub 筛选词，避免重开回到默认 |
+| `SkillHubPanel` | `viewMemory.filters`（模块级）；`installedHere` / `installErrors`（组件内） | 纯 UI：记住 Hub 筛选词；安装成功立即标记「已安装 · 试用」，失败原因就地显示（NERE-69），不写聊天 notice |
 | `Composer` | 草稿、`/` 菜单、附件 | 纯 UI |
 | `MessageList` | 滚动是否贴底 | 纯 UI |
 | `ShareLinkCard`、`ShareDialog` | `copied`、`result` | 纯 UI（`host`+`path` 不落地） |

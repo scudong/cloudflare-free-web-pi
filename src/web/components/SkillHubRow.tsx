@@ -99,23 +99,34 @@ export function SkillHubRow({
 	entry,
 	expanded,
 	installed,
+	installedNow,
 	installing,
+	installError,
 	onToggle,
 	onInstall,
+	onTry,
 }: {
 	entry: SkillHubEntry;
 	expanded: boolean;
 	installed: boolean;
+	/** 本次会话刚装成功：目录快照还没刷新，先按「已安装」呈现，不再提示「可更新」。 */
+	installedNow: boolean;
 	installing: boolean;
+	/** 安装失败首因（422 `details.audit.reasons[0].message`）。 */
+	installError: string | null;
 	onToggle: (name: string) => void;
 	onInstall: (entry: SkillHubEntry) => void;
+	/** 「试用」：页面层关弹窗并把 `/技能名 ` 预填进输入框。 */
+	onTry: (name: string) => void;
 }) {
 	const blocked = entry.audit.status === "blocked";
 	const installUrl = hubEntryInstallUrl(entry);
 	const installable = canInstallHubEntry(entry);
 	const isInstalled = installed || entry.installed;
-	const updatable = isHubEntryUpdatable(entry);
+	const updatable = isHubEntryUpdatable(entry) && !installedNow;
 	const actionLabel = blocked ? "不可安装" : installing ? "安装中…" : updatable ? "更新" : isInstalled ? "重新安装" : "安装";
+	/** blocked 条目按钮按契约禁用；把首条原因放在按钮旁，用户不用展开审计报告也能看到为什么。 */
+	const blockedReason = blocked ? entry.audit.reasons[0]?.message ?? "" : "";
 
 	return (
 		<li className="rounded-lg bg-slate-800/50">
@@ -164,6 +175,7 @@ export function SkillHubRow({
 					{blocked && (
 						<p role="note" className="rounded-md border border-rose-500/30 bg-rose-950/30 px-2 py-1.5 text-[11px] text-rose-200">
 							{BLOCKED_HINT}
+							{blockedReason && <span className="mt-0.5 block break-all">原因：{blockedReason}</span>}
 						</p>
 					)}
 					{!blocked && !installUrl && !isInstalled && (
@@ -182,6 +194,27 @@ export function SkillHubRow({
 					>
 						{actionLabel}
 					</button>
+					{installError && (
+						<p
+							role="alert"
+							className="rounded-md border border-rose-500/30 bg-rose-950/30 px-2 py-1.5 text-[11px] leading-relaxed text-rose-200"
+						>
+							安装失败：<span className="break-all">{installError}</span>
+						</p>
+					)}
+					{isInstalled && !blocked && (
+						<div className="flex flex-wrap items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-950/20 px-2 py-1.5 text-[11px] text-emerald-200">
+							<span>已安装 ·</span>
+							<button
+								type="button"
+								onClick={() => onTry(entry.name)}
+								aria-label={`试用技能 ${entry.name}`}
+								className="rounded-md border border-emerald-400/40 px-2 py-0.5 text-[11px] text-emerald-100 transition-colors hover:bg-emerald-900/40"
+							>
+								试用
+							</button>
+						</div>
+					)}
 					{blocked && (
 						<p className="text-[10px] leading-relaxed text-slate-500">
 							审计结论为 blocked，安装不会发起请求；如果你认为误判，请让作者修正运行时或脚本后再上架。
