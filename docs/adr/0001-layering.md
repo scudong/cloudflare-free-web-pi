@@ -118,8 +118,9 @@ CI 用 grep 检查即可（无需引入新框架）：
 
 ### 6. 迁移与 schema
 
-- 新增 `src/worker/db/migrations.ts`，按版本号有序执行，记录到 `schema_migrations(version, applied_at)`。
+- 新增 `src/worker/db/migrations.ts`，按版本号有序执行，记录到 `schema_migrations(version, name, applied_at)`。
 - 请求路径不再调用 `ensureTables`；只在 DO 首次 `open()` 时执行一次 `migrate(sql)`。
+- 本阶段只收口 `SpikeAgent` 的 DDL；`UserRegistry` 自己库里的 `users` 建表仍在其 `db()`，随阶段 0b 的路由层收口一起处理。
 - 迁移必须先 `CREATE TABLE` 再 `ALTER TABLE`；不允许吞掉非"列已存在"的错误。
 - 每个迁移必须能在空库上从 0 跑到最新；CI 增加"空 persist 首次请求"用例。
 
@@ -246,6 +247,7 @@ export function migrate(sql: SqlHandle, now?: () => string): number; // 返回�
 
 - 账本表：`schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)`。
 - 按 version 升序执行，每条执行成功后写账本；`SqlHandle` 没有事务入口，因此**每条迁移必须自身幂等**（`IF NOT EXISTS`、`INSERT OR IGNORE`、只容忍 `duplicate column name`）。
+- **已应用的迁移不可编辑，只能追加新版本**：账本不会重跑旧版本，改 v1 的 SQL 会让老库永远落后且零报错。`MIGRATIONS` 的 version 必须唯一且严格递增，模块加载时断言。
 - v1 = 现行 schema 全量，**先 CREATE 后 ALTER**：修掉 `sessions_meta` 现在"先 ALTER 后 CREATE、空库 ALTER 全被吞"导致首请求缺 `deleted/model/hidden/parent_id/fork_at` 的顺序缺陷。v1 必须覆盖 `ensureTables` 的全部对象，不只是表：
   - 20 张表：`pi_mem`、`vfs_v2`、`sessions_meta`、`skills`、`shares`、`automations`、`mcp_servers`、`reflect_state`、`app_settings`、`plans`、`prompts`、`rules`、`kb_docs`、`kb_chunks`、`goals`、`questions`、`custom_tools`、`approvals`、`approval_grants`、`providers`
   - 普通索引 `kb_chunks_doc`
