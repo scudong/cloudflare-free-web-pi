@@ -1,0 +1,78 @@
+src/web/lib/collections.ts
+  0f6a3f8dd9d0d59b 111,116-123
+src/web/components/LeftPanels.tsx
+  0f6a3f8dd9d0d59b 3,162-195,206,219-220,358
+src/web/App.tsx
+  0f6a3f8dd9d0d59b 1479
+src/web/types.ts
+  0f6a3f8dd9d0d59b 151,153-154
+tests/unit/automation-last-run.test.tsx
+  0f6a3f8dd9d0d59b 1,3,6,60-107
+src/web/lib/format.ts
+  0f6a3f8dd9d0d59b 47-54
+docs/frontend-map.md
+  0f6a3f8dd9d0d59b 38,86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "3b8a1e9f94a8be640fbfe4c23764c9bfee36c53d",
+  "prompts": {
+    "0f6a3f8dd9d0d59b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a6e583e4-c858-43d4-9df2-d12a4a524f25",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 275,
+      "total_deletions": 23,
+      "accepted_lines": 116,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/App.tsx": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "tests/unit/automation-last-run.test.ts": {
+          "additions": 58
+        },
+        "tests/unit/automation-last-run.test.tsx": {
+          "additions": 51,
+          "accepted_lines": 51
+        },
+        "src/web/preview-nere68.html": {
+          "additions": 12
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 40,
+          "deletions": 1,
+          "accepted_lines": 39
+        },
+        "src/web/types.ts": {
+          "additions": 4,
+          "deletions": 2,
+          "accepted_lines": 3
+        },
+        "src/web/preview-nere68.tsx": {
+          "additions": 87,
+          "deletions": 18
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 11,
+          "accepted_lines": 11
+        },
+        "docs/frontend-map.md": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/lib/format.ts": {
+          "additions": 9,
+          "accepted_lines": 9
+        }
+      }
+    }
+  }
+}
