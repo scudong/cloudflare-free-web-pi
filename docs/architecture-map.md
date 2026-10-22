@@ -42,7 +42,7 @@ SpikeAgent DO（每用户一个；主人沿用 "spike"，邀请用户 "user:<id>
 | Agent 运行时 | `spikeExtension`（`1969`）、`buildInstructions`（`2940`）、`runChat`（`2702-2769`）、`runChatStream`（`3699-3875`） | 工具定义、系统提示、chat / SSE 流、技能注入 | Harness、LLM、MCP、AI | Harness 表 |
 | 会话与文件 | 路由 `routes/session.ts`、`routes/files.ts`；用例 `services/session-service.ts`、`services/file-service.ts`；SQL `repo/sessions-repo.ts`、`repo/files-repo.ts`；工具 `write_file`/`read_file`/`list_files`（`~1770-1810`） | 会话列表/新建/分支/删除、工作台文件；路由层零 SQL，Harness 协调留在 DO 的 `sessionRuntime()` 端口 | 服务/仓储、Harness | `sessions_meta`、`vfs_v2` |
 | 知识库 | 路由 `routes/kb.ts`；用例 `services/kb-service.ts`；SQL `repo/kb-repo.ts`；纯函数 `lib/kb.ts`；工具 `kb_search`/`kb_add`/`kb_list`/`kb_delete`（`~1400-1465`） | 分块、FTS5、向量索引、混合检索、预检索、ingest；AI / Vectorize / settings / 抓取全部经端口注入 | 服务/仓储、AI、Vectorize | `kb_docs/kb_chunks/kb_fts` |
-| 分享 | `sharePage`（`2498`）、`createShare`（`3321`）、`listShares`（`3343`）、路由 `4219-4279` | token 生成、SSR 分享页、主题/目录、过期 | `shares`、`vfs_v2`、Harness | `shares` |
+| 分享 | 路由 `routes/share.ts`；用例 `services/share-service.ts`；SQL `repo/shares-repo.ts`（文件正文复用 `files-repo`）；纯函数 `lib/share-render.ts`；工具 `share_file`/`share_conversation` | token 生成、SSR 分享页、主题/目录、过期；`/s/*` 标 `needsHarness: false`，文件分享与 404/410 在 Harness 之前返回，只有会话分享命中后才经 `shareRuntime.entries()` 读条目 | 服务/仓储、`shares`、`vfs_v2`、Harness（仅会话分享） | `shares` |
 | 定时任务与目标 | 调度 helper（`196-300`）、`alarm`（`3006-3019`）、`goalTick`（`3667`）、路由 `4280-4326`、`4756-4786` | alarm 调度、token 预算、自动续转 | `automations`、`goals` | `automations`、`goals` |
 | 审批与问答 | 审批闸门 / `ask_user`（`~380-500`）、路由 `4433-4472`、`4582-4628` | 工具审批闸门、ask_user 卡片 | `approvals`、`approval_grants`、`questions` | 同上 |
 | 设置 / 供应商 / MCP | `getSetting`/`setSetting`（`156-170`）、`activeProviderId`/`activeModelIds`（`~660-724`）、`buildMcpExtension`（`2066`）、路由 `4649-4906` | app_settings、OpenAI 兼容端点、MCP 连接 | 外部 HTTP | `app_settings`、`providers`、`mcp_servers` |
@@ -116,7 +116,7 @@ DO            ──→ Harness / MCP / Vectorize / LLM
 | `custom_tools` | 自定义 JS 工具 | `/custom-tools` | 否 |
 | `providers` | LLM 供应商 | `/providers` | 是（含明文 `api_key`） |
 | `mcp_servers` | MCP 配置 | `/mcp` | 是（含 headers） |
-| `shares` | 公开分享 token | `/share` | 是 |
+| `shares` | 公开分享 token | `shares-repo`（`share-service` 编排：`POST /share`、`share_file`/`share_conversation`） | 是 |
 | `kb_docs` / `kb_chunks` / `kb_fts` | 知识库 + FTS 索引 | `kb-repo`（`kb-service` 编排：`/kb*`、`kb_add`/`kb_delete`、恢复） | 仅 `kb_docs`，恢复时重建分块/索引 |
 
 表定义集中在 `ensureTables`（`worker.ts:63-153`），`open()` 每次执行；`handleFetch` 里另有 **52 次**重复调用。迁移器落地后改为 `db/migrations.ts` 一次执行（ADR-0001 §9.4）。
@@ -175,14 +175,14 @@ CI：`.github/workflows/deploy.yml`（test → build → deploy）、`smoke.yml`
 
 严重度：**P0** 阻断演进 / **P1** 用户可见或数据风险 / **P2** 维护性 / **P3** nit。
 
-> 行号口径：R1/R4/R5/R11 已按 `ce75bce` 刷新；R2/R3/R6-R15 的证据行号仍是 `64c9515` 基线，在其所属域迁移时重锚（阶段 3/4 顺手更新）。引用风险时优先用符号名。
+> 行号口径：R1/R4/R5/R11 已按 `ce75bce` 刷新；R3/R6-R14 的证据行号仍是 `64c9515` 基线，在其所属域迁移时重锚（阶段 4 顺手更新）。R2 已关闭，证据改为符号与用例名。引用风险时优先用符号名。
 
-> 执行状态（2026-10-22）：ADR-0001 已转 Accepted；阶段 0a（迁移器）与 0b（路由表）已合并。阶段 1（会话/文件）已收口：`routes/session|files.ts` → `services/session|file-service.ts` → `repo/sessions|files-repo.ts`，`sessions_meta`/`vfs_v2` 在路由与工具中零内联 SQL。阶段 2（知识库）已收口：`routes/kb.ts` → `services/kb-service.ts` → `repo/kb-repo.ts`，纯函数在 `lib/kb.ts`；AI / Vectorize / settings / 抓取经端口注入，路由与工具零内联 SQL；R4 由 0a 关闭，R1/R11 由阶段 1-5 逐步关闭。
+> 执行状态（2026-10-22）：ADR-0001 已转 Accepted；阶段 0a（迁移器）与 0b（路由表）已合并。阶段 1（会话/文件）已收口：`routes/session|files.ts` → `services/session|file-service.ts` → `repo/sessions|files-repo.ts`，`sessions_meta`/`vfs_v2` 在路由与工具中零内联 SQL。阶段 2（知识库）已收口：`routes/kb.ts` → `services/kb-service.ts` → `repo/kb-repo.ts`，纯函数在 `lib/kb.ts`；AI / Vectorize / settings / 抓取经端口注入，路由与工具零内联 SQL；R4 由 0a 关闭，R1/R11 由阶段 1-5 逐步关闭。阶段 3（分享）已收口：`routes/share.ts` → `services/share-service.ts` → `repo/shares-repo.ts`，渲染纯函数在 `lib/share-render.ts`，`/s/*` 不再 `open()` Harness（R2 关闭）。
 
 | ID | 级别 | 问题 | 证据 | 影响 | 建议 |
 |---|---|---|---|---|---|
 | R1 | P0 | 单文件单体：`handleFetch` 81 个分支、105 处路由内联 SQL | `worker.ts` 5249 行；`3903-4948` | 无法单测业务、合并冲突、改动半径不可控 | 执行 ADR-0001，按域增量拆分 |
-| R2 | P1 | 公开分享页也会启动完整 Harness | `3579`（所有非 `/` 请求 `open()`）+ `3886`（`/s/`）+ `2315-2344` | 冷启动分享页要建扩展/MCP/Harness；MCP 不可用时分享也可能变慢/失败 | 分享文件与 404/过期路径零 Harness；会话分享在 token 命中后再开；评估创建时快照 |
+| R2 | P1 | ~~公开分享页也会启动完整 Harness~~ **已关闭（阶段 3，NERE-31/NERE-22）** | `routes/share.ts`（`GET /s/` 标 `needsHarness: false`）；`services/share-service.ts` 的 `render()` 在 `shareRuntime.entries()` 之前处理 404/410/文件分支；DO 的 `harnessOpens` 计数只在 `open()` 成功时自增（`TEST_HARNESS_STATS=1` 暴露 `GET /debug/harness`） | 原风险：冷启动分享页要建扩展/MCP/Harness；MCP 不可用时分享也可能变慢/失败 | 验证：`tests/api/share-cold.test.ts` 在空 persist 上把首个 DO 请求打成 `GET /s/doesnotexist`，断言 404 且 `opens` 仍为 0；文件分享读页前后计数不变（同一用例先让 `/api/restore` 触发 `open()` 自证观测点）；会话分享仍渲染 `thread`。渲染契约由 `tests/unit/share-render.test.ts` 钉住（打印按钮/`@media print`、Deploy 出口、演示横条） |
 | R3 | P1 | 首屏 18 个 API 请求，全部进同一个单线程 DO；邀请用户每次再查一次全局 registry | `App.tsx:160-260, 638-1050`；`worker.ts:4637`、`4600-4613` | 首屏延迟 = 18 次串行 DO 往返；registry 成为全站串行点 | 已落地 `GET /api/bootstrap`（NERE-23）：后端只读面板合并为 1 个请求，registry 查询随面板数收敛为每请求一次；前端切换后首屏为 bootstrap + auth 两个请求 |
 | R4 | P1 | schema bootstrap 顺序脆弱：先 ALTER 后 CREATE，异常全吞；DDL 在请求路径执行 | `78-102`（5 个 ALTER 在 `CREATE sessions_meta` 之前）、`63-153`、52 次请求内 `ensureTables` | 全新 DO 首次 `open()` 只得到 4 列；依赖后续某次 `ensureTables` 补列，漏掉的路径会 500 或静默回落默认值 | 版本化迁移（`schema_migrations`），先建表后补列，空库首启测试 |
 | R5 | P1 | 跨 DO 的模块级可变状态 | `customToolNames` `350/563`；`mcpCache` `2063/2086`（只按 server.id） | 同 isolate 多用户时，自定义工具分类和 MCP client 可能串用 | 移到 DO 实例字段或按 `scopeId` 分键 |
@@ -195,7 +195,7 @@ CI：`.github/workflows/deploy.yml`（test → build → deploy）、`smoke.yml`
 | R12 | P2 | 入站对话没有并发闸门；`activeChats` 只挡 alarm | `2347-2362`、`3371-3383`；检查点仅 `2693/2721`；SSE 在 `3539` 之后继续 | 同会话两个请求可能交错 submit，是否被 Harness 拒绝取决于依赖行为（**未验证**） | 显式会话锁或 409；补并发用例 |
 | R13 | P2 | 向量过滤回退可能被其他用户结果挤占 | `966-979`：先 filter，空则无过滤取 `topK*5` 再 Worker 侧过滤 | 元数据索引未生效时，本用户命中可能被其他 scope 的近似向量挤出 | 明确索引就绪检查/skip；或按用户独立索引 |
 | R14 | P2 | 错误与可观测性弱 | 500 返回 `String(e).slice(0,500)`（`4552-4553`）；仅 17 处 console；每轮 `CHAT_TOOLS` 日志（`2386`） | 线上排障靠猜；无 request id / 错误码 / 指标 | 结构化错误 + request id + 关键路径计数 |
-| R15 | P3 | 重复查询与冗余 open | `/capabilities` 两次 `COUNT(*)`（`4044-4046`）；`/kb/prefetch` 两次检索（`3738-3744`）；`createShare` 两次 `open()`（`2986-2987`） | 轻微 CPU/请求放大 | 随手清理 |
+| R15 | P3 | 重复查询与冗余 open | `/capabilities` 两次 `COUNT(*)`（`4044-4046`）；`/kb/prefetch` 两次检索（`3738-3744`） | 轻微 CPU/请求放大 | 随手清理；分享域的重复 `open()` 已在阶段 3 去掉（`createShare` 的两次 `open()` 合并为 `shareRuntime.conversationId()` 一次） |
 
 ## 9. 测试与可观测性现状
 

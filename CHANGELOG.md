@@ -11,6 +11,12 @@
 - 新增迁移 v4：`kb_docs(source)` 索引；不新增表、不新增依赖，历史重复文档不做破坏性清理
 - 金标新增：同一 PDF 连导两次仍 1 篇且 chunk 数不变、修改正文后同 docId 且旧句子检索不到；单测覆盖向量删除与重建
 
+### 分享域分层收口 + 分享页零 Harness（NERE-31 / NERE-22）
+- 后端分享域按 ADR-0001 拆为 `routes/share.ts` → `services/share-service.ts` → `repo/shares-repo.ts`，渲染纯函数（`sharePage`、Markdown/目录/主题/CSS）移入 `lib/share-render.ts`，entry 取值移入 `lib/entries.ts`
+- `GET /s/<token>` 标 `needsHarness: false`：失效/过期 token 与文件分享不再 `open()` Harness，只有会话分享命中 token 后才通过 `shareRuntime.entries()` 读条目；路由层零 SQL，服务层零 `Response`
+- `POST /api/share`、`GET /api/shares`、`/s/` 的响应与状态码逐字不变；打印按钮与 `@media print`、页脚 Deploy 出口、`DEMO_SHARE_URL` 只读横条原样保留（`tests/unit/share-render.test.ts` 钉住）
+- 新增测试观测点 `GET /api/debug/harness`（仅 `TEST_HARNESS_STATS=1`）：`tests/api/share-cold.test.ts` 在空 persist 上以 `GET /s/<invalid>` 为首个 DO 请求，断言 404 且 Harness `open()` 计数为 0
+
 ### 知识库命中随 assistant entry 落库（v0.58.0，NERE-40）
 - `GET /api/entries` 的 assistant entry 新增可选 `kbRefs: {docId, chunkId, chunkSeq, title, source?}[]`：本轮预检索的命中与注入 instructions 的参考资料逐条对应；未命中或 `kb_prefetch` 关闭时不写该字段
 - Harness 的 `pi.assistant` entry 不承载自定义字段，命中落在旁路表 `entry_kb_refs(conversation_id, entry_id, refs, created_at)`；迁移 v3 建表，读路径在 session-service 合并，老会话无行时响应与迁移前一致
