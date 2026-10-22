@@ -132,12 +132,71 @@ const shareOpenTracking: Migration = {
 	},
 };
 
+/**
+ * v6：Skill Hub 目录索引与审计（NERE-55 / 契约 §5.6）。
+ * skills 增量列全部带默认值，老库升级即完成回填：runtime=prompt、audit_status=pass、source=local、version=0.0.0。
+ * 不重写 content、不改既有审计状态；`updated_at` 用 created_at 补。
+ */
+const skillHubColumns: Migration = {
+	version: 6,
+	name: "skill-hub-columns",
+	up(sql) {
+		ensureColumn(sql, "skills", `version TEXT NOT NULL DEFAULT '0.0.0'`);
+		ensureColumn(sql, "skills", `source TEXT NOT NULL DEFAULT 'local'`);
+		ensureColumn(sql, "skills", `author TEXT NOT NULL DEFAULT ''`);
+		ensureColumn(sql, "skills", `license TEXT NOT NULL DEFAULT 'UNLICENSED'`);
+		ensureColumn(sql, "skills", `runtime TEXT NOT NULL DEFAULT 'prompt'`);
+		ensureColumn(sql, "skills", `tags TEXT NOT NULL DEFAULT '[]'`);
+		ensureColumn(sql, "skills", `content_hash TEXT NOT NULL DEFAULT ''`);
+		ensureColumn(sql, "skills", `audit_status TEXT NOT NULL DEFAULT 'pass'`);
+		ensureColumn(sql, "skills", `audit_report TEXT NOT NULL DEFAULT '{}'`);
+		ensureColumn(sql, "skills", `manifest TEXT`);
+		ensureColumn(sql, "skills", `updated_at TEXT NOT NULL DEFAULT ''`);
+		sql.exec(`UPDATE skills SET updated_at = created_at WHERE updated_at = ''`);
+		sql.exec(
+			`CREATE TABLE IF NOT EXISTS skill_audits (
+				content_hash TEXT NOT NULL,
+				rules_version INTEGER NOT NULL,
+				status TEXT NOT NULL,
+				report TEXT NOT NULL,
+				audited_at TEXT NOT NULL,
+				PRIMARY KEY (content_hash, rules_version)
+			)`,
+		);
+	},
+};
+
+/**
+ * v7：技能域埋点（NERE-55 追加范围 A / NERE-59 解锁要求）。
+ * 与 NERE-42 的分享计数完全独立：单独建表，不引用 shares、不共用口径。
+ */
+const skillEvents: Migration = {
+	version: 7,
+	name: "skill-events",
+	up(sql) {
+		sql.exec(
+			`CREATE TABLE IF NOT EXISTS skill_events (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL,
+				type TEXT NOT NULL,
+				source TEXT NOT NULL DEFAULT '',
+				at INTEGER NOT NULL,
+				meta TEXT NOT NULL DEFAULT ''
+			)`,
+		);
+		sql.exec(`CREATE INDEX IF NOT EXISTS skill_events_type_at ON skill_events(type, at)`);
+		sql.exec(`CREATE INDEX IF NOT EXISTS skill_events_name_type ON skill_events(name, type)`);
+	},
+};
+
 export const MIGRATIONS: readonly Migration[] = [
 	initialSchema,
 	vfsRootConversation,
 	entryKbRefs,
 	kbSourceIndex,
 	shareOpenTracking,
+	skillHubColumns,
+	skillEvents,
 ];
 
 // 版本号是账本的唯一真源：重复或乱序会被 INSERT OR IGNORE 静默跳过，模块加载时就暴露。

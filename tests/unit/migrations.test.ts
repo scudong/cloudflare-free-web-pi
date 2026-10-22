@@ -227,4 +227,62 @@ describe("migrate", () => {
 			db.close();
 		}
 	});
+
+	it("v6/v7 给老库补技能 Hub 列与事件表，旧技能回填后仍可调用", () => {
+		const db = new DatabaseSync(":memory:");
+		try {
+			db.exec("CREATE TABLE skills (name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, created_at TEXT NOT NULL)");
+			db.exec(
+				"INSERT INTO skills (name, description, content, created_at) VALUES ('legacy-skill', '旧技能', '# 正文', '2026-01-01T00:00:00Z')",
+			);
+			const sql = sqlHandle(db);
+			migrate(sql);
+			expect(columnsOf(db, "skills")).toEqual(
+				expect.arrayContaining([
+					"version",
+					"source",
+					"author",
+					"license",
+					"runtime",
+					"tags",
+					"content_hash",
+					"audit_status",
+					"audit_report",
+					"manifest",
+					"updated_at",
+				]),
+			);
+			// 老数据回填：可调用、不被误伤
+			expect(
+				db
+					.prepare(
+						"SELECT version, source, runtime, audit_status, tags, content_hash, updated_at FROM skills WHERE name = 'legacy-skill'",
+					)
+					.all(),
+			).toEqual([
+				{
+					version: "0.0.0",
+					source: "local",
+					runtime: "prompt",
+					audit_status: "pass",
+					tags: "[]",
+					content_hash: "",
+					updated_at: "2026-01-01T00:00:00Z",
+				},
+			]);
+			// 审计缓存与事件表
+			expect(db.prepare("PRAGMA table_info(skill_audits)").all()).toEqual(
+				expect.arrayContaining([expect.objectContaining({ name: "content_hash" }), expect.objectContaining({ name: "rules_version" })]),
+			);
+			expect(columnsOf(db, "skill_events")).toEqual(
+				expect.arrayContaining(["id", "name", "type", "source", "at", "meta"]),
+			);
+			// 幂等
+			expect(migrate(sql)).toBe(0);
+			db.exec("DELETE FROM schema_migrations WHERE version IN (6, 7)");
+			expect(migrate(sql)).toBe(2);
+		} finally {
+			db.close();
+		}
+	});
 });

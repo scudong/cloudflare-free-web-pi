@@ -22,6 +22,8 @@ jobs:
       - run: npm ci
       - run: npm run build:web --if-present
       - run: bash scripts/check-layering.sh
+      # Skill Hub 目录门禁：catalog 出现 blocked、sha256 漂移或 audit.hash 不一致即失败（NERE-55）
+      - run: npm run catalog:check
       - run: npm test
 
   deploy:

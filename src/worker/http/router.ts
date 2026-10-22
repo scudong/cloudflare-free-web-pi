@@ -13,6 +13,13 @@ function pathMatches(routePath: string, pathname: string): boolean {
 	if (routePath === pathname) return true;
 	if (routePath === "/s") return pathname.startsWith("/s/");
 	if (routePath.endsWith("/") && pathname.startsWith(routePath)) return true;
+	// 路径参数（NERE-55 的 `/skills/:name/audit`）：一段对一段，参数段非空。
+	if (routePath.includes("/:")) {
+		const routeParts = routePath.split("/");
+		const pathParts = pathname.split("/");
+		if (routeParts.length !== pathParts.length) return false;
+		return routeParts.every((part, i) => (part.startsWith(":") ? Boolean(pathParts[i]) : part === pathParts[i]));
+	}
 	return false;
 }
 
