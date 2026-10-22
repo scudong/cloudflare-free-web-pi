@@ -28,8 +28,15 @@ import { demoShareToken, demoShareUrl, shareExpiryLabel } from "./worker/lib/sha
 import { migrate, type SqlHandle } from "./worker/db/migrations";
 import { buildContext, type AppEnv } from "./worker/http/context";
 import {
+	createChatGate,
 	USER_ID_RE,
 	type AlarmRuntime,
+	type ChatEntry,
+	type ChatHandle,
+	type ChatRuntime,
+	type ChatSettled,
+	type ChatSubmission,
+	type ChatWatchEvent,
 	type ContextRuntime,
 	type GoalRuntime,
 	type McpRuntime,
@@ -57,6 +64,7 @@ import {
 	thinkingLevel,
 } from "./worker/services/settings-service";
 import { createAutomationService, type AutomationService } from "./worker/services/automation-service";
+import { createChatService, type ChatService } from "./worker/services/chat-service";
 import { approvalSettings, listPending as listPendingApprovals, withApproval, type ToolGateDeps } from "./worker/services/approval-service";
 import {
 	buildExtension as buildCustomToolsExtension,
@@ -67,20 +75,17 @@ import {
 } from "./worker/services/custom-tool-service";
 import {
 	GOAL_MAX_TURNS_DEFAULT,
-	GOAL_ROUNDS_PER_REQUEST,
 	GOAL_TOKEN_BUDGET_DEFAULT,
-	goalContinuePrompt,
 	goalInfo,
 	readGoal,
 	startGoal as startGoalRow,
 	writeGoal as updateGoalRow,
 	type GoalPatch,
 	type GoalRow,
-	type GoalStatus,
 } from "./worker/services/goal-service";
 import { buildExtension as buildMcpExtension, type McpCache } from "./worker/services/mcp-service";
 import { readPlan as readPlanRow, savePlan as savePlanRow, type PlanStep } from "./worker/services/plan-service";
-import { listPending as listPendingQuestions, readPending as readPendingQuestionRow, record as recordQuestionRow, type AskItem, type AskOption, type AskPayload } from "./worker/services/question-service";
+import { listPending as listPendingQuestions, record as recordQuestionRow, type AskItem, type AskOption, type AskPayload } from "./worker/services/question-service";
 import { createKbService, type WebFetchResult } from "./worker/services/kb-service";
 import { createSessionService, type SessionRuntime } from "./worker/services/session-service";
 import { createShareService } from "./worker/services/share-service";
@@ -167,10 +172,6 @@ const toolGate: ToolGateDeps = { sql: () => sqlFacade!, get: getSetting };
 
 
 /* ---------------- 交互式问答（v0.37.0）：实现在 services/question-service.ts ---------------- */
-
-function readPendingQuestion(sessionId: string): { id: number; payload: AskPayload } | null {
-	return readPendingQuestionRow(sqlFacade!, sessionId);
-}
 
 function recordQuestion(sessionId: string, payload: AskPayload): number | null {
 	return recordQuestionRow(sqlFacade!, sessionId, payload);
@@ -1118,10 +1119,39 @@ const codemodeExtension = {
 
 /* MCP 连接缓存与扩展构建在 services/mcp-service.ts（R5：缓存按 DO 实例传入）。 */
 
+/**
+ * pi-durable conversation 的结构子集。Service 只拿到不透明句柄（`ChatHandle`），
+ * 真正的 Harness 调用由 DO 的端口实现完成；边界处一次断言，内部全部走命名类型。
+ */
+type ChatConversationLike = {
+	configure(options: unknown, context: unknown): Promise<void>;
+	agent(context: unknown): Promise<{ tools: readonly { name?: string }[] }>;
+	entries(
+		query: object,
+		limit: number,
+		cursor: undefined,
+		context: unknown,
+	): Promise<{ items: readonly ChatEntry[] }>;
+	submit(draft: unknown, context: unknown): Promise<{ id?: unknown; wait(context: unknown): Promise<unknown> }>;
+	commit(
+		build: (tx: { entry(kind: unknown, answer: unknown): unknown }) => unknown,
+		context: unknown,
+	): Promise<ChatEntry | null>;
+	abort(context: unknown): Promise<void>;
+	reset(instructions: undefined, context: unknown): Promise<void>;
+	compact(instructions: string | undefined, context: unknown): Promise<unknown>;
+};
+
+type ChatSubmissionLike = { wait(context: unknown): Promise<unknown> };
+
+function conversationOf(handle: ChatHandle): ChatConversationLike {
+	return handle as unknown as ChatConversationLike;
+}
+
 export class SpikeAgent extends DurableObject {
 	/** pi-durable 的存储句柄，用来枚举会话（Harness 本身不提供列表 API）。 */
-	/** 正在跑对话的会话 id，用于避免定时任务与用户对话并发。 */
-	private activeChats = new Set<string>();
+	/** 正在跑对话的会话 id（NERE-33：闸门状态对象由 DO 持有，开合时机在 chat-service）。 */
+	private chatGate = createChatGate();
 	/** MCP 扩展：构建一次后常驻，避免每轮重连造成工具列表抖动。 */
 	private mcpExt: { name: string; tools?: unknown[] } | null = null;
 	/** 自定义工具扩展（v0.36.0）：增删后重建并重新 install。 */
@@ -1186,91 +1216,82 @@ export class SpikeAgent extends DurableObject {
 		return this.harness;
 	}
 
-	async chat(
-		message: string,
-		sessionId?: string,
-		images?: string[],
-	): Promise<{ answer: string; tools: { name: string; summary: string }[] }> {
-		const key = sessionId || "1";
-		this.activeChats.add(key);
-		try {
-			return await this.runChat(message, sessionId, images);
-		} catch (err) {
-			if (/SessionFailed|storage error/i.test(String(err))) await this.recoverSession();
-			throw err;
-		} finally {
-			this.activeChats.delete(key);
-		}
+	/** 对话域服务（NERE-33）：流式与非流式共用 prepare → submit → finish。 */
+	private chatService(): ChatService {
+		return createChatService({ sql: this.ctx.storage.sql as unknown as SqlHandle, runtime: this.chatRuntime() });
 	}
 
-	private async runChat(
-		message: string,
-		sessionId?: string,
-		images?: string[],
-	): Promise<{ answer: string; tools: { name: string; summary: string }[] }> {
-		const harness = await this.open();
-		const root = await this.conversationFor(harness, sessionId);
-		// 显式技能调用（v0.23.0）：/技能名 命中后把技能正文注入本轮 instructions
-		const inv = this.skillInvocation(message);
-		const effectiveMessage = inv ? inv.rest || `请按技能「${inv.name}」执行。` : message;
-		// 会话首次创建后 agent 选择会固化在 pi.agent 文档里；幂等重设，保证新扩展开关对老会话也生效。
-		const turn = await this.buildInstructions(inv, sessionId, effectiveMessage);
-		await root.configure(
-			{
-				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
-				// 思考档位（v0.22.0）：off 时不产生 thinking 事件，前端自然不显示思考块。
-				thinkingLevel: thinkingLevel(getSetting),
-				extensions: this.agentExtensions() as never,
-				instructions: turn.instructions,
-			},
-			ctx,
-		);
-		const dbgAgent = await root.agent(ctx);
-		console.log("CHAT_TOOLS", JSON.stringify(dbgAgent.tools.map((t) => (t as { name?: string }).name)));
-		// 记录本轮起点：之后只把新增条目里的工具结果算作本轮工具活动。
-		const before = await root.entries({}, 1, undefined, ctx);
-		const beforeId = (before.items[0] as unknown as { id?: number } | undefined)?.id ?? 0;
-		// 转录里保留「/技能名」原文（与气泡一致），技能正文只进本轮 instructions
-		const submission = await root.submit({ type: "input", content: userContent(message, images) as never }, ctx);
-		const settled = await submission.wait(ctx);
-		if (settled.status !== "done" || settled.type !== "input") {
-			throw new Error(`run failed: ${JSON.stringify(settled).slice(0, 300)}`);
-		}
-		const answer = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), ctx);
-		if (answer) this.sessionService().saveEntryKbRefs(String(root.id), Number(answer.id), turn.kbRefs);
-		const c = answer?.model?.[0]?.content;
-		const text = typeof c === "string" ? c : Array.isArray(c)
-			? c.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).join("")
-			: "";
-		// 会话标题：首轮用消息前 24 字，之后只更新时间。
-		try {
-			const id = String(root.id);
-			const now = new Date().toISOString();
-			const meta = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", id).toArray() as { title: string }[];
-			const title = meta[0]?.title;
-			if (!title || title === "新会话" || /^会话 \d+$/.test(title)) {
-				sqlFacade!.exec(
-					"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at",
-					id, effectiveMessage.slice(0, 24), now, now,
+	/** 对话域的 Harness 端口：open/重试、会话、扩展装配与事件泵留在 DO 组合根（ADR-0001 §4）。 */
+	private chatRuntime(): ChatRuntime {
+		return {
+			gate: this.chatGate,
+			conversation: async (sessionId) => this.conversationFor(await this.open(), sessionId),
+			configure: async (handle, input) => {
+				const conversation = conversationOf(handle);
+				await conversation.configure(
+					{
+						model: { provider: this.providerId(), modelId: this.modelFor(input.sessionId) },
+						// 思考档位（v0.22.0）：off 时不产生 thinking 事件，前端自然不显示思考块。
+						thinkingLevel: thinkingLevel(getSetting),
+						extensions: this.agentExtensions() as never,
+						instructions: input.instructions,
+					},
+					ctx,
 				);
-			} else {
-				sqlFacade!.exec("UPDATE sessions_meta SET updated_at = ? WHERE id = ?", now, id);
-			}
-		} catch (e) {
-			console.warn("session meta update failed", e);
-		}
-		const page2 = await root.entries({}, 60, undefined, ctx);		const lastId = Number((page2.items[0] as unknown as { id?: number } | undefined)?.id ?? 0);
-		this.ctx.waitUntil(this.maybeReflect(root as never, lastId));
-		const tools: { name: string; summary: string }[] = [];
-		for (const e of page2.items as unknown as Record<string, unknown>[]) {
-			if ((e as { kind?: unknown }).kind !== "pi.tool-result") continue;
-			if (Number((e as { id?: unknown }).id ?? 0) <= beforeId) continue;
-			const model = (e as { model?: { toolName?: string; content?: { type: string; text?: string }[] }[] }).model;
-			const first = model?.[0];
-			const text = (first?.content ?? []).map((b) => b.text ?? "").join("");
-			if (first) tools.push({ name: first.toolName ?? "tool", summary: text.slice(0, 80) });
-		}
-		return { answer: text || "(empty)", tools: tools.slice(-6) };
+			},
+			instructions: (input) => this.buildInstructions(input.inv, input.sessionId, input.message),
+			skillInvocation: (message) => this.skillInvocation(message),
+			toolNames: async (handle) => {
+				const agent = await conversationOf(handle).agent(ctx);
+				return agent.tools.map((tool) => tool.name).filter((name): name is string => Boolean(name));
+			},
+			lastEntryId: async (handle) => {
+				const page = await conversationOf(handle).entries({}, 1, undefined, ctx);
+				return Number(page.items[0]?.id ?? 0);
+			},
+			submit: async (handle, input) => {
+				const conversation = conversationOf(handle);
+				const submission = await conversation.submit(
+					{
+						type: "input",
+						content: userContent(input.message, input.images) as never,
+						...(input.whenBusy ? { whenBusy: input.whenBusy } : {}),
+					},
+					ctx,
+				);
+				return { id: String(submission.id ?? ""), raw: submission } satisfies ChatSubmission;
+			},
+			wait: async (submission) => {
+				const raw = submission.raw as ChatSubmissionLike;
+				return (await raw.wait(ctx)) as ChatSettled;
+			},
+			commit: async (handle, answer) =>
+				conversationOf(handle).commit((tx) => tx.entry(AssistantEntry, answer), ctx),
+			entries: async (handle, opts) => {
+				const query = opts?.order ? { order: opts.order } : {};
+				const page = await conversationOf(handle).entries(query, opts?.limit ?? 60, undefined, ctx);
+				return page.items;
+			},
+			watch: async (handle, onEvents) => {
+				const stream = await watchEvents(await this.open(), handle.id as never, ctx);
+				stream.start((events) => onEvents(events as unknown as readonly ChatWatchEvent[]));
+				return { stop: () => stream.stop() };
+			},
+			abort: async (handle) => {
+				await conversationOf(handle).abort(ctx);
+			},
+			reset: async (handle) => {
+				await conversationOf(handle).reset(undefined, ctx);
+			},
+			compact: async (handle, instructions) => String(await conversationOf(handle).compact(instructions, ctx)),
+			reflect: (conversationId, transcript) => this.reflect(conversationId, transcript),
+			usageTokens: async (handle) => this.goalTokens(await this.open(), handle.id),
+			recover: () => this.recoverSession(),
+			scheduleAlarm: () => this.scheduleNextAlarm(),
+			waitUntil: (promise) => {
+				this.ctx.waitUntil(promise);
+			},
+		};
 	}
 
 	/** 会话当前模型（未设置时用默认）。 */
@@ -1600,14 +1621,15 @@ export class SpikeAgent extends DurableObject {
 			const now = Date.now();
 			const automations = this.automationService();
 			const due = automations.due(now);
+			const chat = this.chatService();
 			for (const job of due) {
 				try {
 					// 会话正忙时跳过这一轮，避免并发 submit 破坏会话状态（v0.17.1）
-					if (this.activeChats.has(job.session_id || "1")) {
+					if (chat.hasActive(job.session_id || "1")) {
 						automations.defer(job.id, now);
 						continue;
 					}
-					await this.chat(job.prompt, job.session_id || undefined);
+					await chat.chat({ message: job.prompt, sessionId: job.session_id || undefined });
 				} catch (err) {
 					console.warn(`automation ${job.id} failed`, String(err).slice(0, 200));
 					await this.recoverSession();
@@ -1618,19 +1640,16 @@ export class SpikeAgent extends DurableObject {
 
 			// 目标自动续转（v0.31.0）：到点的目标推进一轮
 			for (const sessionId of automations.dueGoals(now)) {
-				if (this.activeChats.has(sessionId)) {
+				if (chat.hasActive(sessionId)) {
 					automations.deferGoal(sessionId, now);
 					continue;
 				}
 				try {
-					this.activeChats.add(sessionId);
-					await this.goalTick(sessionId);
+					await chat.goalTick(sessionId);
 				} catch (err) {
 					console.warn(`goal ${sessionId} tick failed`, String(err).slice(0, 200));
 					await this.recoverSession();
 					automations.deferGoal(sessionId, now);
-				} finally {
-					this.activeChats.delete(sessionId);
 				}
 			}
 		} catch (err) {
@@ -1685,29 +1704,6 @@ export class SpikeAgent extends DurableObject {
 		out +=
 			"\n用户说「分享 / 发我个链接 / 转给同事 / 生成公开链接」时，直接调用 share_file（工作台文件）或 share_conversation（当前对话），并把返回的完整 URL 原样写进回复；不要回答「做不到」，也不要让用户去别处配置。";
 		return out;
-	}
-
-	/**
-	 * 生成中插话（v0.34.0）：把消息以 steer 方式提交，模型在当前这轮的下一个边界
-	 * （通常是下一次工具调用之后）就会看到；会话空闲时等同普通发送。
-	 */
-	async interject(message: string, sessionId?: string): Promise<{ ok: true; id: string }> {
-		const text = message.trim();
-		if (!text) throw new Error("插话内容不能为空");
-		const harness = await this.open();
-		const conversation = await this.conversationFor(harness, sessionId);
-		const submission = await (conversation as unknown as {
-			submit(draft: unknown, c: unknown): Promise<{ id: unknown }>;
-		}).submit({ type: "input", content: userContent(text, undefined), whenBusy: "steer" }, ctx);
-		return { ok: true, id: String(submission.id) };
-	}
-
-	/** 真正中止服务端生成（v0.19.0）：撤回排队输入并等待会话空闲。 */
-	async abort(sessionId?: string): Promise<{ ok: true }> {
-		const harness = await this.open();
-		const conversation = await this.conversationFor(harness, sessionId);
-		await conversation.abort(ctx);
-		return { ok: true };
 	}
 
 	/** 全量备份：记忆、文件、定时任务、MCP 配置、会话元数据（不含对话正文，正文走 /api/export）。 */
@@ -2006,31 +2002,9 @@ export class SpikeAgent extends DurableObject {
 		}
 	}
 
-	/** 达到阈值才跑 reflect：默认每 6 个新条目一次，避免每轮都花 token。 */
-	private async maybeReflect(root: { id: unknown; entries(q: object, limit: number, cursor: undefined, context: unknown): Promise<unknown> }, uptoId: number): Promise<number> {
-		try {
-			const convId = String(root.id);
-			const state = sqlFacade!.exec("SELECT last_entry_id FROM reflect_state WHERE conversation_id = ?", convId).toArray() as { last_entry_id: number }[];
-			const since = state[0]?.last_entry_id ?? 0;
-			if (uptoId - since < 6) return 0;
-			const page = (await root.entries({ order: "descending" }, 40, undefined, ctx)) as { items: readonly Record<string, unknown>[] };
-			const lines: string[] = [];
-			for (const e of [...page.items].reverse()) {
-				const kind = String(e.kind ?? "");
-				const text = JSON.stringify(e.model ?? e.data ?? "").slice(0, 800);
-				if (kind === "pi.user") lines.push(`用户：${text}`);
-				else if (kind === "pi.assistant") lines.push(`助手：${text}`);
-			}
-			const saved = await this.reflect(convId, lines.join("\n"));
-			sqlFacade!.exec(
-				"INSERT INTO reflect_state (conversation_id, last_entry_id, updated_at) VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET last_entry_id = excluded.last_entry_id, updated_at = excluded.updated_at",
-				convId, uptoId, new Date().toISOString(),
-			);
-			return saved;
-		} catch (err) {
-			console.warn("maybeReflect skipped", err);
-			return 0;
-		}
+	/** 达到阈值才跑 reflect（NERE-33：节流与 transcripts 在 chat-service）。 */
+	private async maybeReflect(root: ChatHandle, uptoId: number): Promise<number> {
+		return this.chatService().maybeReflect(root, uptoId);
 	}
 
 	/** 估算当前上下文占用（v0.42.0）：最近一次模型用量 + 之后新增内容的字符估算。 */
@@ -2093,261 +2067,6 @@ export class SpikeAgent extends DurableObject {
 		}
 	}
 
-	/**
-	 * 同步目标进度（每轮结束后调用）：把会话累计 token 折算成目标消耗，累加轮次，
-	 * 到预算/轮次上限就自动收尾（exhausted）。
-	 */
-	private async syncGoalProgress(
-		harness: Awaited<ReturnType<typeof this.open>>,
-		conversationId: unknown,
-		sessionId: string,
-		incrementTurn: boolean,
-	): Promise<GoalRow | null> {
-		const row = readGoalRow(sessionId);
-		if (!row) return null;
-		const total = await this.goalTokens(harness, conversationId);
-		// baseline = -1 表示目标由模型在对话中途建立：第一次同步以当前累计值为起点，不计之前的花费。
-		const baseline = row.baseline_tokens < 0 ? total : row.baseline_tokens;
-		const used = total > 0 ? Math.max(0, total - baseline) : row.tokens_used;
-		const turns = row.turns + (incrementTurn ? 1 : 0);
-		if (row.status !== "active") {
-			// 已经结束的目标只补记本轮消耗，不再改变状态
-			writeGoal(sessionId, { baseline_tokens: baseline, tokens_used: used, turns });
-			return { ...row, baseline_tokens: baseline, tokens_used: used, turns };
-		}
-		let status: GoalStatus = "active";
-		if (used >= row.token_budget || turns >= row.max_turns) status = "exhausted";
-		const nextRunAt = status === "active" ? row.next_run_at : 0;
-		writeGoal(sessionId, { baseline_tokens: baseline, tokens_used: used, turns, status, next_run_at: nextRunAt });
-		return { ...row, baseline_tokens: baseline, tokens_used: used, turns, status, next_run_at: nextRunAt };
-	}
-
-	/** alarm 用：为目标推进一轮（跨请求续转）。 */
-	private async goalTick(sessionId: string): Promise<void> {
-		const row = readGoalRow(sessionId);
-		if (!row || row.status !== "active") return;
-		// 用户还没回答问题：暂停续转（v0.37.0）
-		if (readPendingQuestion(sessionId)) {
-			writeGoal(sessionId, { next_run_at: 0 });
-			return;
-		}
-		writeGoal(sessionId, { next_run_at: 0 });
-		const harness = await this.open();
-		const conversation = await this.conversationFor(harness, sessionId);
-		await this.chat(goalContinuePrompt(row), sessionId);
-		const updated = await this.syncGoalProgress(harness, conversation.id, sessionId, true);
-		if (updated?.status === "active") {
-			writeGoal(sessionId, { next_run_at: Date.now() + 15_000 });
-		}
-	}
-
-	/** 流式聊天：SSE 推送 text delta / 工具开始结束 / 最终 done。 */
-	async chatStream(message: string, sessionId?: string, images?: string[]): Promise<Response> {
-		const key = sessionId || "1";
-		this.activeChats.add(key);
-		try {
-			return await this.runChatStream(message, sessionId, images);
-		} catch (err) {
-			if (/SessionFailed|storage error/i.test(String(err))) await this.recoverSession();
-			throw err;
-		} finally {
-			this.activeChats.delete(key);
-		}
-	}
-
-	private async runChatStream(message: string, sessionId?: string, images?: string[]): Promise<Response> {
-		const harness = await this.open();
-		const root = await this.conversationFor(harness, sessionId);
-		const inv = this.skillInvocation(message);
-		const effectiveMessage = inv ? inv.rest || `请按技能「${inv.name}」执行。` : message;
-		const turn = await this.buildInstructions(inv, sessionId, effectiveMessage);
-		await root.configure(
-			{
-				model: { provider: this.providerId(), modelId: this.modelFor(sessionId) },
-				thinkingLevel: thinkingLevel(getSetting),
-				extensions: this.agentExtensions() as never,
-				instructions: turn.instructions,
-			},
-			ctx,
-		);
-		const before = await root.entries({}, 1, undefined, ctx);
-		const beforeId = (before.items[0] as unknown as { id?: number } | undefined)?.id ?? 0;
-
-		const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-		const writer = writable.getWriter();
-		const encoder = new TextEncoder();
-		let closed = false;
-		const send = async (event: string, data: unknown) => {
-			if (closed) return;
-			try {
-				await writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-			} catch {
-				closed = true;
-			}
-		};
-
-		const pump = (async () => {
-			const stream = await watchEvents(harness, root.id, ctx);
-			stream.start(async (events) => {
-				for (const e of events) {
-					if (e.type === "message_update") {
-						for (const change of e.changes) {
-							// 思考过程（v0.22.0）：模型开 reasoning 时逐字推送
-							if (change.type === "thinking_delta" && change.delta) await send("thinking", { delta: change.delta });
-							else if (change.type === "thinking_start") await send("thinking_start", {});
-							else if (change.type === "text_delta" && change.delta) await send("text", { delta: change.delta });
-						}
-					} else if (e.type === "compaction_start") {
-						await send("compaction", { status: "start" });
-					} else if (e.type === "compaction_end") {
-						await send("compaction", { status: "end" });
-					} else if (e.type === "tool_execution_start") {
-						const call = e as unknown as { toolName?: string; toolCallId?: string; parentToolCallId?: string; args?: unknown };
-						await send("tool_start", {
-							name: call.toolName ?? "tool",
-							id: call.toolCallId,
-							parentId: call.parentToolCallId,
-							args: call.args,
-						});
-					} else if (e.type === "tool_execution_end") {
-						const call = e as unknown as {
-							toolName?: string;
-							toolCallId?: string;
-							parentToolCallId?: string;
-							entry?: { model?: readonly { content?: unknown; details?: unknown }[] };
-							result?: { details?: unknown };
-						};
-						const message = call.entry?.model?.[0];
-						let summary: string | undefined;
-						if (message && Array.isArray(message.content)) {
-							summary = message.content
-								.filter((b): b is { type: string; text?: string } => Boolean(b) && typeof b === "object" && b.type === "text")
-								.map((b) => b.text ?? "")
-								.join("")
-								.trim() || undefined;
-						}
-						await send("tool_end", {
-							name: call.toolName ?? "tool",
-							id: call.toolCallId,
-							parentId: call.parentToolCallId,
-							summary,
-							details: call.result?.details ?? message?.details,
-						});
-					}
-				}
-			});
-			try {
-				const sid = String(root.id);
-				let answer = "";
-				let prompt = message;
-				let promptImages: string[] | undefined = images;
-				let round = 0;
-				// 目标模式（v0.31.0）：一轮结束且目标仍在进行时自动续转，最多 3 轮/请求，其余交给 alarm。
-				for (;;) {
-					const submission = await root.submit({ type: "input", content: userContent(prompt, promptImages) as never }, ctx);
-					const settled = await submission.wait(ctx);
-					if (settled.status !== "done" || settled.type !== "input") {
-						await send("error", { message: `运行未完成：${JSON.stringify(settled).slice(0, 200)}` });
-						break;
-					}
-					const entry = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), ctx);
-					// 目标续转不重算 instructions：本轮注入的检索块对同一请求里的每一轮都生效，
-					// 所以每条续转 assistant entry 都记同一份 kbRefs（语义是「这一轮上下文里有哪些资料」）。
-					if (entry) this.sessionService().saveEntryKbRefs(sid, Number(entry.id), turn.kbRefs);
-					const c = entry?.model?.[0]?.content;
-					answer =
-						typeof c === "string"
-							? c
-							: Array.isArray(c)
-								? c.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).join("")
-								: "";
-					round++;
-					const goal = readGoalRow(sid);
-					if (!goal) break;
-					const updated = await this.syncGoalProgress(harness, root.id, sid, true);
-					if (!updated) break;
-					if (updated.status !== "active") {
-						await send("goal", { goal: goalInfo(updated), finished: true });
-						break;
-					}
-					// 有待回答的问题：暂停自动续转，等用户答完再说（v0.37.0）
-					const pendingQuestion = readPendingQuestion(sid);
-					if (pendingQuestion) {
-						writeGoal(sid, { next_run_at: 0 });
-						await send("goal", { goal: goalInfo(updated), paused: true, questionId: pendingQuestion.id });
-						break;
-					}
-					if (round >= GOAL_ROUNDS_PER_REQUEST) {
-						writeGoal(sid, { next_run_at: Date.now() + 15_000 });
-						await this.scheduleNextAlarm();
-						await send("goal", { goal: goalInfo(readGoalRow(sid)), scheduled: true });
-						break;
-					}
-					await send("goal", { goal: goalInfo(updated), continuing: true, round });
-					prompt = goalContinuePrompt(updated);
-					promptImages = undefined;
-				}
-				const page2 = await root.entries({}, 60, undefined, ctx);
-				const lastId = Number((page2.items[0] as unknown as { id?: number } | undefined)?.id ?? 0);
-				const tools: { name: string; summary: string }[] = [];
-				for (const e of page2.items as unknown as Record<string, unknown>[]) {
-					if ((e as { kind?: unknown }).kind !== "pi.tool-result") continue;
-					if (Number((e as { id?: unknown }).id ?? 0) <= beforeId) continue;
-					const model = (e as { model?: { toolName?: string; content?: { type: string; text?: string }[] }[] }).model;
-					const first = model?.[0];
-					const text = (first?.content ?? []).map((b) => b.text ?? "").join("");
-					if (first) tools.push({ name: first.toolName ?? "tool", summary: text.slice(0, 80) });
-				}
-				// 标题/时间维护
-				try {
-					const id = String(root.id);
-					const now = new Date().toISOString();
-					const meta = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", id).toArray() as { title: string }[];
-					const title = meta[0]?.title;
-					if (!title || title === "新会话" || /^会话 \d+$/.test(title)) {
-						sqlFacade!.exec(
-							"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at",
-							id, effectiveMessage.slice(0, 24), now, now,
-						);
-					} else {
-						sqlFacade!.exec("UPDATE sessions_meta SET updated_at = ? WHERE id = ?", now, id);
-					}
-				} catch (err) {
-					console.warn("session meta update failed", err);
-				}
-				// kbRefs 与 entry 同一份：命中才带字段，未命中保持旧事件形状（NERE-40/41）。
-				await send("done", { answer, tools, ...(turn.kbRefs.length ? { kbRefs: turn.kbRefs } : {}) });
-				this.ctx.waitUntil(this.maybeReflect(root as never, lastId));
-			} catch (err) {
-				await send("error", { message: String(err).slice(0, 300) });
-			} finally {
-				await stream.stop().catch(() => {});
-				closed = true;
-				await writer.close().catch(() => {});
-			}
-		})();
-		this.ctx.waitUntil(pump);
-
-		return new Response(readable, {
-			headers: {
-				"content-type": "text/event-stream; charset=utf-8",
-				"cache-control": "no-cache, no-transform",
-				connection: "keep-alive",
-				"x-accel-buffering": "no",
-			},
-		});
-	}
-
-	async reset(sessionId?: string): Promise<{ ok: true }> {
-		const harness = await this.open();
-		const conversation = await this.conversationFor(harness, sessionId);
-		await conversation.reset(undefined, ctx);
-		if (sessionId) {
-			sqlFacade!.exec("UPDATE sessions_meta SET title = ?, updated_at = ? WHERE id = ?", "新会话", new Date().toISOString(), sessionId);
-		}
-		return { ok: true };
-	}
-
 	override async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 		const env = this.env as unknown as AppEnv;
@@ -2389,6 +2108,7 @@ export class SpikeAgent extends DurableObject {
 					goalRuntime: this.goalRuntime(),
 					toolRuntime: this.toolRuntime(),
 					mcpRuntime: this.mcpRuntime(),
+					chatRuntime: this.chatRuntime(),
 					webFetch: (target) => webFetchPageContent(target, env.DEEPSEEK_API_KEY ?? null),
 				});
 				return dispatch(context);
@@ -2401,22 +2121,6 @@ export class SpikeAgent extends DurableObject {
 		try {
 			// 所有路由都先确保 DO 初始化（sqlFacade/表/Harness 就绪），幂等。
 			if (url.pathname !== "/") await this.open();
-			if (request.method === "POST" && url.pathname === "/chat/stream") {
-				const { message, sessionId, images } = (await request.json()) as {
-					message: string;
-					sessionId?: string;
-					images?: string[];
-				};
-				return await this.chatStream(message, sessionId, images);
-			}
-			if (request.method === "POST" && url.pathname === "/chat") {
-				const { message, sessionId, images } = (await request.json()) as {
-					message: string;
-					sessionId?: string;
-					images?: string[];
-				};
-				return Response.json(await this.chat(message, sessionId, images));
-			}
 			if (request.method === "GET" && url.pathname === "/debug/agent") {
 				const harness = await this.open();
 				const root = await this.retryOnSessionError(harness, (h) => h.root(ctx));
@@ -2457,10 +2161,6 @@ export class SpikeAgent extends DurableObject {
 					return Response.json({ error: "sessionId 必须是正整数" }, { status: 400 });
 				}
 				return Response.json(await this.readBootstrap(sessionId));
-			}
-			if (url.pathname === "/abort" && request.method === "POST") {
-				const body = (await request.json().catch(() => ({}))) as { sessionId?: string };
-				return Response.json(await this.abort(body.sessionId));
 			}
 			if (url.pathname === "/backup" && request.method === "GET") {
 				return Response.json(await this.backup());
@@ -2601,26 +2301,6 @@ export class SpikeAgent extends DurableObject {
 					},
 				});
 			}
-			/* ---- 生成中插话（v0.34.0） ---- */
-			if (url.pathname === "/interject" && request.method === "POST") {
-				const body = (await request.json().catch(() => ({}))) as { sessionId?: string; message?: string };
-				const message = String(body.message ?? "").trim();
-				if (!message) return Response.json({ ok: false, error: "插话内容不能为空" }, { status: 400 });
-				try {
-					return Response.json(await this.interject(message, body.sessionId));
-				} catch (err) {
-					return Response.json({ ok: false, error: String(err).slice(0, 200) }, { status: 500 });
-				}
-			}
-			if (url.pathname === "/compact" && request.method === "POST") {
-				const body = (await request.json().catch(() => ({}))) as { sessionId?: string; instructions?: string };
-				const harness = await this.open();
-				const conversation = await this.conversationFor(harness, body.sessionId);
-				const taskId = await (conversation as unknown as {
-					compact(instructions: string | undefined, c: unknown): Promise<unknown>;
-				}).compact(typeof body.instructions === "string" ? body.instructions : undefined, ctx);
-				return Response.json({ ok: true, taskId: String(taskId) });
-			}
 			if (url.pathname === "/reflect" && request.method === "POST") {
 				const body = (await request.json().catch(() => ({}))) as { sessionId?: string };
 				const harness = await this.open();
@@ -2644,10 +2324,6 @@ export class SpikeAgent extends DurableObject {
 			}
 			if (request.method === "GET" && url.pathname === "/version") {
 				return Response.json({ build: (this.env as { BUILD?: string }).BUILD ?? "dev", images: true, search: true });
-			}
-			if (request.method === "POST" && url.pathname === "/reset") {
-				const body = (await request.json().catch(() => ({}))) as { sessionId?: string };
-				return Response.json(await this.reset(body.sessionId));
 			}
 			return Response.json({ error: "not found" }, { status: 404 });
 		} catch (e) {

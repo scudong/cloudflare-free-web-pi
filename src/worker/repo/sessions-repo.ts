@@ -96,3 +96,19 @@ export function isHidden(sql: SqlHandle, id: string): boolean {
 		return false;
 	}
 }
+
+/** 首轮对话写入标题（行不存在时补建）：标题策略在 chat-service，仓储只做 SQL。 */
+export function upsertTitle(sql: SqlHandle, id: string, title: string, now: string): void {
+	sql.exec(
+		"INSERT INTO sessions_meta (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at",
+		id,
+		title,
+		now,
+		now,
+	);
+}
+
+/** 已命名会话只刷新 updated_at。 */
+export function touchUpdatedAt(sql: SqlHandle, id: string, now: string): void {
+	sql.exec("UPDATE sessions_meta SET updated_at = ? WHERE id = ?", now, id);
+}

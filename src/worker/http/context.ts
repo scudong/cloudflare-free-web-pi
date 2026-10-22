@@ -4,6 +4,7 @@ import type { KbSettings, WebFetchResult } from "../services/kb-service";
 import type { SessionRuntime } from "../services/session-service";
 import type {
 	AlarmRuntime,
+	ChatRuntime,
 	ContextRuntime,
 	GoalRuntime,
 	McpRuntime,
@@ -63,6 +64,8 @@ export type RequestContext = {
 	readonly toolRuntime: ToolRuntime;
 	/** MCP 域：配置变更后重建扩展。 */
 	readonly mcpRuntime: McpRuntime;
+	/** 对话域（阶段 5）：prepare/submit 的 Harness 端口 + 并发闸门。 */
+	readonly chatRuntime: ChatRuntime;
 	/** DeepSeek 网页抓取端口（web_fetch_page 与链接 ingest 共用适配器）。 */
 	webFetch(url: string): Promise<WebFetchResult>;
 };
@@ -86,6 +89,7 @@ export type BuildContextInput = {
 	goalRuntime: GoalRuntime;
 	toolRuntime: ToolRuntime;
 	mcpRuntime: McpRuntime;
+	chatRuntime: ChatRuntime;
 	webFetch(url: string): Promise<WebFetchResult>;
 };
 
@@ -110,6 +114,7 @@ export function buildContext(input: BuildContextInput): RequestContext {
 		goalRuntime: input.goalRuntime,
 		toolRuntime: input.toolRuntime,
 		mcpRuntime: input.mcpRuntime,
+		chatRuntime: input.chatRuntime,
 		webFetch: (url: string) => input.webFetch(url),
 	};
 }

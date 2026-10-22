@@ -4,6 +4,13 @@
 
 ## 2026-10-22
 
+### 对话提交路径合并（NERE-33，阶段 5）
+- 新增 `services/chat-service.ts`：`prepare`（技能解析 → instructions → configure → beforeId）→ `submit`（submit → wait → commit → kbRefs）→ `finish`（标题 → 工具摘要）成为 `/chat` 与 `/chat/stream` 的唯一提交路径；流式只额外负责 `watchEvents` 泵
+- 新增 `routes/chat.ts`：`POST /chat`、`/chat/stream`、`/interject`、`/abort`、`/reset`、`/compact`；路由层零 SQL，SSE 事件名与顺序不变（`thinking_start` / `thinking` / `text` / `tool_start` / `tool_end` / `compaction` / `goal` / `done`）
+- 目标续转、`activeChats` 并发闸门（现为 `ChatGate`）、反射节流与标题策略搬入 Service：`goalTick`/`syncGoalProgress`/`maybeReflect` 不再在 DO 重复实现；标题读写走 `repo/sessions-repo.ts`，反射进度走新增 `repo/reflect-repo.ts`
+- Harness 的 open/重试、conversation、扩展装配、`configure`、`watchEvents`、`reflect` 留在 DO 组合根，经 `ChatRuntime` 端口注入（`http/ports.ts`）
+- 新增金标：同一输入下流式与非流式返回相同 answer 且写入相同的 `sessions_meta.title`（`tests/api/share-tools.test.ts`）
+
 ### 设置/供应商/MCP/自动化/审批/问答分层收口 + R5 全局状态（NERE-32）
 - 后端五个域按 ADR-0001 拆分：路由 `routes/settings|automations|approvals|capabilities.ts` → 用例 `services/settings|automation|goal|plan|approval|question|mcp|custom-tool|capability-service.ts` → 仓储 `repo/settings|providers|mcp|automations|goals|plans|approvals|questions|custom-tools|panels-repo.ts`
 - `alarm()` 仍是 DO 入口并包 `agentScope.run`；到点筛选、下一次执行时间、忙时顺延、目标续转与 `nextAlarmAt` 判断搬入 `automation-service`，Service 不依赖 DO 全局

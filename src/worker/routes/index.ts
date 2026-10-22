@@ -4,6 +4,7 @@ import { matchRoute, type Route } from "../http/router";
 import { approvalRoutes } from "./approvals";
 import { automationRoutes } from "./automations";
 import { capabilityRoutes } from "./capabilities";
+import { chatRoutes } from "./chat";
 import { fileRoutes } from "./files";
 import { kbRoutes } from "./kb";
 import { sessionRoutes } from "./session";
@@ -15,6 +16,7 @@ import { skillRoutes } from "./skills";
  * 路由表（ADR-0001 §9.1）：已迁移的域在这里登记，未登记的端点继续走 legacy 委托。
  * 阶段 1：会话与文件域。阶段 2：知识库域。阶段 3：分享域（/s/ 不启 Harness）。
  * 阶段 4：技能域（NERE-55，hub 需排在 `/skills` 之前）；设置/自动化/审批/能力域（NERE-32）。
+ * 阶段 5：对话域（NERE-33），`/chat` 与 `/chat/stream` 共用 chat-service。
  */
 export const ROUTES: readonly Route[] = [
 	...sessionRoutes,
@@ -27,6 +29,8 @@ export const ROUTES: readonly Route[] = [
 	...automationRoutes,
 	...approvalRoutes,
 	...capabilityRoutes,
+	// 阶段 5（NERE-33）：对话 / 插话 / 中止 / 重置 / 压缩。
+	...chatRoutes,
 ];
 
 export async function dispatch(ctx: RequestContext, routes: readonly Route[] = ROUTES): Promise<Response> {
