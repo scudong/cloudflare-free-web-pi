@@ -26,13 +26,13 @@ export const kbRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/kb",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => Response.json({ docs: service(ctx).listDocs() }),
 	},
 	{
 		method: "POST",
 		path: "/kb",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const body = (await ctx.req.json().catch(() => ({}))) as {
 				title?: string;
@@ -56,7 +56,7 @@ export const kbRoutes: readonly Route[] = [
 	{
 		method: "POST",
 		path: "/kb/ingest",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const contentType = (ctx.req.headers.get("content-type") ?? "").toLowerCase();
 			try {
@@ -82,7 +82,7 @@ export const kbRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/kb/doc",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const id = Number(ctx.url.searchParams.get("id") ?? 0);
 			const doc = service(ctx).getDoc(id);
@@ -93,7 +93,7 @@ export const kbRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/kb/search",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const q = ctx.url.searchParams.get("q") ?? "";
 			if (!q.trim()) return Response.json({ hits: [] });
@@ -104,13 +104,13 @@ export const kbRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/kb/prefetch",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => Response.json(await service(ctx).prefetchPreview(ctx.url.searchParams.get("q") ?? "")),
 	},
 	{
 		method: "DELETE",
 		path: "/kb",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const id = Number(ctx.url.searchParams.get("id") ?? 0);
 			if (!id) throw new AppError("bad_request", 400, "缺少文档 id");
@@ -120,13 +120,13 @@ export const kbRoutes: readonly Route[] = [
 	{
 		method: "GET",
 		path: "/kb/status",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => Response.json(service(ctx).status()),
 	},
 	{
 		method: "POST",
 		path: "/kb/reindex",
-		needsHarness: true,
+		needsHarness: false,
 		handle: async (ctx) => {
 			const kb = service(ctx);
 			if (!kb.vectorAvailable()) {

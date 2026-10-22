@@ -141,7 +141,7 @@ npx wrangler deploy
 |---|---|---|
 | GET | `/api/auth` | 是否需要登录 / 当前是否已登录 |
 | POST | `/api/login` | `{password}` → 下发签名 cookie |
-| GET | `/api/bootstrap?sessionId=` | 首屏聚合：一次返回 `session` / `entries` / `sessions` / `files` / `memories` / `approvals` / `settings` / `plan` / `goal` / `questions` / `prompts` / `rules` / `customTools` / `skills` / `automations` / `mcpServers` / `models`；单个面板失败时该字段为 `null` 或 `[]`，并在 `errors` 里给出原因 |
+| GET | `/api/bootstrap?sessionId=` | 首屏聚合：一次返回 `session` / `entries` / `sessions` / `files` / `memories` / `approvals` / `settings` / `plan` / `goal` / `questions` / `prompts` / `rules` / `customTools` / `skills` / `automations` / `mcpServers` / `models`；单个面板失败时该字段为 `null` 或 `[]`，`errors` 里只给稳定码 `internal_error` / `unavailable`（异常原文只进服务端日志，不回传表名或 SQL） |
 | GET | `/api/sessions` | 会话列表 |
 | POST | `/api/sessions` | 新建会话 |
 | PATCH / DELETE | `/api/sessions` | 重命名 / 删除。删除会级联清空该会话的分享、文件、计划、审批/许可、问题与 KB 命中旁路；响应 `{ok:true,deleted:{shares,files,plans,approvals,approvalGrants,questions,kbRefs}}` |
@@ -151,9 +151,10 @@ npx wrangler deploy
 | GET | `/api/files?sessionId=` | 工作台文件列表 |
 | GET | `/api/files/content?sessionId=&name=` | 文件内容 |
 | GET | `/api/files/all?q=` | 当前用户所有会话的文件（跨会话总览） |
-| GET / POST / DELETE | `/api/kb` | 用户知识库：文档列表 / 入库 / 删除 |
-| POST | `/api/kb/ingest` | 导入文件（`multipart/form-data` 的 `file`：PDF / DOCX / MD / TXT）或网页（JSON `{url}`），服务端解析后入库；同 source 同正文返回 `updated:false` 不重复入库，正文变化则原地替换并返回 `updated:true` |
+| GET / POST / DELETE | `/api/kb` | 用户知识库：文档列表 / 入库 / 删除。入库响应带 `chunks`、`vectorized`、`pending`：向量模式下本次会把该文档所有未建向量的分块分批建完；中途失败时保留已完成批次，剩余量看 `pending` |
+| POST | `/api/kb/ingest` | 导入文件（`multipart/form-data` 的 `file`：PDF / DOCX / MD / TXT）或网页（JSON `{url}`），服务端解析后入库；同 source 同正文返回 `updated:false` 不重复入库，正文变化则原地替换并返回 `updated:true`；向量进度同 `/api/kb` 的 `vectorized` / `pending` |
 | GET | `/api/kb/doc?id=` · `/api/kb/search?q=` | 知识库文档全文 / 检索片段 |
+| GET | `/api/kb/status` · `POST /api/kb/reindex?limit=` | 向量索引进度（`total` / `indexed` / `pending`）与手动补建（单次最多 500 段，剩余继续轮询） |
 | GET | `/api/kb/prefetch?q=` | 本轮会自动注入的知识库参考资料（调试 / 排查用） |
 | GET / POST / DELETE | `/api/skills` | 技能增删查（兼容旧字段；每条新增 `lastInvokedAt`）。`POST` 先审计再入库（256 KiB 上限，超限 413），落库的是真实 `auditStatus`/`auditReport`；同名覆盖后 `GET /skills` 与 `/skills/hub` 判定一致，`blocked` 不进入模型提示词索引 |
 | GET | `/api/skills/hub` | Skill Hub 市场：目录快照 + 已安装合并；`q` / `runtime` / `tag` / `audit` / `source` / `origin` / `installed` / `sort` / `limit` / `offset`；`runtime` 接受 `prompt/javascript/typescript/python/shell/binary/other`，列表零抓取 |

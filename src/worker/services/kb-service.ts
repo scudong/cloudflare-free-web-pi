@@ -16,6 +16,7 @@ import {
 	countChunks,
 	countChunksForDoc,
 	countUnvectorized,
+	countUnvectorizedForDoc,
 	countVectorized,
 	deleteChunks,
 	deleteDoc,
@@ -100,7 +101,18 @@ type KbMarkdownAi = { toMarkdown(input: { name: string; blob: Blob }): Promise<K
 export type KbAddInput = { title: string; content: string; source?: string; tags?: string };
 /** updated=false 只表示「同来源同正文已存在」，本次未写库；新建与版本替换都是 true。 */
 export type KbAddResult = { id: number; chunks: number; updated: boolean };
-export type KbIngestOk = { ok: true; docId: string; title: string; chunks: number; chars: number; updated: boolean };
+export type KbIngestOk = {
+	ok: true;
+	docId: string;
+	title: string;
+	chunks: number;
+	chars: number;
+	updated: boolean;
+	/** 本次入库后已建向量的分块数；向量未启用时为 0。 */
+	vectorized: number;
+	/** 该文档仍未建向量的分块数；可用 `/kb/status` 轮询，或 `/kb/reindex` 续建。 */
+	pending: number;
+};
 export type KbStatus = {
 	mode: KbRetrievalMode;
 	available: boolean;
@@ -108,6 +120,7 @@ export type KbStatus = {
 	model: string;
 	total: number;
 	indexed: number;
+	pending: number;
 };
 export type KbPrefetchPreview = { enabled: boolean; hits: KbHit[]; block: string };
 /** 本轮预检索结果：注入 instructions 的块 + 与之逐条对应的结构化引用（NERE-40）。 */
@@ -134,7 +147,7 @@ export interface KbService {
 	/** 纯入库 / 版本替换（恢复备份走这条，不建向量）。 */
 	add(input: KbAddInput): Promise<KbAddResult>;
 	/** 入库并按当前检索模式增量建向量。 */
-	addIndexed(input: KbAddInput): Promise<KbAddResult & { vectorized: number }>;
+	addIndexed(input: KbAddInput): Promise<KbAddResult & { vectorized: number; pending: number }>;
 	/** 删除文档、分块、FTS 行与已写入的向量；文档不存在返回 false。 */
 	remove(id: number): Promise<boolean>;
 	search(query: string, limit?: number): KbHit[];
@@ -236,32 +249,45 @@ export function createKbService(deps: KbServiceDeps): KbService {
 		return (loose.matches ?? []).filter((match) => match.metadata?.scope === scopeId);
 	}
 
-	/** 把未建向量的分块写入 Vectorize（单次最多 100 段，避免一次请求太久）。 */
-	async function indexDoc(docId: number): Promise<number> {
-		if (!bindings()) return 0;
-		const rows = listUnvectorized(sql, 100, docId);
-		if (!rows.length) return 0;
-		const vectors = await embedTexts(rows.map((row) => row.text));
-		await vectorUpsert(
-			rows.map((row, index) => ({
-				id: `${scopeId}:${row.id}`,
-				values: vectors[index]!,
-				metadata: { scope: scopeId, docId, chunkSeq: row.seq },
-			})),
-		);
-		markVectorized(sql, rows.map((row) => row.id));
-		return rows.length;
+	type KbIndexProgress = { vectorized: number; pending: number };
+
+	/** 该文档已建 / 未建向量的分块数；失败后也用它回报真实进度，而不是本次处理数。 */
+	function indexProgress(docId: number): KbIndexProgress {
+		const pending = countUnvectorizedForDoc(sql, docId);
+		return { vectorized: Math.max(0, countChunksForDoc(sql, docId) - pending), pending };
 	}
 
-	/** 当前检索模式需要向量时增量建索引；失败只记日志，不影响 FTS 入库。 */
-	async function indexIfEnabled(docId: number): Promise<number> {
-		if (retrievalMode() === "fts" || !bindings()) return 0;
+	/**
+	 * 把该文档所有未建向量的分块写入 Vectorize，按 KB_VECTOR_BATCH 循环到没有剩余。
+	 * 单篇正文上限 20 万字符（约 280 段），循环次数有界；只建前一批会让长文档尾部永远无法召回（NERE-78）。
+	 */
+	async function indexDoc(docId: number): Promise<void> {
+		if (!bindings()) return;
+		for (;;) {
+			const rows = listUnvectorized(sql, KB_VECTOR_BATCH, docId);
+			if (!rows.length) return;
+			const vectors = await embedTexts(rows.map((row) => row.text));
+			await vectorUpsert(
+				rows.map((row, index) => ({
+					id: `${scopeId}:${row.id}`,
+					values: vectors[index]!,
+					metadata: { scope: scopeId, docId, chunkSeq: row.seq },
+				})),
+			);
+			// 每批成功就落库，后续批次失败时已完成的部分仍可召回。
+			markVectorized(sql, rows.map((row) => row.id));
+		}
+	}
+
+	/** 当前检索模式需要向量时增量建索引；失败只记日志，不影响 FTS 入库，剩余量由 pending 回报。 */
+	async function indexIfEnabled(docId: number): Promise<KbIndexProgress> {
+		if (retrievalMode() === "fts" || !bindings()) return { vectorized: 0, pending: 0 };
 		try {
-			return await indexDoc(docId);
+			await indexDoc(docId);
 		} catch (err) {
 			console.warn("kb vector index failed", String(err).slice(0, 160));
-			return 0;
 		}
+		return indexProgress(docId);
 	}
 
 	function writeChunks(docId: number, title: string, source: string, tags: string, chunks: string[]): number {
@@ -412,8 +438,8 @@ export function createKbService(deps: KbServiceDeps): KbService {
 	async function ingestDoc(title: string, content: string, source: string): Promise<KbIngestOk> {
 		const stored = content.replace(/\r\n/g, "\n").trim().slice(0, KB_MAX_CONTENT);
 		const { id, chunks, updated } = await add({ title, content: stored, source: source.slice(0, 300) });
-		await indexIfEnabled(id);
-		return { ok: true as const, docId: String(id), title, chunks, chars: stored.length, updated };
+		const progress = await indexIfEnabled(id);
+		return { ok: true as const, docId: String(id), title, chunks, chars: stored.length, updated, ...progress };
 	}
 
 	/** 未知异常统一收敛为 internal_error；KbIngestError 原样上抛给 Route 映射状态码。 */
@@ -477,8 +503,8 @@ export function createKbService(deps: KbServiceDeps): KbService {
 
 		async addIndexed(input) {
 			const result = await add(input);
-			const vectorized = await indexIfEnabled(result.id);
-			return { ...result, vectorized };
+			const progress = await indexIfEnabled(result.id);
+			return { ...result, ...progress };
 		},
 
 		async remove(id) {
@@ -504,6 +530,7 @@ export function createKbService(deps: KbServiceDeps): KbService {
 				model: KB_EMBED_MODEL,
 				total: countChunks(sql),
 				indexed: countVectorized(sql),
+				pending: countUnvectorized(sql),
 			};
 		},
 
