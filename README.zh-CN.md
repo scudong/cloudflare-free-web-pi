@@ -155,9 +155,12 @@ npx wrangler deploy
 | POST | `/api/kb/ingest` | 导入文件（`multipart/form-data` 的 `file`：PDF / DOCX / MD / TXT）或网页（JSON `{url}`），服务端解析后入库；同 source 同正文返回 `updated:false` 不重复入库，正文变化则原地替换并返回 `updated:true` |
 | GET | `/api/kb/doc?id=` · `/api/kb/search?q=` | 知识库文档全文 / 检索片段 |
 | GET | `/api/kb/prefetch?q=` | 本轮会自动注入的知识库参考资料（调试 / 排查用） |
-| GET / POST / DELETE | `/api/skills` | 技能增删查 |
-| GET | `/api/skills/community` | 社区技能目录（badlogic/pi-skills） |
-| POST | `/api/skills/import` | `{url}` 从 GitHub/raw/任意 md 导入技能 |
+| GET / POST / DELETE | `/api/skills` | 技能增删查（兼容旧字段；每条新增 `lastInvokedAt`） |
+| GET | `/api/skills/hub` | Skill Hub 市场：目录快照 + 已安装合并；`q` / `runtime` / `tag` / `audit` / `source` / `origin` / `installed` / `sort` / `limit` / `offset`；`runtime` 接受 `prompt/javascript/typescript/python/shell/binary/other`，列表零抓取 |
+| GET | `/api/skills/:name/audit` | 单技能审计：已安装走本地重审计（`auditSource:"local"`），仅目录存在时返回快照（`"catalog"`），不存在 404 |
+| POST | `/api/skills/import` | `{url}` 或 `{manifest, content}`，**先审计再入库**；`blocked` → 422 `{ok:false, installed:false, code:"audit_blocked", details:{audit}}` 且不写库；同名不同哈希 409，`overwrite:true` 覆盖 |
+| GET | `/api/skills/community` | 社区技能目录（badlogic/pi-skills）：8 条固定 `audit_status:"blocked"`（需要本地运行时），不可安装 |
+| GET | `/api/metrics/skill-hub?days=7` | 技能域指标：`{hubViews, installOk, installBlocked, blockedRatio, installed, called7d}`；与分享计数完全独立 |
 | GET / POST / DELETE | `/api/mcp` | MCP 服务器配置（支持 `headers`） |
 | GET / POST / DELETE | `/api/providers` · `/api/providers/activate` | LLM 供应商（自定义 OpenAI 兼容端点） |
 | GET / POST | `/api/settings` | 全局设置（网页搜索开关 `webSearch`、思考档位 `thinkingLevel`、分享页署名 `displayName`、分享默认有效期 `shareTtlSeconds`） |

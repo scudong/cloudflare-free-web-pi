@@ -4,6 +4,15 @@
 
 ## 2026-10-22
 
+### Skill Hub 后端：目录索引 / 审计引擎 / 能力准入 / 埋点（v0.61.0，NERE-55）
+- 新增迁移 v6/v7：`skills` 增 `version/source/author/license/runtime/tags/content_hash/audit_status/audit_report/manifest/updated_at`（老库回填 `prompt` / `pass` / `local` / `0.0.0`，正文不动、升级后可调用）；建 `skill_audits` 缓存与 `skill_events` 埋点表（与分享计数无关）
+- 新增纯函数审计引擎 `lib/skill-audit.ts`：契约 §4 的 M/L/C/I/S/X 规则、去注释/字符串扫描、prompt 只扫 fence/shebang/命令行避免「Python 不受支持」误伤；契约 §8 五个样例的 `contentHash` 逐字节对齐
+- 新增 `GET /api/skills/hub`（构建期目录快照 + 已安装合并、筛选/排序/分页、零抓取、`installed` 状态）、`GET /api/skills/:name/audit`、`POST /api/skills/import`（URL 或 manifest+content，**先审计再入库**，blocked → 422 且不写库，同名冲突 409 / `overwrite`）
+- 准入：模型侧技能索引、`list_skills`、`load_skill`、显式 `/技能名` 调用只接受 `audit_status != 'blocked'`；`install_skill` 与 Hub 共用同一审计导入通道
+- 收口老入口：`GET /api/skills/community` 的 8 条固定 `blocked`（需要本地运行时，不再裸 INSERT）；`POST /api/skills/import` 的「抓下来裸 INSERT」删除
+- 埋点：`skill_hub_view / detail_view / import / blocked / install / loaded / invoked`，`GET /api/metrics/skill-hub?days=` 聚合 `hubViews / installOk / installBlocked / blockedRatio / installed / called7d`；`GET /api/skills` 每条新增 `lastInvokedAt`
+- 目录门禁：`npm run catalog:check` 校验 `skills/catalog.json`（无 blocked、sha256 与正文一致、`audit.hash == contentHash`），CI 硬门禁；`npm run catalog` 重新生成
+
 ### 分享打开计数 / 全量清单 / 撤销（v0.60.0，NERE-42）
 - `GET /s/<token>` 命中有效链接时累计 `openCount` 与 `lastOpenedAt`：同一 IP（`CF-Connecting-IP`，反代回落 `X-Forwarded-For` 首跳）1 小时内只计 1 次；IP 以 `SHA-256(token + IP)` 落库，不存原始地址；未知/过期链接不计数
 - 新增 `GET /api/shares/all?status=active|expired|all`（缺省 `active`）：返回 `token/kind/name/expiresAt/theme/createdAt/openCount/lastOpenedAt/sessionId/url`，`url` 为相对路径 `/s/<token>`

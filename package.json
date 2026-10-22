@@ -10,7 +10,9 @@
     "test:unit": "vitest run tests/unit",
     "test:api": "vitest run tests/api",
     "upgrade:pi": "node scripts/upgrade-pi.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "catalog": "SKILL_CATALOG_WRITE=1 vitest run tests/unit/skill-catalog.test.ts",
+    "catalog:check": "vitest run tests/unit/skill-catalog.test.ts"
   },
   "keywords": [],
   "author": "",

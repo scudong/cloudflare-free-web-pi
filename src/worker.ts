@@ -34,6 +34,8 @@ import { createFileService } from "./worker/services/file-service";
 import { createKbService, KB_VECTOR_DEFAULT_INDEX, type WebFetchResult } from "./worker/services/kb-service";
 import { createSessionService, type SessionRuntime } from "./worker/services/session-service";
 import { createShareService, MAX_SHARE_TTL, shareDefaultTtl } from "./worker/services/share-service";
+import { createSkillService, SkillApiError, trackSkillCall } from "./worker/services/skill-service";
+import { normalizeSkillUrl } from "./worker/lib/skill-import";
 import { dispatch } from "./worker/routes";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -819,7 +821,9 @@ const baseSpikeExtension = defineExtension({
 			description: "列出已安装的技能（名称与用途）",
 			parameters: Type.Object({}),
 			execute: async () => {
-				const rows = sqlFacade!.exec("SELECT name, description FROM skills ORDER BY name").toArray() as {
+				const rows = sqlFacade!
+					.exec("SELECT name, description FROM skills WHERE audit_status != 'blocked' ORDER BY name")
+					.toArray() as {
 					name: string;
 					description: string;
 				}[];
@@ -833,8 +837,23 @@ const baseSpikeExtension = defineExtension({
 			parameters: Type.Object({ name: Type.String({ description: "技能名称" }) }),
 			execute: async (args) => {
 				const name = String((args as { name?: unknown }).name ?? "").trim();
-				const rows = sqlFacade!.exec("SELECT content FROM skills WHERE name = ?", name).toArray() as { content: string }[];
-				return { output: [{ type: "text", text: rows[0]?.content ?? `技能「${name}」不存在，可用 list_skills 查看。` }] };
+				const rows = sqlFacade!
+					.exec("SELECT content, audit_status, audit_report FROM skills WHERE name = ?", name)
+					.toArray() as { content: string; audit_status: string; audit_report: string }[];
+				if (!rows[0]) return { output: [{ type: "text", text: `技能「${name}」不存在，可用 list_skills 查看。` }] };
+				if (rows[0].audit_status === "blocked") {
+					// 准入：blocked 行即使因历史原因存在也不可加载（契约 §5.5）
+					let reason = "";
+					try {
+						const report = JSON.parse(rows[0].audit_report || "{}") as { reasons?: { message?: string }[] };
+						reason = report.reasons?.[0]?.message ?? "";
+					} catch {
+						// 报告损坏时只给通用原因
+					}
+					return { output: [{ type: "text", text: `技能「${name}」未通过安全审计，不能加载。${reason}` }] };
+				}
+				trackSkillCall(sqlFacade!, name, "loaded");
+				return { output: [{ type: "text", text: rows[0].content }] };
 			},
 		}),
 		defineTool({
@@ -845,41 +864,29 @@ const baseSpikeExtension = defineExtension({
 				name: Type.Optional(Type.String({ description: "覆盖技能名（默认取 frontmatter 的 name）" })),
 			}),
 			execute: async (args) => {
-				const url = normalizeSkillUrl(String((args as { url?: unknown }).url ?? ""));
+				const raw = String((args as { url?: unknown }).url ?? "");
+				const url = normalizeSkillUrl(raw);
 				if (!url) return { output: [{ type: "text", text: "需要一个 http(s) 的 SKILL.md 链接。" }] };
-				let text = "";
+				const name = String((args as { name?: unknown }).name ?? "").trim();
 				try {
-					const resp = await fetch(url, { headers: { "user-agent": "pi-harness-skill-install" } });
-					if (!resp.ok) return { output: [{ type: "text", text: `抓取失败：HTTP ${resp.status}` }] };
-					text = await resp.text();
+					// 与 Hub/API 同一导入通道：先审计再入库，blocked 不写库（NERE-55）。
+					const result = await createSkillService({ sql: sqlFacade!, settings: { get: getSetting } }).importSkill({
+						url,
+						...(name ? { name } : {}),
+					});
+					const warn = result.audit.status === "warn" ? `（审计告警：${result.audit.reasons.map((r) => r.message).join("；")}）` : "";
+					return {
+						output: [
+							{
+								type: "text",
+								text: `技能已安装：${result.name}${warn}。现在可以调用 load_skill("${result.name}") 读取；下一轮起会出现在技能索引里。`,
+							},
+						],
+					};
 				} catch (err) {
-					return { output: [{ type: "text", text: `抓取失败：${String(err).slice(0, 120)}` }] };
+					const message = err instanceof SkillApiError ? err.message : `抓取失败：${String(err).slice(0, 120)}`;
+					return { output: [{ type: "text", text: `安装失败：${message}` }] };
 				}
-				if (!text.trim()) return { output: [{ type: "text", text: "抓取到的内容为空。" }] };
-				const parsed = parseFrontmatter(text);
-				const fallback = (url.split("/").slice(-2, -1)[0] ?? "imported-skill").toLowerCase();
-				const override = String((args as { name?: unknown }).name ?? "").trim();
-				const name = (override || parsed.name || fallback).trim().slice(0, 40);
-				if (!name) return { output: [{ type: "text", text: "技能名为空。" }] };
-				let content = (parsed.body || text).slice(0, 200_000);
-				// 兼容「入口 stub」：本 harness 没有 Skill 工具，改写成 load_skill
-				content = content.replace(
-					/Call the Skill tool with\s+["'“]([^"'”]+)["'”][.。]?/gi,
-					'调用 load_skill("$1") 读取完整流程后再继续。',
-				);
-				const description = (parsed.description || "（未提供描述）").slice(0, 200);
-				sqlFacade!.exec(
-					"INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
-					name, description, content, new Date().toISOString(),
-				);
-				return {
-					output: [
-						{
-							type: "text",
-							text: `技能已安装：${name}。现在可以调用 load_skill("${name}") 读取；下一轮起会出现在技能索引里。`,
-						},
-					],
-				};
 			},
 		}),
 		defineTool({
@@ -1488,51 +1495,6 @@ function userContent(message: string, images: string[] | undefined): string | { 
 	return [{ type: "text", text: message || "（图片）" }, ...blocks];
 }
 
-/** 社区技能目录（badlogic/pi-skills）与从 URL 导入的解析逻辑。 */
-const COMMUNITY_SKILLS = [
-	{ name: "brave-search", description: "通过 Brave Search API 搜索网页与提取正文", needsLocal: false },
-	{ name: "youtube-transcript", description: "抓取 YouTube 视频字幕用于总结分析", needsLocal: false },
-	{ name: "browser-tools", description: "通过 Chrome DevTools 协议做浏览器自动化", needsLocal: true },
-	{ name: "transcribe", description: "本地语音转写（Apple Silicon / ffmpeg）", needsLocal: true },
-	{ name: "gdcli", description: "Google Drive 命令行（列目录/上传/下载/分享）", needsLocal: true },
-	{ name: "gccli", description: "Google Calendar 命令行（查看/创建事件）", needsLocal: true },
-	{ name: "gmcli", description: "Gmail 命令行（搜索/读信/发信）", needsLocal: true },
-	{ name: "vscode", description: "VS Code 集成（查看 diff / 比较文件）", needsLocal: true },
-];
-const COMMUNITY_RAW_BASE = "https://raw.githubusercontent.com/badlogic/pi-skills/main";
-
-/** 把 GitHub 页面链接/目录链接统一成 SKILL.md 的 raw 地址。 */
-function normalizeSkillUrl(input: string): string | null {
-	const url = input.trim();
-	if (!/^https?:\/\//.test(url)) return null;
-	let m = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:blob|tree)\/([^/]+)\/(.+)$/.exec(url);
-	if (m) {
-		const [, owner, repo, branch, path] = m;
-		const clean = path!.replace(/\/+$/, "");
-		const file = /\.md$/i.test(clean) ? clean : `${clean}/SKILL.md`;
-		return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${file}`;
-	}
-	m = /^https?:\/\/raw\.githubusercontent\.com\/.+$/.exec(url);
-	if (m) return /\.[a-z]+$/i.test(url) ? url : `${url.replace(/\/+$/, "")}/SKILL.md`;
-	if (/\.md$/i.test(url)) return url;
-	return `${url.replace(/\/+$/, "")}/SKILL.md`;
-}
-
-/** 解析 SKILL.md 的 YAML frontmatter（只取 name / description）。 */
-function parseFrontmatter(text: string): { name: string; description: string; body: string } {
-	const match = /^﻿?---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
-	if (!match) return { name: "", description: "", body: text.trim() };
-	const header = match[1] ?? "";
-	const body = text.slice(match[0].length).trim();
-	const read = (key: string) => {
-		const re = new RegExp(`^${key}:\\s*(.+)$`, "m");
-		const hit = re.exec(header);
-		if (!hit) return "";
-		return (hit[1] ?? "").trim().replace(/^["']|["']$/g, "");
-	};
-	return { name: read("name"), description: read("description"), body };
-}
-
 /** 工具搜索扩展：模型先搜再加载被延迟的工具（v0.13.0）。 */
 const baseToolSearchExtension = createToolSearchExtension();
 const toolSearchExtension = {
@@ -1951,11 +1913,14 @@ export class SpikeAgent extends DurableObject {
 		const match = /^\/(\S{1,60})(?:\s+([\s\S]*))?$/.exec(trimmed);
 		if (!match) return null;
 		try {
-			const rows = sqlFacade!.exec("SELECT name, content FROM skills WHERE name = ?", match[1]!).toArray() as {
+			const rows = sqlFacade!
+				.exec("SELECT name, content FROM skills WHERE name = ? AND audit_status != 'blocked'", match[1]!)
+				.toArray() as {
 				name: string;
 				content: string;
 			}[];
 			if (!rows[0]) return null;
+			trackSkillCall(sqlFacade!, rows[0].name, "invoked");
 			return { name: rows[0].name, content: rows[0].content, rest: (match[2] ?? "").trim() };
 		} catch {
 			return null;
@@ -2113,10 +2078,10 @@ export class SpikeAgent extends DurableObject {
 		await this.scheduleNextAlarm();
 	}
 
-	/** 已安装技能清单（name + description），供提示词索引与工具使用。 */
+	/** 已安装技能清单（name + description），供提示词索引与工具使用；blocked 不进入模型视野。 */
 	private skillIndex(): { name: string; description: string }[] {
 		try {
-			return sqlFacade!.exec("SELECT name, description FROM skills ORDER BY name").toArray() as {
+			return sqlFacade!.exec("SELECT name, description FROM skills WHERE audit_status != 'blocked' ORDER BY name").toArray() as {
 				name: string;
 				description: string;
 			}[];
@@ -2905,53 +2870,6 @@ export class SpikeAgent extends DurableObject {
 					return Response.json({ error: "sessionId 必须是正整数" }, { status: 400 });
 				}
 				return Response.json(await this.readBootstrap(sessionId));
-			}
-			if (url.pathname === "/skills/community" && request.method === "GET") {
-				return Response.json({
-					source: "https://github.com/badlogic/pi-skills",
-					skills: COMMUNITY_SKILLS.map((item) => ({ ...item, url: `${COMMUNITY_RAW_BASE}/${item.name}/SKILL.md` })),
-				});
-			}
-			if (url.pathname === "/skills/import" && request.method === "POST") {
-				const body = (await request.json()) as { url?: string };
-				const target = normalizeSkillUrl(body.url ?? "");
-				if (!target) return Response.json({ error: "需要 http(s) 链接" }, { status: 400 });
-				let text = "";
-				try {
-					const resp = await fetch(target, { headers: { "user-agent": "pi-harness-skill-import" } });
-					if (!resp.ok) return Response.json({ error: `抓取失败：HTTP ${resp.status}` }, { status: 400 });
-					text = await resp.text();
-				} catch (err) {
-					return Response.json({ error: `抓取失败：${String(err).slice(0, 120)}` }, { status: 400 });
-				}
-				if (!text.trim()) return Response.json({ error: "内容为空" }, { status: 400 });
-				const parsed = parseFrontmatter(text);
-				const fallbackName = (target.split("/").slice(-2, -1)[0] ?? "imported-skill").toLowerCase();
-				const name = (parsed.name || fallbackName).slice(0, 40);
-				const description = parsed.description || "（从社区导入，未提供描述）";
-				sqlFacade!.exec(
-					"INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
-					name, description.slice(0, 200), (parsed.body || text).slice(0, 200_000), new Date().toISOString(),
-				);
-				return Response.json({ ok: true, name, description, source: target });
-			}
-			if (url.pathname === "/skills" && request.method === "GET") {
-				return Response.json({ skills: listSkills() });
-			}
-			if (url.pathname === "/skills" && request.method === "POST") {
-				const body = (await request.json()) as { name?: string; description?: string; content?: string };
-				const name = (body.name ?? "").trim().slice(0, 40);
-				const content = (body.content ?? "").trim();
-				if (!name || !content) return Response.json({ error: "需要名称与内容" }, { status: 400 });
-				sqlFacade!.exec(
-					"INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
-					name, (body.description ?? "").trim().slice(0, 120), content, new Date().toISOString(),
-				);
-				return Response.json({ ok: true });
-			}
-			if (url.pathname === "/skills" && request.method === "DELETE") {
-				sqlFacade!.exec("DELETE FROM skills WHERE name = ?", url.searchParams.get("name") ?? "");
-				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/abort" && request.method === "POST") {
 				const body = (await request.json().catch(() => ({}))) as { sessionId?: string };

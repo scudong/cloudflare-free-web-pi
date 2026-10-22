@@ -41,6 +41,7 @@ Cloudflare Free Web Pi is the opposite: a workspace you deploy to your own Cloud
 - **Files with a share button — on your own domain.** The agent writes Markdown and HTML into a workbench. One click produces a public page served from your Cloudflare domain (the default `*.pages.dev` subdomain, or a custom domain you bind) with an expiry (1 hour to forever), four themes, and a table of contents.
 - **A knowledge base that answers first.** Per-user FTS5 index with Chinese bigram tokenization and bm25. The top 3 chunks are injected before every turn; the model can also call `kb_search` itself. Switch to Vectorize + bge-m3, or hybrid retrieval (RRF), in Settings.
 - **Real tools.** 24 built-in tools in the default install: web search, MCP servers, skills, prompts, rules, custom JS tools, parallel subagents, and a QuickJS codemode sandbox.
+- **A Skill Hub with an audit gate.** Browse a build-time catalog and install skills only after a deterministic audit: prompt / JavaScript / TypeScript pass; Python, shell, binaries, host APIs and undeclared network use are blocked before they reach the database. The full API is documented in the [Chinese README](README.zh-CN.md#http-api).
 - **Control and visibility.** Read/write/exec tool approvals with per-tool overrides, thinking levels, a context meter, manual compaction, step plans, and structured `ask_user` cards.
 - **Chinese-first, four themes.** The UI, prompts, and docs are written in Chinese; light, dark, sepia, and midnight themes; pages.dev proxy for access from mainland China.
 
