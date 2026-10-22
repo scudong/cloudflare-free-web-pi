@@ -1,6 +1,8 @@
 {
   "name": "pi-harness-spike",
-  "vars": { "BUILD": "dev" },
+  // 登录页「看一个真实对话」入口（NERE-13）：指向一条永久、只读的会话分享。
+  // 置空则不显示入口；改这里即可换演示内容，不需要再改前端。
+  "vars": { "BUILD": "dev", "DEMO_SHARE_URL": "/s/jrbxvkz8em3u" },
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
