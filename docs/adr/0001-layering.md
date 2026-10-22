@@ -329,6 +329,7 @@ chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./servi
 - 2026-10-22：operator 更新插入顺序：阶段 3 合并 → NERE-42 → NERE-55（wakeup condition=`NERE-42 done`，已 enabled）→ 阶段 4。NERE-40 评审打回 1 个 blocker（`entry_kb_refs` 的 IN 绑定参数超过 DO 上限 100），修复后重新评审；NERE-31 未提升。
 - 2026-10-22：operator 定稿后端队列（05:41Z）：阶段 3 → NERE-42 → NERE-55 → NERE-47 → 阶段 4 → 5 → 6。wakeup 链已核实：NERE-42←NERE-31、NERE-55←NERE-42、NERE-47←NERE-55，均 `enabled=true`、`fire_count=0`。
 - 2026-10-22：NERE-47（W4-2 KB 去重）提前完成并合入（PR #38，`4cb8363`）；队列缩短为 阶段 3 → NERE-42 → NERE-55 → 阶段 4 → 5 → 6，阶段 4 前置改为 NERE-55 合并。
+- 2026-10-22：队列推进：NERE-42（W3-3 分享清单/撤销，迁移 v5）合入（PR #45，`ecaf3e7`）；NERE-40 的 fix 合入（PR #44，`getMany` 改 `BETWEEN`，绑定参数恒 3 个，120 id 用例）。NERE-55（Skill Hub 后端）in_progress；NERE-32 的 wakeup 已挂 `NERE-55 done`，触发后仍需确认 NERE-40 fix 已在 main（已满足）。
 - 后续每个阶段完成后在本节追加一行：阶段号、PR、验收命令结果。
 
 ## 后果
