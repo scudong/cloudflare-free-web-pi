@@ -1,9 +1,12 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { migrate, type SqlHandle } from "../../src/worker/db/migrations";
+import type { RequestContext } from "../../src/worker/http/context";
 import { sha256Content, type AuditReport } from "../../src/worker/lib/skill-audit";
 import type { CatalogEntry } from "../../src/worker/lib/skill-catalog";
-import { listSkillRows } from "../../src/worker/repo/skills-repo";
+import { getSkillRow, listSkillRows } from "../../src/worker/repo/skills-repo";
+import { skillRoutes } from "../../src/worker/routes/skills";
+import { buildInstructions } from "../../src/worker/services/instructions-service";
 import { createSkillService, SkillApiError, trackSkillCall } from "../../src/worker/services/skill-service";
 
 function sqlHandle(db: DatabaseSync): SqlHandle {
@@ -344,7 +347,7 @@ describe("Skill Hub：埋点与 NERE-59 指标", () => {
 
 	it("listCompat 返回 lastInvokedAt（未调用为 null）", async () => {
 		const { sql, service } = setup();
-		service.addManual({ name: "manual", description: "手写", content: "# 正文" });
+		await service.addManual({ name: "manual", description: "手写", content: "# 正文" });
 		expect(service.listCompat().skills[0]!).toMatchObject({ name: "manual", lastInvokedAt: null });
 		trackSkillCall(sql, "manual", "invoked");
 		const invoked = service.listCompat().skills[0] as { lastInvokedAt: number | null };
@@ -358,5 +361,71 @@ describe("Skill Hub：埋点与 NERE-59 指标", () => {
 		expect(community.skills).toHaveLength(8);
 		expect(community.skills.every((skill) => skill.audit_status === "blocked")).toBe(true);
 		expect(community.skills.every((skill) => skill.audit.reasons[0]!.rule === "M3")).toBe(true);
+	});
+});
+
+describe("技能审计真相（NERE-77）", () => {
+	const instructionsSettings = { get: (key: string, fallback: string) => (key === "web_search" ? "0" : fallback) };
+	const fakeKb = { prefetch: async () => ({ block: "", refs: [] }) };
+
+	async function instructions(sql: SqlHandle): Promise<string> {
+		const result = await buildInstructions(
+			{ sql, settings: instructionsSettings, kb: fakeKb as never },
+			null,
+		);
+		return result.instructions;
+	}
+
+	it("本地重审计把 blocked 回写 skills 行，下一次提示词索引不含它", async () => {
+		const { db, sql, service } = setup();
+		// 老库行：内容实际需要宿主执行，但存量列仍是 pass、hash 为空。
+		db.prepare("INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?)").run(
+			"legacy",
+			"旧技能",
+			"```python\nprint(1)\n```",
+			"2026-10-22T00:00:00Z",
+		);
+		expect(getSkillRow(sql, "legacy")!.auditStatus).toBe("pass");
+		expect(await instructions(sql)).toContain("legacy");
+
+		const hub = await service.hub({ installed: "1" });
+		expect(hub.skills.find((skill) => skill.name === "legacy")!.audit.status).toBe("blocked");
+
+		const row = getSkillRow(sql, "legacy")!;
+		expect(row.auditStatus).toBe("blocked");
+		expect(row.contentHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+		expect(JSON.parse(row.auditReport).status).toBe("blocked");
+		expect(await instructions(sql)).not.toContain("legacy");
+	});
+
+	it("POST /skills 同名覆盖后 GET /skills 与 hub 审计状态一致", async () => {
+		const { sql, service } = setup();
+		await service.addManual({ name: "manual", description: "手写", content: "# 正文" });
+		expect((service.listCompat().skills[0] as { auditStatus: string }).auditStatus).toBe("pass");
+
+		await service.addManual({ name: "manual", description: "手写", content: "```python\nprint(1)\n```" });
+		const listStatus = (service.listCompat().skills[0] as { auditStatus: string }).auditStatus;
+		const hub = await service.hub({ installed: "1" });
+		expect(listStatus).toBe("blocked");
+		expect(hub.skills.find((skill) => skill.name === "manual")!.audit.status).toBe("blocked");
+		expect(await instructions(sql)).not.toContain("manual");
+	});
+
+	it("POST /skills 正文超过 256 KiB 返回 413，且不写库", async () => {
+		const { sql } = setup();
+		const route = skillRoutes.find((item) => item.method === "POST" && item.path === "/skills")!;
+		const request = new Request("https://example.com/api/skills", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ name: "big", content: "x".repeat(256 * 1024 + 1) }),
+		});
+		const response = await route.handle({
+			req: request,
+			url: new URL(request.url),
+			sql: () => sql,
+			settings: { get: () => "" },
+		} as unknown as RequestContext);
+		expect(response.status).toBe(413);
+		expect(listSkillRows(sql)).toHaveLength(0);
 	});
 });

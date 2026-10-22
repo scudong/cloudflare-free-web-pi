@@ -155,7 +155,7 @@ npx wrangler deploy
 | POST | `/api/kb/ingest` | 导入文件（`multipart/form-data` 的 `file`：PDF / DOCX / MD / TXT）或网页（JSON `{url}`），服务端解析后入库；同 source 同正文返回 `updated:false` 不重复入库，正文变化则原地替换并返回 `updated:true` |
 | GET | `/api/kb/doc?id=` · `/api/kb/search?q=` | 知识库文档全文 / 检索片段 |
 | GET | `/api/kb/prefetch?q=` | 本轮会自动注入的知识库参考资料（调试 / 排查用） |
-| GET / POST / DELETE | `/api/skills` | 技能增删查（兼容旧字段；每条新增 `lastInvokedAt`） |
+| GET / POST / DELETE | `/api/skills` | 技能增删查（兼容旧字段；每条新增 `lastInvokedAt`）。`POST` 先审计再入库（256 KiB 上限，超限 413），落库的是真实 `auditStatus`/`auditReport`；同名覆盖后 `GET /skills` 与 `/skills/hub` 判定一致，`blocked` 不进入模型提示词索引 |
 | GET | `/api/skills/hub` | Skill Hub 市场：目录快照 + 已安装合并；`q` / `runtime` / `tag` / `audit` / `source` / `origin` / `installed` / `sort` / `limit` / `offset`；`runtime` 接受 `prompt/javascript/typescript/python/shell/binary/other`，列表零抓取 |
 | GET | `/api/skills/:name/audit` | 单技能审计：已安装走本地重审计（`auditSource:"local"`），仅目录存在时返回快照（`"catalog"`），不存在 404 |
 | POST | `/api/skills/import` | `{url}` 或 `{manifest, content}`，**先审计再入库**；`blocked` → 422 `{ok:false, installed:false, code:"audit_blocked", details:{audit}}` 且不写库；同名不同哈希 409，`overwrite:true` 覆盖 |
@@ -174,7 +174,7 @@ npx wrangler deploy
 | GET | `/api/export?format=md` | 导出 Markdown |
 | GET / POST | `/api/backup` · `/api/restore` | 全量备份 / 合并恢复 |
 | GET | `/api/version` | 线上构建号（CI 注入 git SHA） |
-| GET / POST / DELETE | `/api/users` · `POST /api/users/reset` | 邀请用户管理（仅主人；码只返回一次）。`DELETE?id=` 吊销访问：注册表行删除、该用户全部分享立即失效，**数据默认保留**；响应 `{ok,id,deleted,shares,retained:{sessions,files,kbDocs,...}}`，重复调用幂等 |
+| GET / POST / DELETE | `/api/users` · `POST /api/users/reset` | 邀请用户管理（仅主人；码只返回一次）。`DELETE?id=` 吊销访问：**先删除该用户全部分享（`/s/*` 立即 404），再删注册表行**；任一步失败返回 502 可重试，重试期间不会留下可读的旧分享。**数据默认保留**；响应 `{ok,id,deleted,shares,retained:{sessions,files,kbDocs,...}}`，重复调用幂等 |
 | GET | `/api/users/export?id=` | 导出某用户的完整备份（仅主人；与 `/api/backup` 同形，purge 前留档用） |
 | DELETE | `/api/users/data?id=&confirm=<id>` | 显式清空某用户 DO 的全部数据（仅主人；必须已吊销且 `confirm` 等于用户 id）。不可逆；返回 `{ok,id,purged:{...}}`，重复调用为 0 |
 
