@@ -1,4 +1,17 @@
-import type { AllFileInfo, AutomationInfo, CustomToolInfo, FileInfo, KbDocInfo, KbHit, MemoryInfo, PromptInfo, RuleInfo, SessionListItem, SkillInfo } from "../types";
+import type {
+	AllFileInfo,
+	AutomationInfo,
+	CustomToolInfo,
+	FileInfo,
+	KbDocInfo,
+	KbHit,
+	MemoryInfo,
+	PromptInfo,
+	RuleInfo,
+	SessionListItem,
+	ShareRecord,
+	SkillInfo,
+} from "../types";
 
 /**
  * Tolerant parsers for panel data (sessions / files / memories).
@@ -185,4 +198,30 @@ export function parseKbHits(raw: unknown): KbHit[] {
 		chunkSeq: pickNumber(entry, ["chunkSeq", "chunk_seq", "seq"]),
 		score: pickNumber(entry, ["score"]),
 	}));
+}
+
+/**
+ * GET /api/shares/all → 分享清单（NERE-42）。
+ * 丢弃 token 缺失或 kind 不在枚举内的项；数字字段缺失按 0，name 缺失按「（未命名）」。
+ */
+export function parseShareRecords(raw: unknown): ShareRecord[] {
+	const list = arrayOf(raw, ["shares"]).filter(isObject);
+	const records: ShareRecord[] = [];
+	for (const entry of list) {
+		const token = pickString(entry, ["token"]);
+		const kind = entry.kind;
+		if (!token || (kind !== "file" && kind !== "conversation")) continue;
+		records.push({
+			token,
+			kind,
+			name: pickString(entry, ["name"]) || "（未命名）",
+			expiresAt: pickNumber(entry, ["expiresAt", "expires_at"]),
+			createdAt: pickString(entry, ["createdAt", "created_at"]),
+			openCount: pickNumber(entry, ["openCount", "open_count"]),
+			lastOpenedAt: pickNumber(entry, ["lastOpenedAt", "last_opened_at"]),
+			sessionId: pickString(entry, ["sessionId", "session_id"]),
+			url: pickString(entry, ["url"]) || `/s/${token}`,
+		});
+	}
+	return records;
 }

@@ -16,6 +16,25 @@ export function formatTime(iso: string): string {
 }
 
 /**
+ * 分享链接的剩余有效期（NERE-43）：0 = 永久；已过期 → 「已过期」；其余按天 / 小时取整。
+ * 只此一份文案实现，组件不得另写 toLocaleString 拼接。
+ */
+export function formatExpiry(expiresAt: number, now: number = Date.now()): string {
+	if (!Number.isFinite(expiresAt) || expiresAt === 0) return "永久";
+	const remaining = expiresAt - now;
+	if (remaining <= 0) return "已过期";
+	const hour = 3_600_000;
+	if (remaining < 24 * hour) return `剩余 ${Math.ceil(remaining / hour)} 小时`;
+	return `剩余 ${Math.ceil(remaining / (24 * hour))} 天`;
+}
+
+/** 最近一次打开时间（NERE-43）：0 = 从未打开；其余复用 formatTime。 */
+export function formatOpenedAt(lastOpenedAt: number): string {
+	if (!Number.isFinite(lastOpenedAt) || lastOpenedAt <= 0) return "从未打开";
+	return formatTime(new Date(lastOpenedAt).toISOString());
+}
+
+/**
  * 分享链接归一化：只保留路径，域名换成当前页面的 origin。
  * pages.dev 反代到 Worker 时，服务端 request.url 是 workers.dev 地址，
  * 直接使用它拼链接在国内打不开（v0.38.1）。
