@@ -24,6 +24,8 @@ import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudfl
 import packageJson from "../package.json";
 import { collectBootstrap } from "./worker/bootstrap";
 import { migrate, type SqlHandle } from "./worker/db/migrations";
+import { buildContext, type AppEnv } from "./worker/http/context";
+import { dispatch } from "./worker/routes";
 
 const ctx = BACKGROUND_CONTEXT;
 
@@ -3952,22 +3954,39 @@ export class SpikeAgent extends DurableObject {
 	}
 
 	override async fetch(request: Request): Promise<Response> {
+		const url = new URL(request.url);
+		const env = this.env as unknown as AppEnv;
+		const scopeId = (this.ctx.id as { name?: string }).name ?? this.ctx.id.toString();
+		const userKey = request.headers.get("x-pi-user") ?? "";
 		// 每个请求绑定自己的 SQL / Harness，避免同一 isolate 里的其它 DO 串数据
 		return agentScope.run(
 			{
 				sql: this.ctx.storage.sql as unknown as SqlHandle,
 				harness: this.harness ?? null,
-				apiKey: (this.env as { DEEPSEEK_API_KEY?: string }).DEEPSEEK_API_KEY ?? null,
-				env: this.env as AgentScope["env"],
-				scopeId: (this.ctx.id as { name?: string }).name ?? this.ctx.id.toString(),
-				origin: new URL(request.url).origin,
-				userKey: request.headers.get("x-pi-user") ?? "",
+				apiKey: env.DEEPSEEK_API_KEY ?? null,
+				env,
+				scopeId,
+				origin: url.origin,
+				userKey,
 			},
-			() => this.handleFetch(request),
+			() => {
+				const context = buildContext({
+					req: request,
+					env,
+					scopeId,
+					userKey,
+					origin: url.origin,
+					sql: this.ctx.storage.sql as unknown as SqlHandle,
+					ensureMigrated: () => this.ensureMigrated(),
+					open: () => this.open(),
+					legacy: () => this.handleLegacyFetch(request),
+				});
+				return dispatch(context);
+			},
 		);
 	}
 
-	private async handleFetch(request: Request): Promise<Response> {
+	private async handleLegacyFetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 		try {
 			// 所有路由都先确保 DO 初始化（sqlFacade/表/Harness 就绪），幂等。
