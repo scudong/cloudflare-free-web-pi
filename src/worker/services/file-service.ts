@@ -3,7 +3,7 @@ import { getContent, listAll, listBySession, remove, removeSession, write } from
 import type { AllFileRow, FileContent, FileSummary } from "../repo/files-repo";
 
 /**
- * 文件域用例（ADR-0001 §2）：只依赖显式 sql 句柄，不读模块级 scope()。
+ * 文件域用例（ADR-0001 §2）：只依赖显式 sql 句柄，不读请求级隐式作用域。
  * `listAll` 承担查询归一化（旧 GET /files/all 的行为）。
  */
 export type FileServiceDeps = {

@@ -225,3 +225,27 @@ export function lastInvokedMap(sql: SqlHandle): Record<string, number> {
 	for (const row of rows) map[row.name] = Number(row.at);
 	return map;
 }
+
+/** 备份：只导基础三列（与旧 /backup 一致，审计字段不导出）。 */
+export function listForBackup(sql: SqlHandle): { name: string; description: string; content: string }[] {
+	return sql.exec("SELECT name, description, content FROM skills ORDER BY name").toArray() as {
+		name: string;
+		description: string;
+		content: string;
+	}[];
+}
+
+/** 恢复：只写基础三列；已存在则更新描述与正文（旧 restore 语义）。 */
+export function restoreRow(
+	sql: SqlHandle,
+	row: { name: string; description: string; content: string },
+	now: string,
+): void {
+	sql.exec(
+		"INSERT INTO skills (name, description, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, content = excluded.content",
+		row.name,
+		row.description,
+		row.content,
+		now,
+	);
+}

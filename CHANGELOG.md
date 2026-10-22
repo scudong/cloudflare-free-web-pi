@@ -4,6 +4,14 @@
 
 ## 2026-10-22
 
+### 后端分层收口：删除兼容层，分层变成 CI 硬约束（NERE-34，阶段 6）
+- 删除 `handleLegacyFetch`、`RequestContext.legacy()`、`sqlFacade` 代理、`scope()` / `agentScope`；`src/worker.ts` 2654 → **1165 行**，只剩鉴权、`SpikeAgent` / `UserRegistry` 组合根、Harness 生命周期与 `alarm`
+- 12 个遗留路径按域拆出：`routes/system.ts`（version/bootstrap/debug/kernel）、`routes/data.ts`（backup/restore/export/memories/reflect）、`routes/prompts.ts`（prompts/rules/custom-tools）；对应新增 `services/bootstrap|kernel|data|memory|reflect|prompts|context-service.ts` 与 `repo/memory|prompts-repo.ts`。`/backup`、`/restore`、`/export` 的 JSON 结构与状态码逐字不变
+- 工具扩展迁到 `tools/spike-tools.ts`：SQL、设置、文件/KB/分享服务、Harness、API Key 全部显式注入，不再有模块级隐式存储；扩展按请求构造并 install（pi-durable 按扩展名从注册表解析工具），`share_file` 的 Origin 来自当前请求
+- `UserRegistry` 的 `users` 建表移入 `db/migrations.ts` 的 `migrateRegistry()`，DDL 只允许出现在迁移器
+- `scripts/check-layering.sh` 新增两条硬约束：`src/worker.ts` 禁止 `CREATE TABLE`/`ALTER TABLE`；`src/worker/**` 禁止 `sqlFacade`/`ensureTables`/`scope(`。`npm test` 414 passed（新增路由表冻结用例：20 个 method+path 全部命中，未知路径仍 404）
+- 文档：ADR-0001 §10 记录收口；架构地图模块清单改为最终布局，R1/R4/R5/R11 全部关闭
+
 ### 对话提交路径合并（NERE-33，阶段 5）
 - 新增 `services/chat-service.ts`：`prepare`（技能解析 → instructions → configure → beforeId）→ `submit`（submit → wait → commit → kbRefs）→ `finish`（标题 → 工具摘要）成为 `/chat` 与 `/chat/stream` 的唯一提交路径；流式只额外负责 `watchEvents` 泵
 - 新增 `routes/chat.ts`：`POST /chat`、`/chat/stream`、`/interject`、`/abort`、`/reset`、`/compact`；路由层零 SQL，SSE 事件名与顺序不变（`thinking_start` / `thinking` / `text` / `tool_start` / `tool_end` / `compaction` / `goal` / `done`）

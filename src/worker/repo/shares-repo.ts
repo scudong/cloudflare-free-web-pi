@@ -135,3 +135,10 @@ export function deleteByToken(sql: SqlHandle, token: string): boolean {
 export function purgeExpired(sql: SqlHandle, now: number): void {
 	sql.exec("DELETE FROM shares WHERE expires_at > 0 AND expires_at <= ?", now);
 }
+
+/** 备份：分享记录全量（恢复不还原 shares，保持旧 /restore 语义）。 */
+export function listForBackup(sql: SqlHandle): Record<string, unknown>[] {
+	return sql
+		.exec("SELECT token, kind, session_id, name, expires_at, theme, created_at FROM shares")
+		.toArray() as Record<string, unknown>[];
+}

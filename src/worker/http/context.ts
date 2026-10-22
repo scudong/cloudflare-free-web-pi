@@ -1,13 +1,17 @@
 import type { Harness } from "@earendil-works/pi-durable";
 import type { SqlHandle } from "../db/migrations";
-import type { KbSettings, WebFetchResult } from "../services/kb-service";
+import type { WebFetchResult } from "../services/kb-service";
 import type { SessionRuntime } from "../services/session-service";
 import type {
 	AlarmRuntime,
 	ChatRuntime,
 	ContextRuntime,
+	CustomToolsRuntime,
+	DataRuntime,
+	DebugRuntime,
 	GoalRuntime,
 	McpRuntime,
+	SettingsPort,
 	SettingsRuntime,
 	ShareRuntime,
 	ToolRuntime,
@@ -44,14 +48,14 @@ export type RequestContext = {
 	ready(): Promise<void>;
 	/** 惰性 open()；只有 needsHarness 的路由调用。 */
 	harness(): Promise<Harness>;
-	/** 阶段 0-4 的过渡委托：未迁移端点原样走旧 handleFetch。 */
-	legacy(): Promise<Response>;
 	/** 会话域的 Harness 端口（open/重试/模型配置在 DO 组合根）；由路由注入 session-service。 */
 	readonly sessionRuntime: SessionRuntime;
 	/** 分享域的 Harness 端口（阶段 3）：只有会话分享真正读条目时才 open()。 */
 	readonly shareRuntime: ShareRuntime;
 	/** 设置读取端口（DO 用既有 getSetting 实现），供服务替代模块级 getSetting。 */
-	readonly settings: KbSettings;
+	readonly settings: SettingsPort;
+	/** 设置写入（`/kernel` 的版本缓存）；写入口径在 `repo/settings-repo`。 */
+	setSetting(key: string, value: string): void;
 	/** 设置域：压缩策略 / 当前供应商变更后重建 Harness。 */
 	readonly settingsRuntime: SettingsRuntime;
 	/** 自动化域：任务或目标调度变更后重排 alarm。 */
@@ -66,6 +70,12 @@ export type RequestContext = {
 	readonly mcpRuntime: McpRuntime;
 	/** 对话域（阶段 5）：prepare/submit 的 Harness 端口 + 并发闸门。 */
 	readonly chatRuntime: ChatRuntime;
+	/** 数据域（阶段 6）：导出/反思/恢复后重建 MCP；Harness 相关部分留在 DO。 */
+	readonly dataRuntime: DataRuntime;
+	/** 系统域（阶段 6）：`/debug/agent` 的注册表快照。 */
+	readonly debugRuntime: DebugRuntime;
+	/** 自定义工具写操作（阶段 6）：更新 DO 的扩展与注册表。 */
+	readonly customToolsRuntime: CustomToolsRuntime;
 	/** DeepSeek 网页抓取端口（web_fetch_page 与链接 ingest 共用适配器）。 */
 	webFetch(url: string): Promise<WebFetchResult>;
 };
@@ -79,10 +89,10 @@ export type BuildContextInput = {
 	sql: SqlHandle;
 	ensureMigrated(): Promise<void>;
 	open(): Promise<Harness>;
-	legacy(): Promise<Response>;
 	sessionRuntime: SessionRuntime;
 	shareRuntime: ShareRuntime;
-	settings: KbSettings;
+	settings: SettingsPort;
+	setSetting(key: string, value: string): void;
 	settingsRuntime: SettingsRuntime;
 	alarmRuntime: AlarmRuntime;
 	contextRuntime: ContextRuntime;
@@ -90,6 +100,9 @@ export type BuildContextInput = {
 	toolRuntime: ToolRuntime;
 	mcpRuntime: McpRuntime;
 	chatRuntime: ChatRuntime;
+	dataRuntime: DataRuntime;
+	debugRuntime: DebugRuntime;
+	customToolsRuntime: CustomToolsRuntime;
 	webFetch(url: string): Promise<WebFetchResult>;
 };
 
@@ -104,10 +117,10 @@ export function buildContext(input: BuildContextInput): RequestContext {
 		sql: () => input.sql,
 		ready: () => input.ensureMigrated(),
 		harness: () => input.open(),
-		legacy: () => input.legacy(),
 		sessionRuntime: input.sessionRuntime,
 		shareRuntime: input.shareRuntime,
 		settings: input.settings,
+		setSetting: (key, value) => input.setSetting(key, value),
 		settingsRuntime: input.settingsRuntime,
 		alarmRuntime: input.alarmRuntime,
 		contextRuntime: input.contextRuntime,
@@ -115,6 +128,9 @@ export function buildContext(input: BuildContextInput): RequestContext {
 		toolRuntime: input.toolRuntime,
 		mcpRuntime: input.mcpRuntime,
 		chatRuntime: input.chatRuntime,
+		dataRuntime: input.dataRuntime,
+		debugRuntime: input.debugRuntime,
+		customToolsRuntime: input.customToolsRuntime,
 		webFetch: (url: string) => input.webFetch(url),
 	};
 }

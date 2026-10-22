@@ -56,3 +56,20 @@ export function listAll(sql: SqlHandle, query: string): AllFileRow[] {
 		)
 		.toArray() as AllFileRow[];
 }
+
+/** 备份：全部文件正文（不含大小/标题等派生字段）。 */
+export function listForBackup(
+	sql: SqlHandle,
+): { conversation_id: string; name: string; content: string; updated_at: string }[] {
+	return sql
+		.exec("SELECT conversation_id, name, content, updated_at FROM vfs_v2 ORDER BY conversation_id, name")
+		.toArray() as { conversation_id: string; name: string; content: string; updated_at: string }[];
+}
+
+/** 恢复：按 (conversation_id, name) upsert。 */
+export function restoreRow(
+	sql: SqlHandle,
+	row: { conversation_id: string; name: string; content: string; updated_at: string },
+): void {
+	write(sql, row.conversation_id, row.name, row.content, row.updated_at);
+}

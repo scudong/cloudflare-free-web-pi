@@ -895,3 +895,25 @@ export type SkillService = {
 	track(type: SkillEventType, name: string, source?: string, meta?: string): void;
 	trackCall(name: string, kind: "loaded" | "invoked"): void;
 };
+
+/**
+ * 识别消息开头的「/技能名」（v0.23.0）：命中已安装且未 blocked 的技能时返回正文与去掉前缀的正文。
+ * 显式调用会写 `skill_invoked` 埋点；任何读取失败都按「未命中」处理，不阻塞对话。
+ */
+export function parseSkillInvocation(
+	sql: SqlHandle,
+	message: string,
+): { name: string; content: string; rest: string } | null {
+	const trimmed = message.trimStart();
+	if (!trimmed.startsWith("/")) return null;
+	const match = /^\/(\S{1,60})(?:\s+([\s\S]*))?$/.exec(trimmed);
+	if (!match) return null;
+	try {
+		const row = getSkillRow(sql, match[1]!);
+		if (!row || row.auditStatus === "blocked") return null;
+		trackSkillCall(sql, row.name, "invoked");
+		return { name: row.name, content: row.content, rest: (match[2] ?? "").trim() };
+	} catch {
+		return null;
+	}
+}

@@ -1,6 +1,5 @@
 import { Type } from "typebox";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
 import type { SqlHandle } from "../db/migrations";
 import * as customToolsRepo from "../repo/custom-tools-repo";
 import * as settingsRepo from "../repo/settings-repo";
@@ -27,10 +26,22 @@ export const RESERVED_TOOL_NAMES: Record<string, true> = {
 };
 export const CUSTOM_TOOL_CODE_MAX = 8000;
 
-/** 共享的 QuickJS 沙箱：每次 execute 起独立 VM，自定义工具之间互不影响。 */
-let customSandbox: ReturnType<typeof createInlineCodemodeSandbox> | null = null;
-function sandbox(): ReturnType<typeof createInlineCodemodeSandbox> {
-	customSandbox ??= createInlineCodemodeSandbox({ memoryLimitBytes: 32 * 1024 * 1024, timeoutMs: 15_000 });
+/** 沙箱的最小形状（类型放在本地，避免静态 import 把 cloudflare 运行时拖进单测）。 */
+type CustomSandbox = {
+	execute(
+		source: string,
+		options: { store: Record<string, unknown>; timeoutMs: number },
+	): Promise<{ ok: boolean; error?: unknown; value?: unknown }>;
+};
+
+/** 共享的 QuickJS 沙箱：每次 execute 起独立 VM，自定义工具之间互不影响。
+ * 按需动态加载：路由表可在 node 单测里 import，不必拉起 workerd。 */
+let customSandbox: Promise<CustomSandbox> | null = null;
+function sandbox(): Promise<CustomSandbox> {
+	customSandbox ??= import("@earendil-works/pi-codemode/cloudflare").then(
+		({ createInlineCodemodeSandbox }) =>
+			createInlineCodemodeSandbox({ memoryLimitBytes: 32 * 1024 * 1024, timeoutMs: 15_000 }) as CustomSandbox,
+	);
 	return customSandbox;
 }
 
@@ -38,7 +49,7 @@ function sandbox(): ReturnType<typeof createInlineCodemodeSandbox> {
 async function runCustomTool(code: string, args: unknown): Promise<{ ok: boolean; text: string }> {
 	const source = `async function __custom_tool(args) {\n${code}\n}\nreturn await __custom_tool(load("args"));`;
 	try {
-		const result = await sandbox().execute(source, { store: { args: args ?? {} }, timeoutMs: 15_000 });
+		const result = await (await sandbox()).execute(source, { store: { args: args ?? {} }, timeoutMs: 15_000 });
 		if (!result.ok) {
 			const detail = (result.error as { message?: unknown } | undefined)?.message;
 			return { ok: false, text: `执行失败：${String(detail ?? JSON.stringify(result.error)).slice(0, 400)}` };

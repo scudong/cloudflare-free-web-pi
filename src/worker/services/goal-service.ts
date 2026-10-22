@@ -55,6 +55,12 @@ export function startGoal(
 	goalsRepo.start(sql, { ...input, now: new Date().toISOString() });
 }
 
+/** instructions 里的「目标模式（进行中）」段；无进行中目标时为空串。 */
+export function goalInstructionsBlock(row: GoalRow | null): string {
+	if (!row || row.status !== "active") return "";
+	return `\n\n## 目标模式（进行中）\n目标：${row.objective}\n进度：第 ${row.turns + 1} 轮，已用 ${row.tokens_used} / ${row.token_budget} tokens。\n- 这一轮必须有实际进展，不要只回复「继续」。\n- 全部达成后调用 complete_goal，并附可核对的证据。\n- 确实无法推进时调用 report_goal 说明阻塞原因。`;
+}
+
 /** 自动续转的提示词：强调「直接做」，避免模型空转。 */
 export function goalContinuePrompt(row: GoalRow): string {
 	return [

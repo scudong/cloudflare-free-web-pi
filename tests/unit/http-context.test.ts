@@ -25,6 +25,16 @@ const shareRuntime: ShareRuntime = {
 	conversationId: async () => "1",
 	entries: async () => [],
 };
+const dataRuntime = {
+	exportSnapshot: async () => ({ sessionId: "1", title: "会话 1", entries: [] }),
+	reflect: async () => 0,
+	afterRestore: async () => {},
+};
+const debugRuntime = { inspect: async () => ({ tools: [] }) };
+const customToolsRuntime = {
+	save: () => ({ name: "x", tools: 0 }),
+	remove: () => ({ tools: 0 }),
+};
 
 function context(overrides: Partial<Parameters<typeof buildContext>[0]> = {}) {
 	return buildContext({
@@ -36,10 +46,13 @@ function context(overrides: Partial<Parameters<typeof buildContext>[0]> = {}) {
 		sql,
 		ensureMigrated: async () => {},
 		open: async () => harness,
-		legacy: async () => new Response("legacy"),
 		sessionRuntime,
 		shareRuntime,
 		settings: { get: (_key, fallback) => fallback },
+		setSetting: () => {},
+		dataRuntime,
+		debugRuntime,
+		customToolsRuntime,
 		webFetch: async () => ({ ok: false, kind: "error", message: "stub" }),
 		...overrides,
 	});
@@ -66,11 +79,6 @@ describe("buildContext", () => {
 		await ctx.harness();
 		expect(open).toHaveBeenCalledTimes(1);
 	});
-
-	it("legacy() 委托旧 handler", async () => {
-		const ctx = context();
-		expect(await (await ctx.legacy()).text()).toBe("legacy");
-	});
 });
 
 describe("dispatch", () => {
@@ -82,9 +90,15 @@ describe("dispatch", () => {
 		...overrides,
 	});
 
-	it("未命中走 legacy", async () => {
-		const ctx = context();
-		expect(await (await dispatch(ctx, [])).text()).toBe("legacy");
+	it("未命中直接 404（阶段 6：没有 legacy 兜底，且不触发迁移/ Harness）", async () => {
+		const ensureMigrated = vi.fn(async () => {});
+		const open = vi.fn(async () => harness);
+		const ctx = context({ ensureMigrated, open });
+		const res = await dispatch(ctx, []);
+		expect(res.status).toBe(404);
+		expect(await res.json()).toEqual({ error: "not found" });
+		expect(ensureMigrated).not.toHaveBeenCalled();
+		expect(open).not.toHaveBeenCalled();
 	});
 
 	it("命中后按 ready → harness → handle 顺序执行", async () => {
