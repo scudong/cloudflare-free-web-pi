@@ -1,0 +1,95 @@
+src/web/lib/skill-usage.ts
+  11af3904682db59f 1-56
+src/web/types.ts
+  11af3904682db59f 214-224
+src/web/lib/collections.ts
+  11af3904682db59f 122-144,152-156
+src/web/components/Composer.tsx
+  11af3904682db59f 28,30-31,125,154-160
+src/web/components/LeftPanels.tsx
+  11af3904682db59f 4,319,338-339,523-530
+docs/frontend-map.md
+  11af3904682db59f 38,83
+src/web/App.tsx
+  11af3904682db59f 184,186-187,808-828,1456,1537,1559
+CHANGELOG.md
+  11af3904682db59f 7-13
+src/web/components/SkillCard.tsx
+  11af3904682db59f 1-93
+src/worker.ts
+  11af3904682db59f 1876-1880,1900
+tests/unit/skillUsage.test.tsx
+  11af3904682db59f 1-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "6f93c1106d5eb357c20f845e598d855ecac8e6f0",
+  "prompts": {
+    "11af3904682db59f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf189bc7-fd7a-46be-a52d-d9e53cf2448f",
+        "model": "deepseek-flash"
+      },
+      "human_author": "scudong",
+      "messages": [],
+      "total_additions": 441,
+      "total_deletions": 56,
+      "accepted_lines": 432,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "CHANGELOG.md": {
+          "additions": 7,
+          "accepted_lines": 7
+        },
+        "tests/unit/skillUsage.test.tsx": {
+          "additions": 185,
+          "deletions": 8,
+          "accepted_lines": 177
+        },
+        "src/web/lib/skill-usage.ts": {
+          "additions": 56,
+          "accepted_lines": 56
+        },
+        "src/web/types.ts": {
+          "additions": 11,
+          "accepted_lines": 11
+        },
+        "docs/frontend-map.md": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "src/web/components/Composer.tsx": {
+          "additions": 11,
+          "deletions": 3,
+          "accepted_lines": 11
+        },
+        "src/web/App.tsx": {
+          "additions": 30,
+          "deletions": 5,
+          "accepted_lines": 29
+        },
+        "src/web/components/SkillCard.tsx": {
+          "additions": 93,
+          "accepted_lines": 93
+        },
+        "src/web/components/LeftPanels.tsx": {
+          "additions": 12,
+          "deletions": 34,
+          "accepted_lines": 12
+        },
+        "src/worker.ts": {
+          "additions": 6,
+          "deletions": 5,
+          "accepted_lines": 6
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 28,
+          "accepted_lines": 28
+        }
+      }
+    }
+  }
+}
