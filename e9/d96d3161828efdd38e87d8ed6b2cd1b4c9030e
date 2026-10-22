@@ -1,0 +1,44 @@
+tests/unit/skill-hub-service.test.ts
+  228f8f0932377444 61,76
+tests/unit/skill-catalog.test.ts
+  228f8f0932377444 21,42
+tests/api/ingest.test.ts
+  228f8f0932377444 134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "e9d96d3161828efdd38e87d8ed6b2cd1b4c9030e",
+  "prompts": {
+    "228f8f0932377444": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "10857dff-9e74-4c8d-a751-f6c20fe62e0c",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 4,
+      "accepted_lines": 5,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/unit/skill-catalog.test.ts": {
+          "additions": 2,
+          "deletions": 1,
+          "accepted_lines": 2
+        },
+        "tests/api/ingest.test.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "tests/unit/skill-hub-service.test.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        }
+      }
+    }
+  }
+}
