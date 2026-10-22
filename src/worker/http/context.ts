@@ -2,6 +2,7 @@ import type { Harness } from "@earendil-works/pi-durable";
 import type { SqlHandle } from "../db/migrations";
 import type { KbSettings, WebFetchResult } from "../services/kb-service";
 import type { SessionRuntime } from "../services/session-service";
+import type { ShareRuntime } from "./ports";
 
 /** Worker 绑定（ADR-0001 §9.2）；只在 Http 层按需读取，不落库。 */
 export type AppEnv = {
@@ -12,6 +13,10 @@ export type AppEnv = {
 	CF_DISABLE_VECTOR?: string;
 	DEEPSEEK_BASE_URL?: string;
 	BUILD?: string;
+	/** 登录页「看一个真实对话」入口：站内 /s/<token> 或 https 绝对地址。 */
+	DEMO_SHARE_URL?: string;
+	/** 测试专用（wrangler.test.jsonc）：打开 /debug/harness 观测端点。 */
+	TEST_HARNESS_STATS?: string;
 	SpikeAgent: DurableObjectNamespace;
 	UserRegistry: DurableObjectNamespace;
 };
@@ -34,6 +39,8 @@ export type RequestContext = {
 	legacy(): Promise<Response>;
 	/** 会话域的 Harness 端口（open/重试/模型配置在 DO 组合根）；由路由注入 session-service。 */
 	readonly sessionRuntime: SessionRuntime;
+	/** 分享域的 Harness 端口（阶段 3）：只有会话分享真正读条目时才 open()。 */
+	readonly shareRuntime: ShareRuntime;
 	/** 设置读取端口（DO 用既有 getSetting 实现），供服务替代模块级 getSetting。 */
 	readonly settings: KbSettings;
 	/** DeepSeek 网页抓取端口（web_fetch_page 与链接 ingest 共用适配器）。 */
@@ -51,6 +58,7 @@ export type BuildContextInput = {
 	open(): Promise<Harness>;
 	legacy(): Promise<Response>;
 	sessionRuntime: SessionRuntime;
+	shareRuntime: ShareRuntime;
 	settings: KbSettings;
 	webFetch(url: string): Promise<WebFetchResult>;
 };
@@ -68,6 +76,7 @@ export function buildContext(input: BuildContextInput): RequestContext {
 		harness: () => input.open(),
 		legacy: () => input.legacy(),
 		sessionRuntime: input.sessionRuntime,
+		shareRuntime: input.shareRuntime,
 		settings: input.settings,
 		webFetch: (url: string) => input.webFetch(url),
 	};

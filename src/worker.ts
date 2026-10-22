@@ -24,12 +24,16 @@ import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudfl
 import packageJson from "../package.json";
 import { collectBootstrap } from "./worker/bootstrap";
 import type { KbRef } from "./worker/lib/kb";
+import { entryText, entryUsage } from "./worker/lib/entries";
+import { demoShareToken, demoShareUrl, shareExpiryLabel } from "./worker/lib/share-render";
 import { migrate, type SqlHandle } from "./worker/db/migrations";
 import { buildContext, type AppEnv } from "./worker/http/context";
+import { USER_ID_RE, type ShareRuntime } from "./worker/http/ports";
 import { getModel } from "./worker/repo/sessions-repo";
 import { createFileService } from "./worker/services/file-service";
 import { createKbService, KB_VECTOR_DEFAULT_INDEX, type WebFetchResult } from "./worker/services/kb-service";
 import { createSessionService, type SessionRuntime } from "./worker/services/session-service";
+import { createShareService, MAX_SHARE_TTL, shareDefaultTtl } from "./worker/services/share-service";
 import { dispatch } from "./worker/routes";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -43,7 +47,7 @@ type AgentScope = {
 	harness: unknown | null;
 	apiKey: string | null;
 	/** 向量检索 / 网页抓取配置（v0.53.0）：从 Worker 环境变量读取，不落库。 */
-	env?: { AI?: unknown; KB_VEC?: unknown; CF_DISABLE_VECTOR?: string; DEEPSEEK_BASE_URL?: string };
+	env?: { AI?: unknown; KB_VEC?: unknown; CF_DISABLE_VECTOR?: string; DEEPSEEK_BASE_URL?: string; DEMO_SHARE_URL?: string };
 	/** 当前 DO 的稳定标识，用作 Vectorize 元数据过滤与向量 id 前缀。 */
 	scopeId?: string;
 	/** 本次请求的公开 Origin：分享工具据此拼绝对链接（alarm 触发时为空）。 */
@@ -83,28 +87,6 @@ function getSetting(key: string, fallback: string): string {
 
 function setSetting(key: string, value: string): void {
 	sqlFacade!.exec("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
-}
-
-/** 分享默认有效期（秒）：0 = 永久；与分享弹窗默认的 7 天一致。 */
-const DEFAULT_SHARE_TTL = 7 * 86400;
-const MAX_SHARE_TTL = 365 * 86400;
-
-function shareDefaultTtl(): number {
-	const raw = Number(getSetting("share_ttl_seconds", String(DEFAULT_SHARE_TTL)));
-	return Number.isFinite(raw) && raw >= 0 ? Math.min(Math.floor(raw), MAX_SHARE_TTL) : DEFAULT_SHARE_TTL;
-}
-
-/** 解析分享有效期：未传（undefined/null/""）沿用设置默认；显式 0 表示永久。 */
-function shareTtlSeconds(value: unknown): number {
-	if (value === undefined || value === null || value === "") return shareDefaultTtl();
-	const raw = Number(value);
-	if (!Number.isFinite(raw) || raw < 0) return shareDefaultTtl();
-	return Math.min(raw, MAX_SHARE_TTL);
-}
-
-/** 分享页署名：设置里的 displayName，未设置时回落到产品名。 */
-function shareAuthor(): string {
-	return getSetting("display_name", "").trim().slice(0, 40) || "π Harness";
 }
 
 /** 思考档位：off / low / high（deepseek-flash 支持 low/high/max，v4-pro 支持 high/max）。 */
@@ -587,7 +569,7 @@ function settingsView() {
 		compaction: compactionSettings(),
 		approval: approvalSettings(),
 		displayName: getSetting("display_name", ""),
-		shareTtlSeconds: shareDefaultTtl(),
+		shareTtlSeconds: shareDefaultTtl({ get: getSetting }),
 	};
 }
 
@@ -750,6 +732,19 @@ function kbService() {
 		scopeId: current.scopeId ?? "spike",
 		settings: { get: getSetting },
 		webFetch: (url) => webFetchPageContent(url, current.apiKey),
+	});
+}
+
+/** 按请求作用域装配分享服务：模型工具（share_file/share_conversation）在 agentScope 内调用，服务不读 scope()。 */
+function shareService() {
+	const current = scope();
+	return createShareService({
+		sql: sqlFacade!,
+		settings: { get: getSetting },
+		// 工具在 alarm 触发时没有请求 Origin：回落到 share_origin 设置（与旧 shareUrlForToken 一致）。
+		origin: current.origin || getSetting("share_origin", ""),
+		userKey: current.userKey ?? "",
+		demoToken: demoShareToken(current.env?.DEMO_SHARE_URL),
 	});
 }
 
@@ -1321,8 +1316,9 @@ const baseSpikeExtension = defineExtension({
 				const name = String(a.name ?? "").trim().replace(/^[/.]+/, "").slice(0, 120);
 				if (!name) return { output: [{ type: "text", text: "文件名不能为空。请先用 write_file 生成文件再分享。" }] };
 				try {
-					const { share, reused } = shareForTool("file", String(api.conversationId), name, a.ttlSeconds);
-					const url = shareUrlForToken(share.token);
+					const shares = shareService();
+					const { share, reused } = shares.shareForTool("file", String(api.conversationId), name, a.ttlSeconds);
+					const url = shares.urlFor(share.token);
 					const expiry = shareExpiryLabel(share.expiresAt);
 					return {
 						output: [{
@@ -1361,10 +1357,11 @@ const baseSpikeExtension = defineExtension({
 				const a = args as { ttlSeconds?: unknown };
 				const conversationId = String(api.conversationId);
 				try {
-					const { share, reused } = shareForTool("conversation", conversationId, "", a.ttlSeconds);
-					const url = shareUrlForToken(share.token);
+					const shares = shareService();
+					const { share, reused } = shares.shareForTool("conversation", conversationId, "", a.ttlSeconds);
+					const url = shares.urlFor(share.token);
 					const expiry = shareExpiryLabel(share.expiresAt);
-					const title = sessionTitle(conversationId);
+					const title = shares.sessionTitle(conversationId);
 					return {
 						output: [{
 							type: "text",
@@ -1619,593 +1616,6 @@ async function buildMcpExtension(sql: { exec(q: string, ...b: unknown[]): { toAr
 	return defineExtension({ name: "mcp", tools: tools.map((tool) => withApproval(tool as never)) });
 }
 
-/* ---------------- 分享页渲染（v0.38.0） ---------------- */
-
-type SharePage = { status: number; contentType: string; body: string; headers?: Record<string, string> };
-
-/** HTML 转义。 */
-function escapeHtml(text: string): string {
-	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-/** 从 entry.model 里取纯文本（用户 / 助手 / 工具结果通用）。 */
-function entryText(model: unknown): string {
-	const blocks = Array.isArray(model) ? (model as { content?: unknown }[]) : [];
-	for (const block of blocks) {
-		const content = block?.content;
-		if (typeof content === "string") return content;
-		if (Array.isArray(content)) {
-			return content.map((c) => (typeof c === "object" && c && "text" in c ? String((c as { text?: unknown }).text ?? "") : "")).join("");
-		}
-	}
-	return "";
-}
-
-/** 从 assistant entry 里取本次请求的 token 用量（input + output）。 */
-function entryUsage(model: unknown): number | null {
-	const blocks = Array.isArray(model) ? (model as { usage?: unknown }[]) : [];
-	for (const block of blocks) {
-		const usage = block?.usage as { input?: unknown; output?: unknown } | undefined;
-		if (usage && typeof usage === "object") {
-			return (Number(usage.input) || 0) + (Number(usage.output) || 0);
-		}
-	}
-	return null;
-}
-
-/**
- * 极简 Markdown → HTML（只用于公开分享页）。
- * 支持标题、列表（含任务项）、代码块、引用、分隔线、管道表格与常用行内样式。
- * 原文一律转义，不解释原始 HTML，因此没有 XSS 面。
- * 传入 headings 时收集 h1–h4 并生成锚点 id（分享页目录，v0.41.0）。
- */
-interface ShareHeading {
-	level: number;
-	text: string;
-	id: string;
-}
-
-/** 标题纯文本：去掉行内标记，供目录显示。 */
-function headingPlainText(text: string): string {
-	return text
-		.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-		.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-		.replace(/`([^`]+)`/g, "$1")
-		.replace(/[*_~]/g, "")
-		.trim();
-}
-
-/** 标题锚点：保留中英文数字，其余压成 -，重复的加序号。 */
-function headingSlug(text: string, used: Set<string>): string {
-	const base =
-		headingPlainText(text)
-			.toLowerCase()
-			.replace(/[^\p{L}\p{N}\s-]/gu, "")
-			.trim()
-			.replace(/\s+/g, "-") || "section";
-	let id = base;
-	let n = 2;
-	while (used.has(id)) id = `${base}-${n++}`;
-	used.add(id);
-	return id;
-}
-
-function markdownToHtml(
-	source: string,
-	opts?: { headings?: ShareHeading[]; usedIds?: Set<string> },
-): string {
-	const lines = source.replace(/\r\n?/g, "\n").split("\n");
-	const used = opts?.usedIds ?? new Set<string>();
-	const safeHref = /^(https?:\/\/|mailto:|\/|#)/i;
-	const safeSrc = /^(https?:\/\/|data:image\/)/i;
-
-	const inline = (raw: string): string => {
-		// 行内代码先抽出来，避免里面的 * _ ~ 被当成强调
-		const codes: string[] = [];
-		let text = raw.replace(/`([^`\n]+)`/g, (_, code: string) => {
-			codes.push(`<code>${escapeHtml(code)}</code>`);
-			return `\u0000${codes.length - 1}\u0000`;
-		});
-		text = escapeHtml(text)
-			.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (match, alt: string, src: string) =>
-				safeSrc.test(src) ? `<img src="${src}" alt="${alt}" loading="lazy">` : match,
-			)
-			.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label: string, href: string) =>
-				safeHref.test(href) ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>` : label,
-			)
-			.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
-			.replace(/__([^_\n]+)__/g, "<strong>$1</strong>")
-			.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
-			.replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
-		return text.replace(/\u0000(\d+)\u0000/g, (_, index: string) => codes[Number(index)] ?? "");
-	};
-	const isBlockStart = (line: string): boolean =>
-		/^\s*#{1,6}\s+/.test(line) ||
-		/^\s*(```|~~~)/.test(line) ||
-		/^\s*>/.test(line) ||
-		/^\s*([-*+]|\d+\.)\s+/.test(line) ||
-		/^\s*(---+|\*\*\*+|___+)\s*$/.test(line) ||
-		/^\s*\|/.test(line);
-
-	const out: string[] = [];
-	let i = 0;
-	while (i < lines.length) {
-		const line = lines[i];
-		if (!line.trim()) {
-			i++;
-			continue;
-		}
-
-		// 代码块
-		const fence = /^\s*(```|~~~)\s*([\w+-]*)\s*$/.exec(line);
-		if (fence) {
-			const closer = new RegExp(`^\\s*${fence[1]}\\s*$`);
-			const code: string[] = [];
-			i++;
-			while (i < lines.length && !closer.test(lines[i])) {
-				code.push(lines[i]);
-				i++;
-			}
-			i++; // 跳过结束围栏
-			out.push(`<pre><code${fence[2] ? ` class="lang-${escapeHtml(fence[2])}"` : ""}>${escapeHtml(code.join("\n"))}</code></pre>`);
-			continue;
-		}
-
-		// 标题
-		const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-		if (heading) {
-			const level = heading[1].length;
-			const raw = heading[2].trim();
-			if (opts?.headings && level <= 4) {
-				const id = headingSlug(raw, used);
-				out.push(`<h${level} id="${id}">${inline(raw)}</h${level}>`);
-				opts.headings.push({ level, text: headingPlainText(raw), id });
-			} else {
-				out.push(`<h${level}>${inline(raw)}</h${level}>`);
-			}
-			i++;
-			continue;
-		}
-
-		// 分隔线
-		if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) {
-			out.push("<hr>");
-			i++;
-			continue;
-		}
-
-		// 引用：整段递归解析
-		if (/^\s*>/.test(line)) {
-			const quoted: string[] = [];
-			while (i < lines.length && /^\s*>/.test(lines[i])) {
-				quoted.push(lines[i].replace(/^\s*>\s?/, ""));
-				i++;
-			}
-			out.push(`<blockquote>${markdownToHtml(quoted.join("\n"))}</blockquote>`);
-			continue;
-		}
-
-		// 列表
-		const listItem = /^\s*([-*+]|\d+\.)\s+(.*)$/.exec(line);
-		if (listItem) {
-			const ordered = /^\d+\.$/.test(listItem[1]);
-			const items: string[] = [];
-			while (i < lines.length) {
-				const item = /^\s*([-*+]|\d+\.)\s+(.*)$/.exec(lines[i]);
-				if (!item) break;
-				const task = /^\[([ xX])\]\s+(.*)$/.exec(item[2]);
-				items.push(
-					`<li>${task ? `<input type="checkbox" disabled${task[1].toLowerCase() === "x" ? " checked" : ""}> ` : ""}${inline(task ? task[2] : item[2])}</li>`,
-				);
-				i++;
-			}
-			out.push(ordered ? `<ol>${items.join("")}</ol>` : `<ul>${items.join("")}</ul>`);
-			continue;
-		}
-
-		// 管道表格
-		if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])) {
-			const cells = (row: string): string[] =>
-				row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
-			const aligns = cells(lines[i + 1]).map((cell) => {
-				const left = cell.startsWith(":");
-				const right = cell.endsWith(":");
-				return left && right ? "center" : right ? "right" : left ? "left" : "";
-			});
-			const head = cells(line);
-			i += 2;
-			const body: string[] = [];
-			while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
-				const row = cells(lines[i]);
-				body.push(
-					`<tr>${row
-						.map((cell, index) => `<td${aligns[index] ? ` style="text-align:${aligns[index]}"` : ""}>${inline(cell)}</td>`)
-						.join("")}</tr>`,
-				);
-				i++;
-			}
-			out.push(
-				`<table><thead><tr>${head
-					.map((cell, index) => `<th${aligns[index] ? ` style="text-align:${aligns[index]}"` : ""}>${inline(cell)}</th>`)
-					.join("")}</tr></thead><tbody>${body.join("")}</tbody></table>`,
-			);
-			continue;
-		}
-
-		// 普通段落：连续行用 <br> 连接
-		const paragraph: string[] = [line];
-		i++;
-		while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) {
-			paragraph.push(lines[i]);
-			i++;
-		}
-		out.push(`<p>${paragraph.map((part) => inline(part)).join("<br>")}</p>`);
-	}
-	return out.join("\n");
-}
-
-/** 目录（v0.41.0）：少于两个标题不显示；最多 60 条。 */
-function shareToc(headings: ShareHeading[]): string {
-	if (headings.length < 2) return "";
-	const items = headings.slice(0, 60).map(
-		(h) => `<li><a class="l${Math.min(h.level, 4)}" href="#${h.id}">${escapeHtml(h.text)}</a></li>`,
-	);
-	return `<nav class="toc" aria-label="目录"><div class="toc-title">目录</div><ul>${items.join("")}</ul></nav>`;
-}
-
-/* ---- 分享页主题（v0.39.1）：与客户端四套主题一一对应 ---- */
-
-type ShareThemeId = "dark" | "light" | "sepia" | "midnight";
-
-interface SharePalette {
-	scheme: "dark" | "light";
-	bg: string;
-	panel: string;
-	panelAlt: string;
-	border: string;
-	fg: string;
-	muted: string;
-	accent: string;
-	accentSoft: string;
-	accentBorder: string;
-	userBg: string;
-	userBorder: string;
-}
-
-/** 色值取自 web/styles/index.css 的 Arco 主题变量。 */
-const SHARE_PALETTES: Record<ShareThemeId, SharePalette> = {
-	dark: {
-		scheme: "dark",
-		bg: "#17171a",
-		panel: "#232324",
-		panelAlt: "#2a2a2b",
-		border: "#3a3a3c",
-		fg: "#f2f3f5",
-		muted: "#86909c",
-		accent: "#6aa1ff",
-		accentSoft: "rgba(64,128,255,.14)",
-		accentBorder: "rgba(64,128,255,.35)",
-		userBg: "rgba(64,128,255,.12)",
-		userBorder: "rgba(64,128,255,.3)",
-	},
-	light: {
-		scheme: "light",
-		bg: "#f7f8fa",
-		panel: "#ffffff",
-		panelAlt: "#f2f3f5",
-		border: "#e5e6eb",
-		fg: "#1d2129",
-		muted: "#86909c",
-		accent: "#165dff",
-		accentSoft: "rgba(22,93,255,.08)",
-		accentBorder: "rgba(22,93,255,.25)",
-		userBg: "rgba(22,93,255,.07)",
-		userBorder: "rgba(22,93,255,.2)",
-	},
-	sepia: {
-		scheme: "light",
-		bg: "#fcf8ec",
-		panel: "#fffdf6",
-		panelAlt: "#f7efd9",
-		border: "#ebdcbc",
-		fg: "#2e2415",
-		muted: "#a08c68",
-		accent: "#b37a00",
-		accentSoft: "rgba(217,152,0,.12)",
-		accentBorder: "rgba(179,122,0,.35)",
-		userBg: "rgba(217,152,0,.1)",
-		userBorder: "rgba(179,122,0,.25)",
-	},
-	midnight: {
-		scheme: "dark",
-		bg: "#0b1220",
-		panel: "#121a2e",
-		panelAlt: "#1a2440",
-		border: "#263454",
-		fg: "#eaf0fa",
-		muted: "#6b80a8",
-		accent: "#6aa1ff",
-		accentSoft: "rgba(64,128,255,.14)",
-		accentBorder: "rgba(64,128,255,.35)",
-		userBg: "rgba(64,128,255,.1)",
-		userBorder: "rgba(64,128,255,.3)",
-	},
-};
-
-function isShareTheme(value: unknown): value is ShareThemeId {
-	return typeof value === "string" && value in SHARE_PALETTES;
-}
-
-/** 分享页与过期页共用的样式（按主题生成 CSS 变量）。 */
-function shareCss(theme: ShareThemeId): string {
-	const p = SHARE_PALETTES[theme];
-	return `
-:root{color-scheme:${p.scheme};--bg:${p.bg};--panel:${p.panel};--panel-alt:${p.panelAlt};--border:${p.border};--fg:${p.fg};--muted:${p.muted};--accent:${p.accent};--accent-soft:${p.accentSoft};--accent-border:${p.accentBorder};--user-bg:${p.userBg};--user-border:${p.userBorder}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
-header{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:.6rem;padding:.9rem 1.2rem;background:var(--panel);border-bottom:1px solid var(--border)}
-header .badge{font-size:12px;color:var(--accent);border:1px solid var(--accent-border);background:var(--accent-soft);padding:2px 8px;border-radius:6px;white-space:nowrap}
-header h1{font-size:14px;margin:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-main{max-width:860px;margin:0 auto;padding:1.5rem 1.2rem 4rem}
-main.with-toc{max-width:1180px;display:grid;grid-template-columns:220px minmax(0,1fr);gap:1.75rem;align-items:start}
-html{scroll-behavior:smooth}
-.toc{position:sticky;top:4.6rem;max-height:calc(100vh - 6rem);overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:.9rem .8rem}
-.toc-title{font-size:11px;letter-spacing:.08em;color:var(--muted);margin:0 0 .45rem;padding-left:.4rem}
-.toc ul{list-style:none;margin:0;padding:0}
-.toc li{margin:.1rem 0}
-.toc a{display:block;padding:.24rem .4rem;border-radius:6px;color:var(--muted);text-decoration:none;font-size:12.5px;line-height:1.45;border-left:2px solid transparent}
-.toc a:hover{color:var(--fg);background:var(--accent-soft)}
-.toc a.l2{padding-left:1rem}
-.toc a.l3{padding-left:1.8rem}
-.toc a.l4{padding-left:2.6rem}
-@media (max-width:900px){main.with-toc{grid-template-columns:minmax(0,1fr);gap:.9rem}.toc{position:static;max-height:40vh}.demo-note{margin:1rem .9rem 0}}
-article.article{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:1.4rem 1.6rem}
-article.article>*:first-child{margin-top:0}
-h1,h2,h3,h4{line-height:1.35;color:var(--fg);scroll-margin-top:4.5rem}
-h1{font-size:1.6rem;margin:1.4rem 0 .7rem;border-bottom:1px solid var(--border);padding-bottom:.4rem}
-h2{font-size:1.3rem;margin:1.3rem 0 .6rem}
-h3{font-size:1.1rem;margin:1.1rem 0 .5rem}
-p{margin:.7rem 0}
-a{color:var(--accent)}
-code{background:var(--panel-alt);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:.9em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-pre{background:var(--panel-alt);border:1px solid var(--border);border-radius:10px;padding:.9rem 1rem;overflow:auto}
-pre code{background:none;border:0;padding:0;font-size:.86rem;white-space:pre}
-blockquote{margin:.9rem 0;padding:.3rem 1rem;border-left:3px solid var(--accent);background:var(--accent-soft);color:var(--fg);border-radius:0 8px 8px 0}
-ul,ol{margin:.6rem 0;padding-left:1.5rem}
-li{margin:.25rem 0}
-li input{margin-right:.4rem;accent-color:var(--accent)}
-hr{border:0;border-top:1px solid var(--border);margin:1.4rem 0}
-table{border-collapse:collapse;width:100%;margin:.9rem 0;font-size:.92em;display:block;overflow-x:auto}
-th,td{border:1px solid var(--border);padding:.45rem .7rem;text-align:left}
-th{background:var(--panel-alt);color:var(--fg)}
-tr:nth-child(even) td{background:var(--panel-alt)}
-img{max-width:100%;border-radius:8px}
-.msg{margin:1.1rem 0;padding:.9rem 1rem;border-radius:14px}
-.msg.user{background:var(--user-bg);border:1px solid var(--user-border)}
-.msg.bot{background:var(--panel);border:1px solid var(--border)}
-.who{font-size:11px;color:var(--muted);margin-bottom:.35rem}
-.md{word-break:break-word}
-.md>*:first-child{margin-top:0}
-.md>*:last-child{margin-bottom:0}
-.empty{color:var(--muted);text-align:center}
-.thread{min-width:0}
-.fcard{display:flex;align-items:center;gap:.7rem;margin:1rem 0;padding:.7rem .9rem;background:var(--panel);border:1px solid var(--border);border-radius:12px;text-decoration:none;color:var(--fg)}
-a.fcard:hover{border-color:var(--accent-border);background:var(--accent-soft)}
-.fcard-icon{font-size:1.15rem;line-height:1}
-.fcard-text{display:flex;flex-direction:column;min-width:0}
-.fcard-name{font-weight:600;font-size:.92rem;word-break:break-all}
-.fcard-meta{color:var(--muted);font-size:12px}
-.fcard-action{margin-left:auto;color:var(--accent);font-size:12px;white-space:nowrap}
-footer{text-align:center;color:var(--muted);font-size:12px;padding:1.4rem 1rem 2rem}
-/* 出口（NERE-46）：页脚一行跳到仓库 Deploy 段；演示页顶部说明这是只读样例 */
-.share-cta{margin-top:.5rem}
-.share-cta a{color:var(--accent);text-decoration:none;font-weight:600}
-.share-cta a:hover{text-decoration:underline}
-.demo-note{max-width:1180px;margin:1rem auto 0;padding:.6rem 1rem;background:var(--accent-soft);border:1px solid var(--accent-border);border-radius:10px;font-size:13px;color:var(--fg)}
-.demo-note strong{color:var(--accent)}
-.expired{max-width:520px;margin:14vh auto;text-align:center;padding:2rem}
-.expired h1{font-size:1.3rem;margin:0 0 .6rem;border:0}
-.expired p{color:var(--muted)}
-.print-btn{margin-left:auto;flex:none;font:inherit;font-size:12px;line-height:1.4;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-border);border-radius:6px;padding:3px 10px;cursor:pointer;white-space:nowrap}
-.print-btn:hover{background:var(--accent);color:var(--panel);border-color:var(--accent)}
-/* 打印 / 存为 PDF（NERE-39）：只在打印时改写版式，屏幕样式保持原样 */
-@media print{
-@page{margin:14mm 12mm}
-:root{color-scheme:light;--bg:#fff;--panel:#fff;--panel-alt:#f5f6f7;--border:#c9cdd4;--fg:#1d2129;--muted:#4e5969;--accent:#165dff;--accent-soft:#f2f6ff;--accent-border:#bed0f7;--user-bg:#f7f8fa;--user-border:#e5e6eb}
-html{scroll-behavior:auto}
-body{background:#fff;color:var(--fg);font-size:12pt}
-header{position:static;display:block;padding:0 0 .6rem;background:transparent}
-header .badge{display:none}
-header h1{font-size:15pt;overflow:visible;white-space:normal;text-overflow:clip}
-.print-btn{display:none}
-main,main.with-toc{display:block;max-width:none;margin:0;padding:0}
-.toc{position:static;max-height:none;overflow:visible;margin:1rem 0 1.2rem;padding:.6rem .8rem;border-radius:8px;break-inside:avoid;page-break-inside:avoid}
-.toc a{color:var(--fg)}
-article.article{background:transparent;border:0;border-radius:0;padding:0}
-.msg{background:transparent;border:0;border-radius:0;margin:.8rem 0;padding:.2rem 0}
-.msg.user{border-left:3px solid var(--border);padding-left:.9rem}
-a{color:var(--fg);text-decoration:underline}
-h1,h2,h3,h4{break-after:avoid;page-break-after:avoid}
-p,blockquote,ul,ol,pre{break-inside:avoid;page-break-inside:avoid}
-blockquote{background:transparent;border-left:2px solid var(--border)}
-table{display:table;width:100%;overflow:visible;break-inside:avoid;page-break-inside:avoid}
-thead{display:table-header-group}
-tr,th,td{break-inside:avoid;page-break-inside:avoid}
-th{background:#f2f3f5!important;color:var(--fg)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-tr:nth-child(even) td{background:transparent}
-pre{white-space:pre-wrap;word-break:break-word}
-img{break-inside:avoid;page-break-inside:avoid}
-footer{break-inside:avoid;page-break-inside:avoid;border-top:1px solid var(--border);padding:.8rem 0 0}
-/* 出口与演示横条只服务屏幕浏览：打印 / 存 PDF 时不出现（NERE-46） */
-.share-cta,.demo-note{display:none}
-}
-`;
-}
-
-/** 从 write_file 的工具结果里取出文件名与字符数（「已写入 x.md（123 字符）。」）。 */
-function writeFileResult(text: string): { name: string; size: number } | null {
-	const match = /^已写入 (.+?)（(\d+) 字符）。/.exec(text.trim());
-	if (!match) return null;
-	const name = match[1].trim();
-	return name ? { name, size: Number(match[2]) } : null;
-}
-
-/** 工作台文件卡：有文件分享链接时整卡可点，否则只展示文件名与大小。 */
-function shareFileCard(name: string, size: number, href?: string): string {
-	const inner =
-		`<span class="fcard-icon" aria-hidden="true">📄</span>` +
-		`<span class="fcard-text"><span class="fcard-name">${escapeHtml(name)}</span>` +
-		`<span class="fcard-meta">${size} 字符</span></span>` +
-		(href ? `<span class="fcard-action">打开 →</span>` : "");
-	return href
-		? `<a class="fcard" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
-		: `<div class="fcard">${inner}</div>`;
-}
-
-/** 分享页外壳（只读、noindex）。页脚显示署名与生成时间；expiresAt > 0 时再显示有效期。 */
-function sharePage(
-	title: string,
-	body: string,
-	expiresAt = 0,
-	theme: ShareThemeId = "dark",
-	toc = "",
-	meta: { author: string; createdAt: string } = { author: "π Harness", createdAt: new Date().toISOString() },
-	demo = false,
-): string {
-	const until =
-		expiresAt > 0
-			? ` · 链接有效期至 ${new Date(expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}`
-			: "";
-	const generated = new Date(meta.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
-	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · 分享</title>
-<style>${shareCss(theme)}</style></head><body>
-<header><span class="badge">只读分享</span><h1>${escapeHtml(title)}</h1><button class="print-btn" type="button" onclick="window.print()">打印 / 存为 PDF</button></header>
-${demo ? `<div class="demo-note"><strong>这是只读样例</strong>：内容是一份只读快照，看懂了就自己部署一个。</div>` : ""}
-<main class="${toc ? "with-toc" : "single"}">${toc}${body}</main>
-<footer>由 ${escapeHtml(meta.author)} 分享 · 生成于 ${escapeHtml(generated)} · 只读视图${escapeHtml(until)}<div class="share-cta"><a href="https://github.com/scudong/cloudflare-free-web-pi?utm_source=share#deploy" target="_blank" rel="noopener noreferrer">用同样的方式做一个 →</a></div></footer>
-</body></html>`;
-}
-
-/** 过期页（410）。 */
-function expiredSharePage(title: string, expiresAt: number, theme: ShareThemeId = "dark"): SharePage {
-	const until = new Date(expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
-	const body = `<div class="expired"><h1>分享链接已过期</h1><p>「${escapeHtml(title || "分享内容")}」的链接已于 ${escapeHtml(until)} 失效。</p><p>如需继续分享，请回到 pi-harness 重新生成。</p></div>`;
-	return {
-		status: 410,
-		contentType: "text/html; charset=utf-8",
-		body: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>分享已过期</title><style>${shareCss(theme)}</style></head><body>${body}</body></html>`,
-	};
-}
-
-/* ---------------- 分享记录（v0.55.0）：API 与模型工具共用同一套落库 / 复用逻辑 ---------------- */
-
-type ShareKind = "conversation" | "file";
-type ShareRecord = { token: string; kind: string; name: string; expiresAt: number; theme: string; createdAt: string };
-
-/** 未过期的分享链接（新→旧）。 */
-function listShareRows(conversationId: string, kind: ShareKind, name?: string): ShareRecord[] {
-	const now = Date.now();
-	const rows =
-		kind === "file"
-			? sqlFacade!.exec(
-					"SELECT token, kind, name, expires_at, theme, created_at FROM shares WHERE kind = 'file' AND session_id = ? AND name = ? AND (expires_at = 0 OR expires_at > ?) ORDER BY created_at DESC",
-					conversationId, (name ?? "").trim(), now,
-				).toArray()
-			: sqlFacade!.exec(
-					"SELECT token, kind, name, expires_at, theme, created_at FROM shares WHERE kind = 'conversation' AND session_id = ? AND (expires_at = 0 OR expires_at > ?) ORDER BY created_at DESC",
-					conversationId, now,
-				).toArray();
-	return (rows as { token: string; kind: string; name: string; expires_at: number; theme: string; created_at: string }[]).map(
-		(row) => ({
-			token: row.token,
-			kind: row.kind,
-			name: row.name,
-			expiresAt: Number(row.expires_at ?? 0),
-			theme: row.theme ?? "dark",
-			createdAt: row.created_at,
-		}),
-	);
-}
-
-/** 生成一条分享记录。ttlSeconds 已解析：0 = 永久。 */
-function createShareRow(
-	conversationId: string,
-	kind: ShareKind,
-	name: string,
-	ttlSeconds: number,
-	theme: string | undefined,
-	tokenPrefix: string,
-): ShareRecord {
-	const fileName = name.trim();
-	if (kind === "file") {
-		if (!fileName) throw new Error("缺少文件名");
-		const exists = sqlFacade!.exec(
-			"SELECT 1 AS ok FROM vfs_v2 WHERE conversation_id = ? AND name = ?",
-			conversationId, fileName,
-		).toArray();
-		if (!exists.length) throw new Error("文件不存在");
-	}
-	// 清掉已过期的分享，避免表无限增长
-	sqlFacade!.exec("DELETE FROM shares WHERE expires_at > 0 AND expires_at <= ?", Date.now());
-	const expiresAt = ttlSeconds > 0 ? Date.now() + Math.min(ttlSeconds, MAX_SHARE_TTL) * 1000 : 0;
-	const themeId: ShareThemeId = isShareTheme(theme) ? theme : "dark";
-	const bytes = crypto.getRandomValues(new Uint8Array(12));
-	const token = `${tokenPrefix}${[...bytes].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("")}`;
-	const createdAt = new Date().toISOString();
-	sqlFacade!.exec(
-		"INSERT INTO shares (token, kind, session_id, name, expires_at, theme, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		token, kind, conversationId, fileName, expiresAt, themeId, createdAt,
-	);
-	return { token, kind, name: fileName, expiresAt, theme: themeId, createdAt };
-}
-
-/** 复用条件：未过期，且有效期覆盖本次请求（显式 0 = 永久）。 */
-function reusableShare(rows: ShareRecord[], ttlSeconds: number): ShareRecord | undefined {
-	// 显式「永久」只能复用永久的；其它 TTL 允许 10 秒误差，避免「7 天」重问时因几毫秒差新建 token
-	if (ttlSeconds === 0) return rows.find((row) => row.expiresAt === 0);
-	const needed = Date.now() + ttlSeconds * 1000 - 10_000;
-	return rows.find((row) => row.expiresAt === 0 || row.expiresAt >= needed);
-}
-
-/** 绝对分享链接：优先本次请求 Origin（alarm 触发时回落到 share_origin 设置）。 */
-function shareUrlForToken(token: string): string {
-	const origin = scope().origin || getSetting("share_origin", "");
-	return `${origin}/s/${token}`;
-}
-
-function shareExpiryLabel(expiresAt: number): string {
-	return expiresAt > 0
-		? `有效期至 ${new Date(expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}`
-		: "永久有效";
-}
-
-/** 模型工具入口：先复用未过期链接，否则按解析后的 TTL 新建。 */
-function shareForTool(
-	kind: ShareKind,
-	conversationId: string,
-	name: string,
-	ttlValue: unknown,
-): { share: ShareRecord; reused: boolean } {
-	const ttl = shareTtlSeconds(ttlValue);
-	const explicit = ttlValue !== undefined && ttlValue !== null && ttlValue !== "";
-	const unexpired = listShareRows(conversationId, kind, name.trim());
-	// 不传 ttlSeconds（沿用设置默认）时直接复用任意未过期链接；显式要求则必须覆盖本次 TTL
-	const existing = explicit ? reusableShare(unexpired, ttl) : unexpired[0];
-	if (existing) return { share: existing, reused: true };
-	const userKey = scope().userKey ?? "";
-	const tokenPrefix = USER_ID_RE.test(userKey) ? `${userKey}.` : "";
-	return { share: createShareRow(conversationId, kind, name, ttl, undefined, tokenPrefix), reused: false };
-}
-
-function sessionTitle(conversationId: string): string {
-	try {
-		const rows = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", conversationId).toArray() as { title?: string }[];
-		return rows[0]?.title?.trim() || "当前对话";
-	} catch {
-		return "当前对话";
-	}
-}
-
 export class SpikeAgent extends DurableObject {
 	/** pi-durable 的存储句柄，用来枚举会话（Harness 本身不提供列表 API）。 */
 	/** 正在跑对话的会话 id，用于避免定时任务与用户对话并发。 */
@@ -2219,6 +1629,8 @@ export class SpikeAgent extends DurableObject {
 	private storageRef: { scanConversations(q: object, limit: number, cursor: undefined, context: unknown): Promise<unknown> } | null = null;
 
 	private harness: Harness | null = null;
+	/** 测试观测点（TEST_HARNESS_STATS=1）：本实例真正 open() 的次数；/s/ 零初始化靠它断言。 */
+	private harnessOpens = 0;
 	/** DDL 迁移只跑一次：并发的 open()/alarm() 共享同一个 Promise。 */
 	private migrated: Promise<void> | null = null;
 
@@ -2261,6 +1673,7 @@ export class SpikeAgent extends DurableObject {
 			this.customExt = buildCustomToolsExtension(sqlFacade!) as never;
 			if (this.customExt) registry.install(this.customExt as never);
 			this.harness = await Harness.open(storage, { models, registry, settings: { compaction: compactionSettings() } }, ctx);
+			this.harnessOpens++;
 			scope().harness = this.harness;
 			this.harness.resume();
 		}
@@ -2474,6 +1887,22 @@ export class SpikeAgent extends DurableObject {
 				} catch {
 					// 没有目标时忽略
 				}
+			},
+		};
+	}
+
+	/**
+	 * 分享域的 Harness 端口：只有会话分享真正要读条目时才会走到这里。
+	 * 文件分享、失效 token、过期 token 由 share-service 在 open() 之前短路。
+	 */
+	private shareRuntime(): ShareRuntime {
+		return {
+			conversationId: async (sessionId) => String((await this.conversationFor(await this.open(), sessionId)).id),
+			entries: async (sessionId) => {
+				const conversation = await (await this.open()).conversation(Number(sessionId) as never, ctx);
+				if (!conversation) return [];
+				const page = await conversation.entries({}, 500, undefined, ctx);
+				return page.items;
 			},
 		};
 	}
@@ -2925,156 +2354,6 @@ export class SpikeAgent extends DurableObject {
 		return counts;
 	}
 
-	/** 生成分享链接（只读）。ttlSeconds <= 0 表示永久；theme 记录分享页配色。 */
-	async createShare(
-		sessionId: string | undefined,
-		kind: "conversation" | "file",
-		name?: string,
-		ttlSeconds?: number,
-		theme?: string,
-		tokenPrefix = "",
-	): Promise<{ token: string; expiresAt: number }> {
-		await this.open();
-		const conversation = await this.conversationFor(await this.open(), sessionId);
-		const share = createShareRow(
-			String(conversation.id),
-			kind,
-			name ?? "",
-			shareTtlSeconds(ttlSeconds),
-			theme,
-			tokenPrefix,
-		);
-		return { token: share.token, expiresAt: share.expiresAt };
-	}
-
-	/** 列出尚未过期的分享链接（v0.40.0）：打开分享弹窗时直接复用，避免每次生成新 token。 */
-	async listShares(
-		sessionId: string | undefined,
-		kind: "conversation" | "file",
-		name?: string,
-	): Promise<ShareRecord[]> {
-		await this.open();
-		const conversation = await this.conversationFor(await this.open(), sessionId);
-		return listShareRows(String(conversation.id), kind, name);
-	}
-
-	/** 分享页（服务端渲染，只读）。html 文件原样输出，其余按 Markdown 渲染。 */
-	async renderShare(token: string, themeOverride?: string | null): Promise<SharePage | null> {
-		await this.open();
-		const rows = sqlFacade!.exec(
-			"SELECT kind, session_id, name, created_at, expires_at, theme FROM shares WHERE token = ?",
-			token,
-		).toArray() as {
-			kind: string;
-			session_id: string;
-			name: string;
-			created_at: string;
-			expires_at: number;
-			theme: string;
-		}[];
-		const share = rows[0];
-		if (!share) return null;
-		// ?theme= 可临时覆盖；否则用分享时记录的主题，老链接回落深色
-		const theme: ShareThemeId = isShareTheme(themeOverride)
-			? themeOverride
-			: isShareTheme(share.theme)
-				? share.theme
-				: "dark";
-		const expiresAt = Number(share.expires_at ?? 0);
-		if (expiresAt > 0 && expiresAt <= Date.now()) return expiredSharePage(share.name, expiresAt, theme);
-		// 登录页「看一个真实对话」落到的那条分享：顶部加一条只读样例说明（NERE-46）。
-		const demoToken = demoShareToken((this.env as { DEMO_SHARE_URL?: string }).DEMO_SHARE_URL);
-		const demo = demoToken !== "" && demoToken === token;
-
-		if (share.kind === "file") {
-			const file = sqlFacade!.exec(
-				"SELECT content FROM vfs_v2 WHERE conversation_id = ? AND name = ?",
-				share.session_id, share.name,
-			).toArray() as { content: string }[];
-			if (!file[0]) {
-				return { status: 404, contentType: "text/plain; charset=utf-8", body: "文件已删除，分享不再可用" };
-			}
-			const content = file[0].content;
-			// HTML 原样输出：独立页面才能带样式与脚本。CSP sandbox 让它落在不透明源，
-			// 即使有人打开恶意产物，也读不到本站 cookie / Storage。
-			if (/\.html?$/i.test(share.name)) {
-				return {
-					status: 200,
-					contentType: "text/html; charset=utf-8",
-					body: content,
-					headers: { "content-security-policy": "sandbox allow-scripts" },
-				};
-			}
-			const headings: ShareHeading[] = [];
-			const usedIds = new Set<string>();
-			const article = markdownToHtml(content, { headings, usedIds });
-			return {
-				status: 200,
-				contentType: "text/html; charset=utf-8",
-				body: sharePage(
-					share.name || "文件",
-					`<article class="article">${article}</article>`,
-					expiresAt,
-					theme,
-					shareToc(headings),
-					{ author: shareAuthor(), createdAt: share.created_at },
-					demo,
-				),
-			};
-		}
-
-		const conversation = await (await this.open()).conversation(Number(share.session_id) as never, ctx);
-		const page = conversation
-			? ((await conversation.entries({}, 500, undefined, ctx)) as { items: readonly Record<string, unknown>[] })
-			: { items: [] };
-		const meta = sqlFacade!.exec("SELECT title FROM sessions_meta WHERE id = ?", share.session_id).toArray() as { title: string }[];
-		const title = meta[0]?.title ?? "对话";
-		const parts: string[] = [];
-		// 对话分享也生成目录：所有消息共用一套锚点 id（v0.41.0）
-		const headings: ShareHeading[] = [];
-		const usedIds = new Set<string>();
-		for (const entry of [...page.items].reverse()) {
-			const kind = String(entry.kind ?? "");
-			const text = entryText(entry.model).trim();
-			if (!text) continue;
-			if (kind === "pi.user") {
-				parts.push(`<div class="msg user"><div class="who">用户</div><div class="md">${markdownToHtml(text, { headings, usedIds })}</div></div>`);
-			} else if (kind === "pi.assistant") {
-				parts.push(`<div class="msg bot"><div class="who">助手</div><div class="md">${markdownToHtml(text, { headings, usedIds })}</div></div>`);
-			} else if (kind === "pi.tool-result") {
-				// 工作台写入在分享页里补一张文件卡（NERE-13）：有同一文件的分享链接时可直接打开。
-				const blocks = Array.isArray(entry.model) ? (entry.model as { toolName?: unknown; isError?: unknown }[]) : [];
-				const block = blocks[0];
-				if (block?.toolName === "write_file" && !block.isError) {
-					const file = writeFileResult(text);
-					if (file) {
-						const tokenRows = sqlFacade!.exec(
-							"SELECT token FROM shares WHERE kind = 'file' AND session_id = ? AND name = ? AND (expires_at = 0 OR expires_at > ?) ORDER BY created_at DESC LIMIT 1",
-							String(share.session_id), file.name, Date.now(),
-						).toArray() as { token: string }[];
-						const href = tokenRows[0]?.token ? `/s/${tokenRows[0].token}` : undefined;
-						parts.push(shareFileCard(file.name, file.size, href));
-					}
-				}
-			}
-		}
-		return {
-			status: 200,
-			contentType: "text/html; charset=utf-8",
-			body: sharePage(
-				title,
-				// 消息与文件卡必须包在一个容器里：main.with-toc 是两列网格，
-				// 顶层节点会各自成为网格项，导致文件卡跑到目录下面。
-				`<div class="thread">${parts.join("") || "<p class='empty'>（暂无内容）</p>"}</div>`,
-				expiresAt,
-				theme,
-				shareToc(headings),
-				{ author: shareAuthor(), createdAt: share.created_at },
-				demo,
-			),
-		};
-	}
-
 	/** 导出会话为 Markdown（含工具调用摘要）。 */
 	async exportMarkdown(sessionId?: string): Promise<{ markdown: string; title: string; sessionId: string }> {
 		const harness = await this.open();
@@ -3524,6 +2803,11 @@ export class SpikeAgent extends DurableObject {
 	override async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 		const env = this.env as unknown as AppEnv;
+		// 测试观测点：Harness 真正 open() 的次数。放在路由之前，自身不触发 open()（NERE-22 验收）。
+		if (url.pathname === "/debug/harness" && request.method === "GET") {
+			if (env.TEST_HARNESS_STATS !== "1") return Response.json({ error: "not found" }, { status: 404 });
+			return Response.json({ opens: this.harnessOpens });
+		}
 		const scopeId = (this.ctx.id as { name?: string }).name ?? this.ctx.id.toString();
 		const userKey = request.headers.get("x-pi-user") ?? "";
 		// 每个请求绑定自己的 SQL / Harness，避免同一 isolate 里的其它 DO 串数据
@@ -3549,6 +2833,7 @@ export class SpikeAgent extends DurableObject {
 					open: () => this.open(),
 					legacy: () => this.handleLegacyFetch(request),
 					sessionRuntime: this.sessionRuntime(),
+					shareRuntime: this.shareRuntime(),
 					settings: { get: getSetting },
 					webFetch: (target) => webFetchPageContent(target, env.DEEPSEEK_API_KEY ?? null),
 				});
@@ -3679,67 +2964,6 @@ export class SpikeAgent extends DurableObject {
 				} catch (err) {
 					return Response.json({ error: String(err).slice(0, 200) }, { status: 400 });
 				}
-			}
-			if (url.pathname === "/share" && request.method === "POST") {
-				const body = (await request.json()) as {
-					sessionId?: string;
-					kind?: "conversation" | "file";
-					name?: string;
-					ttlSeconds?: number;
-					theme?: string;
-				};
-				try {
-					const userKey = request.headers.get("x-pi-user") ?? "";
-					const tokenPrefix = USER_ID_RE.test(userKey) ? `${userKey}.` : "";
-					const { token, expiresAt } = await this.createShare(
-						body.sessionId,
-						body.kind === "file" ? "file" : "conversation",
-						body.name,
-						body.ttlSeconds,
-						body.theme,
-						tokenPrefix,
-					);
-					// 用请求自身的域名拼绝对地址：页面在哪个域名打开，链接就指向哪里
-					const origin = new URL(request.url).origin;
-					return Response.json({ ok: true, token, url: `${origin}/s/${token}`, expiresAt });
-				} catch (err) {
-					return Response.json(
-						{ error: err instanceof Error ? err.message : String(err) },
-						{ status: 400 },
-					);
-				}
-			}
-			if (url.pathname === "/shares" && request.method === "GET") {
-				const kind = url.searchParams.get("kind") === "file" ? "file" : "conversation";
-				const name = url.searchParams.get("name") ?? undefined;
-				if (kind === "file" && !name?.trim()) {
-					return Response.json({ error: "缺少文件名" }, { status: 400 });
-				}
-				const origin = new URL(request.url).origin;
-				const shares = (await this.listShares(url.searchParams.get("sessionId") ?? undefined, kind, name)).map(
-					(share) => ({ ...share, url: `${origin}/s/${share.token}` }),
-				);
-				return Response.json({ shares });
-			}
-			if (url.pathname.startsWith("/s/") && request.method === "GET") {
-				const page = await this.renderShare(url.pathname.slice(3), url.searchParams.get("theme"));
-				if (!page) {
-					return new Response("分享链接不存在或已失效", {
-						status: 404,
-						headers: { "content-type": "text/plain; charset=utf-8" },
-					});
-				}
-				return new Response(page.body, {
-					status: page.status,
-					headers: {
-						"content-type": page.contentType,
-						"cache-control": "no-store",
-						"x-robots-tag": "noindex, nofollow",
-						"referrer-policy": "no-referrer",
-						"x-content-type-options": "nosniff",
-						...page.headers,
-					},
-				});
 			}
 			if (url.pathname === "/automations" && request.method === "GET") {
 				return Response.json({ automations: listAutomations() });
@@ -4337,34 +3561,6 @@ const SESSION_COOKIE = "pi_access";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 /** 主人（沿用旧版单一 token）与邀请用户（u_ 前缀）的区分（v0.43.0）。 */
 const OWNER_ID = "owner";
-const USER_ID_RE = /^u_[a-z0-9]{6,16}$/;
-
-/**
- * 登录页演示链接（NERE-13）：只接受站内 /s/<token> 或 https 绝对地址。
- * 配置写错时宁可不显示入口，也不把登录页变成开放跳转。
- */
-function demoShareUrl(raw: unknown): string {
-	const value = typeof raw === "string" ? raw.trim() : "";
-	if (!value || value.length > 300) return "";
-	if (/^\/s\/[A-Za-z0-9._~-]+$/.test(value)) return value;
-	if (/^https:\/\/[^\s"'<>]+$/.test(value)) return value;
-	return "";
-}
-
-/**
- * 演示分享的 token（NERE-46）：DEMO_SHARE_URL 指向的那条 /s/<token> 在分享页顶部
- * 加「这是只读样例」横条。配置是绝对地址时取 pathname，取不到就不加横幅。
- */
-function demoShareToken(raw: unknown): string {
-	const value = demoShareUrl(raw);
-	if (!value) return "";
-	try {
-		const parts = new URL(value, "https://demo.invalid").pathname.split("/");
-		return parts.length === 3 && parts[1] === "s" ? decodeURIComponent(parts[2]) : "";
-	} catch {
-		return "";
-	}
-}
 
 /** 旧版主人令牌 = HMAC(ACCESS_PASSWORD, 固定串)，改密码即全体失效。 */
 async function accessToken(password: string): Promise<string> {

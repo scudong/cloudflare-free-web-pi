@@ -6,6 +6,7 @@ import { AppError } from "../../src/worker/http/errors";
 import { dispatch } from "../../src/worker/routes";
 import type { Route } from "../../src/worker/http/router";
 import type { SessionRuntime } from "../../src/worker/services/session-service";
+import type { ShareRuntime } from "../../src/worker/http/ports";
 
 const sql: SqlHandle = { exec: () => ({ toArray: () => [] }) };
 const env = {} as AppEnv;
@@ -20,6 +21,10 @@ const sessionRuntime: SessionRuntime = {
 	modelFor: () => "deepseek-flash",
 	pauseGoal: () => {},
 };
+const shareRuntime: ShareRuntime = {
+	conversationId: async () => "1",
+	entries: async () => [],
+};
 
 function context(overrides: Partial<Parameters<typeof buildContext>[0]> = {}) {
 	return buildContext({
@@ -33,6 +38,7 @@ function context(overrides: Partial<Parameters<typeof buildContext>[0]> = {}) {
 		open: async () => harness,
 		legacy: async () => new Response("legacy"),
 		sessionRuntime,
+		shareRuntime,
 		settings: { get: (_key, fallback) => fallback },
 		webFetch: async () => ({ ok: false, kind: "error", message: "stub" }),
 		...overrides,
@@ -108,6 +114,14 @@ describe("dispatch", () => {
 		const open = vi.fn(async () => harness);
 		const ctx = context({ open });
 		await dispatch(ctx, [route({ needsHarness: false })]);
+		expect(open).not.toHaveBeenCalled();
+	});
+
+	it("真实路由表里 GET /s/<token> 不 open Harness（阶段 3）", async () => {
+		const open = vi.fn(async () => harness);
+		const ctx = context({ req: new Request("https://pi.example/s/doesnotexist"), open });
+		const res = await dispatch(ctx);
+		expect(res.status).toBe(404);
 		expect(open).not.toHaveBeenCalled();
 	});
 

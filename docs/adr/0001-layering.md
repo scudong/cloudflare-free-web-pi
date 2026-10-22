@@ -214,6 +214,7 @@ export type RequestContext = {
   legacy(): Promise<Response>;      // 阶段 0/1-4 的过渡委托，阶段 6 删除
   // 域端口（2026-10-22 现状）：由 DO 组合根实现，Route 传给对应 Service
   readonly sessionRuntime: SessionRuntime;   // 阶段 1：Harness open/重试/模型
+  readonly shareRuntime: ShareRuntime;       // 阶段 3：会话 id 解析 / 会话条目（/s/ 不 open）
   readonly settings: KbSettings;             // 阶段 2：替代模块级 getSetting（类型暂在 services/kb-service.ts）
   webFetch(url: string): Promise<WebFetchResult>;  // 阶段 2：网页抓取（web_fetch_page 与链接 ingest 共用）
 };
@@ -321,6 +322,7 @@ chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./servi
 - 2026-10-21：ADR 转 Accepted（PR #18）。NERE-21 子任务按 stage 排期：0a=NERE-27、0b=NERE-28、1=NERE-29、2=NERE-30、3=NERE-31（吸收 NERE-22）、4=NERE-32、5=NERE-33、6=NERE-34。
 - 2026-10-22：阶段 0a 合并（PR #21，`958c950`）：`src/worker/db/migrations.ts` 落地，`worker.ts` 内 `ensureTables` 计数 0，`open()` 走 `ensureMigrated()`。空的 `sessions_meta` 首启五列由 `tests/unit/migrations.test.ts` 与 `tests/api/api.test.ts` 空库用例守住。
 - 2026-10-22：阶段 0b 路由骨架（PR #23，基线 `1553908`）：`http/context|errors|router` + `routes/index` 落地，`handleFetch` 重命名为 `handleLegacyFetch` 并委托；`scripts/check-layering.sh` 接入 CI。`npm test` 212 passed，`check-layering` 退出 0；auth/version/sessions/bootstrap/chat/`/s/`/404 探针前后响应一致。
+- 2026-10-22：阶段 3 分享域（NERE-31，吸收 NERE-22）：`routes/share.ts` + `services/share-service.ts` + `repo/shares-repo.ts` + `lib/share-render.ts`（`lib/entries.ts` 放 entry 取值）；新端口 `ShareRuntime`/`SettingsPort`/`USER_ID_RE` 按 §9.2 落在 `http/ports.ts`。`GET /s/` 标 `needsHarness: false`：404/410/文件分享零 Harness，会话分享命中 token 后才经 `shareRuntime.entries()` 读条目。`tests/api/share-cold.test.ts` 用空 persist 首个请求 + `GET /debug/harness` 计数断言 `open()` 为 0；渲染三块（打印按钮/`@media print`、Deploy 出口、演示横条）由 `tests/unit/share-render.test.ts` 与既有金标守住。
 - 2026-10-22：阶段 2 知识库（NERE-30，基线 `b071a7f`）：`routes/kb.ts`（9 个端点）→ `services/kb-service.ts` → `repo/kb-repo.ts`，纯函数迁入 `lib/kb.ts`；AI / Vectorize / settings / DeepSeek 抓取经端口注入，Service 不读 `scope()`。`RequestContext` 增加 `settings` 与 `webFetch` 端口。`/kb*` 从 `handleLegacyFetch` 删除，ingest 错误改抛 `KbIngestError`、响应体与状态码逐字不变。`npm test` 229 passed，`check-layering` 退出 0。
 - 2026-10-22：operator 追加产品插入顺序（§9.8）：阶段 2 后先 NERE-40，阶段 3 后先 NERE-42，阶段 4-6 不插入；阶段 2 关闭前须确认 NERE-40 的 wakeup 已触发/排队。
 - 2026-10-22：阶段 2 合并（PR #28，`a46469a`）：`routes/kb.ts` → `kb-service` → `kb-repo`，纯函数进 `lib/kb.ts`；`handleLegacyFetch` 缩到 772 行、`src/worker.ts` 4664 行。NERE-40 的 wakeup 已触发（`fire_count=1`）但 issue 仍在 backlog，已手动置 `todo` 确保开工；NERE-31 未提升。
