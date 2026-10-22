@@ -96,6 +96,21 @@ async function chat(sessionId: string, message: string) {
 	return parseSse(await res.text());
 }
 
+/** 非流式：`POST /api/chat` 返回 { answer, tools }。 */
+async function chatOnce(sessionId: string, message: string): Promise<string> {
+	const res = await post("/api/chat", { message, sessionId });
+	expect(res.status).toBe(200);
+	return str(obj(res.json)?.answer);
+}
+
+/** 会话标题（sessions_meta 经 `GET /api/sessions` 暴露）。 */
+async function titleOf(sessionId: string): Promise<string> {
+	const list = await api("/api/sessions");
+	const rows = arr(obj(list.json)?.sessions).map(obj);
+	const row = rows.find((item) => item && item.id === sessionId);
+	return str(row?.title);
+}
+
 type ShareInfo = { url: string; expiresAt: number; reused: boolean; name: string; kind: string };
 
 function shareEnds(events: { event: string; data: Record<string, unknown> }[]): { share: ShareInfo }[] {
@@ -256,5 +271,26 @@ describe("分享工具（端到端，假模型）", () => {
 		} finally {
 			await post("/api/settings", { displayName: "", shareTtlSeconds: 604800 });
 		}
+	});
+});
+
+describe("对话提交路径（NERE-33：/chat 与 /chat/stream 共用 chat-service）", () => {
+	it("同一输入下流式与非流式返回相同助手文本，并写入相同的 sessions_meta.title", async () => {
+		const prompt = "同一个问题";
+		const reply = "这是同一条回答。";
+
+		fake.setSteps([{ text: reply }]);
+		const plain = await newSession();
+		const plainAnswer = await chatOnce(plain, prompt);
+		expect(plainAnswer).toBe(reply);
+
+		fake.setSteps([{ text: reply }]);
+		const streamed = await newSession();
+		const events = await chat(streamed, prompt);
+		const done = events.find((event) => event.event === "done");
+		expect(str(done?.data.answer)).toBe(plainAnswer);
+
+		expect(await titleOf(plain)).toBe(prompt);
+		expect(await titleOf(streamed)).toBe(await titleOf(plain));
 	});
 });
