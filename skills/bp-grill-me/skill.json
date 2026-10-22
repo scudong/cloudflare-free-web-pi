@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "bp-grill-me",
+  "version": "2.88.9",
+  "description": "用连续追问压力测试计划，区分事实与决策，逐个解决关键分歧后再进入实施。",
+  "author": "Daniel",
+  "source": "https://github.com/danielvm-git/bigpowers/tree/main/skills/grill-me",
+  "license": "MIT",
+  "runtime": "prompt",
+  "tags": ["planning", "review", "decision"],
+  "requires": {
+    "tools": ["read_file", "list_files", "web_fetch_page"],
+    "bindings": [],
+    "network": []
+  },
+  "contentHash": "sha256:1aaf46b88ab4eea86da6361d4fb27983348fafc9aff2bef35db348b02ee5f84a"
+}

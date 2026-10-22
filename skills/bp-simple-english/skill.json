@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "bp-simple-english",
+  "version": "2.88.9",
+  "description": "用简化技术英语规则改写文档和说明，句子短、术语唯一、步骤可执行。",
+  "author": "Daniel",
+  "source": "https://github.com/danielvm-git/bigpowers/tree/main/skills/simple-english",
+  "license": "MIT",
+  "runtime": "prompt",
+  "tags": ["writing", "documentation", "english"],
+  "requires": {
+    "tools": [],
+    "bindings": [],
+    "network": []
+  },
+  "contentHash": "sha256:311060a051393656553088c4690bccc3ce4638a6c698dd4189acbc6e998630be"
+}
