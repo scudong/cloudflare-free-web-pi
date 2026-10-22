@@ -37,7 +37,7 @@ export const chatRoutes: readonly Route[] = [
 		handle: async (ctx) => {
 			const body = (await ctx.req.json()) as { message: string; sessionId?: string; images?: string[] };
 			const chat = service(ctx);
-			// prepare 失败仍是 HTTP 500（与阶段 4 之前一致）；进入泵之后才走 SSE error 帧。
+			// prepare 失败走 HTTP 错误（含同会话并发的 409 chat_busy）；进入泵之后才走 SSE error 帧。
 			const prepared = await chat.prepare({ message: body.message, sessionId: body.sessionId, images: body.images });
 			const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
 			const writer = writable.getWriter();

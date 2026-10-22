@@ -5,8 +5,11 @@
 
 import type { KbRef } from "../lib/kb";
 
-/** `app_settings` 读取端口（阶段 2 的 KbSettings 同形，阶段 6 统一收口）。 */
-export type SettingsPort = { get(key: string, fallback: string): string };
+/**
+ * `app_settings` 读取端口（阶段 2 的 KbSettings 同形，阶段 6 统一收口）。
+ * `snapshot` 供 HTTP 请求级缓存一次读全表；测试/极简实现可只给 `get`。
+ */
+export type SettingsPort = { get(key: string, fallback: string): string; snapshot?(): Record<string, string> };
 
 /** 邀请用户 id 形如 u_ab12cd34；新分享 token 以 `<userId>.` 前缀路由到该用户的 DO。 */
 export const USER_ID_RE = /^u_[a-z0-9]{6,16}$/;
@@ -67,15 +70,18 @@ export type McpRuntime = { rebuild(): Promise<number> };
 /**
  * 并发闸门（原 DO 的 `activeChats`）：同一 DO 内同一会话同时只跑一次提交。
  * 状态由 DO 组合根持有（`createChatGate()` 一次），Service 负责 enter/exit 时机。
+ * `tryEnter` 是原子的抢占：已在跑时返回 false（第二个 `/chat` 据此回 409）。
  */
-export type ChatGate = { has(key: string): boolean; enter(key: string): void; exit(key: string): void };
+export type ChatGate = { has(key: string): boolean; tryEnter(key: string): boolean; exit(key: string): void };
 
 export function createChatGate(): ChatGate {
 	const active = new Set<string>();
 	return {
 		has: (key) => active.has(key),
-		enter: (key) => {
+		tryEnter: (key) => {
+			if (active.has(key)) return false;
 			active.add(key);
+			return true;
 		},
 		exit: (key) => {
 			active.delete(key);

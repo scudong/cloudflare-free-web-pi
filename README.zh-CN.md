@@ -145,8 +145,8 @@ npx wrangler deploy
 | GET | `/api/sessions` | 会话列表 |
 | POST | `/api/sessions` | 新建会话 |
 | PATCH / DELETE | `/api/sessions` | 重命名 / 删除。删除会级联清空该会话的分享、文件、计划、审批/许可、问题与 KB 命中旁路；响应 `{ok:true,deleted:{shares,files,plans,approvals,approvalGrants,questions,kbRefs}}` |
-| POST | `/api/chat` | `{message, sessionId?, images?}` → `{answer, tools}` |
-| POST | `/api/chat/stream` | 同上，SSE：`text` / `tool_start` / `tool_end` / `done`；`done` 在本轮命中知识库时透传 `kbRefs`（与 entry 同一份，未命中不带该字段） |
+| POST | `/api/chat` | `{message, sessionId?, images?}` → `{answer, tools}`；同会话已有对话在跑时直接 409 `{code:"chat_busy", retryable:true}`，不再排队 |
+| POST | `/api/chat/stream` | 同上，SSE：`text` / `tool_start` / `tool_end` / `done`；`done` 在本轮命中知识库时透传 `kbRefs`（与 entry 同一份，未命中不带该字段）；同会话并发时与 `/chat` 一样在建流前返回 409 `chat_busy` |
 | GET | `/api/entries?sessionId=` | 会话转录；命中知识库的 assistant entry 带 `kbRefs: {docId, chunkId, chunkSeq, title, source?}[]`，未命中不带该字段 |
 | GET | `/api/files?sessionId=` | 工作台文件列表 |
 | GET | `/api/files/content?sessionId=&name=` | 文件内容 |
@@ -179,7 +179,7 @@ npx wrangler deploy
 | GET | `/api/users/export?id=` | 导出某用户的完整备份（仅主人；与 `/api/backup` 同形，purge 前留档用） |
 | DELETE | `/api/users/data?id=&confirm=<id>` | 显式清空某用户 DO 的全部数据（仅主人；必须已吊销且 `confirm` 等于用户 id）。不可逆；返回 `{ok,id,purged:{...}}`，重复调用为 0 |
 
-**错误响应（NERE-79）**：所有端点失败时统一返回 `{ error, code, details?, retryable? }`，HTTP 状态码语义不变（400 / 403 / 404 / 409 / 413 / 415 / 422 / 500 / 502 / 504）。`error` 是可直接展示的中文文案，`code` 是稳定分支键（如 `bad_request` / `not_found` / `unsupported_type` / `audit_blocked`），`details` 只在需要结构化原因时出现（如技能审计的 `details.audit`），`retryable` 仅用于可重试的上游失败。兼容期保留旧字段：`POST /api/kb/ingest` 另带 `ok:false` 与 `message`，`POST /api/skills/import` 另带 `ok:false` 与 `installed:false`；未知路径同样返回 `{error:"not found", code:"not_found"}`。
+**错误响应（NERE-79）**：所有端点失败时统一返回 `{ error, code, details?, retryable? }`，HTTP 状态码语义不变（400 / 403 / 404 / 409 / 413 / 415 / 422 / 500 / 502 / 504）。`error` 是可直接展示的中文文案，`code` 是稳定分支键（如 `bad_request` / `not_found` / `unsupported_type` / `audit_blocked` / `chat_busy`），`details` 只在需要结构化原因时出现（如技能审计的 `details.audit`），`retryable` 仅用于可重试的上游失败。兼容期保留旧字段：`POST /api/kb/ingest` 另带 `ok:false` 与 `message`，`POST /api/skills/import` 另带 `ok:false` 与 `installed:false`；未知路径同样返回 `{error:"not found", code:"not_found"}`。
 
 ---
 

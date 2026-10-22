@@ -55,18 +55,24 @@ function fakeAi(options: { failOnCall?: number } = {}): FakeAi {
 }
 
 type VectorRow = { id: string; values: number[]; metadata?: Record<string, string | number> };
+type VectorMatch = { id: string; score: number; metadata?: Record<string, string | number> };
+
 type FakeVector = {
 	upserts: VectorRow[];
 	deleted: string[];
+	queries: number;
+	matches: VectorMatch[];
 	upsert(vectors: VectorRow[]): Promise<unknown>;
 	deleteByIds(ids: string[]): Promise<unknown>;
-	query(vector: number[], options: Record<string, unknown>): Promise<{ matches?: { id: string; score: number }[] }>;
+	query(vector: number[], options: Record<string, unknown>): Promise<{ matches?: VectorMatch[] }>;
 };
 
-function fakeVector(): FakeVector {
+function fakeVector(matches: VectorMatch[] = []): FakeVector {
 	return {
 		upserts: [],
 		deleted: [],
+		queries: 0,
+		matches,
 		async upsert(vectors) {
 			this.upserts.push(...vectors);
 		},
@@ -74,7 +80,8 @@ function fakeVector(): FakeVector {
 			this.deleted.push(...ids);
 		},
 		async query() {
-			return { matches: [] };
+			this.queries += 1;
+			return { matches: this.matches };
 		},
 	};
 }
@@ -186,6 +193,24 @@ describe("kb-service：向量端口", () => {
 			const hits = await kb.searchAsync("久期");
 			expect(hits[0]!.title).toBe("债券研究笔记");
 			expect(ai.calls).toEqual([]);
+		}),
+	);
+
+	it(
+		"prefetchPreview 只检索一次：hybrid 下 1 次 embedding、1 次向量查询（NERE-82 P2-3）",
+		withDb(async (sql) => {
+			await service(sql).add(DOC);
+			const chunkId = service(sql).search("久期")[0]!.chunkId;
+			const ai = fakeAi();
+			const vec = fakeVector([{ id: `scope-a:${chunkId}`, score: 0.9, metadata: { scope: "scope-a" } }]);
+			const kb = service(sql, { env: { AI: ai, KB_VEC: vec }, settings: hybridSettings });
+
+			const preview = await kb.prefetchPreview("久期");
+			expect(preview.enabled).toBe(true);
+			expect(preview.hits.length).toBeGreaterThan(0);
+			expect(preview.block).toContain("债券研究笔记");
+			expect(ai.calls).toHaveLength(1);
+			expect(vec.queries).toBe(1);
 		}),
 	);
 

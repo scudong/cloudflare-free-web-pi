@@ -81,6 +81,53 @@ describe("buildContext", () => {
 	});
 });
 
+describe("请求级设置缓存（NERE-82 P2-2）", () => {
+	it("首次读取用 snapshot 一次拉全表，后续 key 不再查库", () => {
+		const calls = { snapshot: 0, get: 0 };
+		const store: Record<string, string> = { web_search: "0", kb_prefetch: "1", display_name: "pi" };
+		const ctx = context({
+			settings: {
+				get: (key, fallback) => {
+					calls.get += 1;
+					return store[key] ?? fallback;
+				},
+				snapshot: () => {
+					calls.snapshot += 1;
+					return { ...store };
+				},
+			},
+		});
+
+		expect(ctx.settings.get("web_search", "1")).toBe("0");
+		expect(ctx.settings.get("kb_prefetch", "1")).toBe("1");
+		expect(ctx.settings.get("display_name", "")).toBe("pi");
+		expect(ctx.settings.get("missing", "fallback")).toBe("fallback");
+		expect(calls).toEqual({ snapshot: 1, get: 0 });
+	});
+
+	it("同一请求 setSetting 后读到新值", () => {
+		const store: Record<string, string> = { kernel_version: "v1" };
+		const ctx = context({
+			settings: { get: (key, fallback) => store[key] ?? fallback, snapshot: () => ({ ...store }) },
+			setSetting: (key, value) => {
+				store[key] = value;
+			},
+		});
+
+		expect(ctx.settings.get("kernel_version", "")).toBe("v1");
+		ctx.setSetting("kernel_version", "v2");
+		expect(ctx.settings.get("kernel_version", "")).toBe("v2");
+	});
+
+	it("没有 snapshot 的端口仍按 key 缓存，不回退到每次查库", () => {
+		const get = vi.fn((_key: string, fallback: string) => fallback);
+		const ctx = context({ settings: { get } });
+		ctx.settings.get("a", "1");
+		ctx.settings.get("a", "1");
+		expect(get).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe("dispatch", () => {
 	const route = (overrides: Partial<Route> = {}): Route => ({
 		method: "GET",

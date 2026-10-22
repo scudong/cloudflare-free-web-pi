@@ -159,7 +159,10 @@ export class SpikeAgent extends DurableObject {
 	}
 
 	private settingsPort(deps: RequestDeps): SettingsPort {
-		return { get: (key, fallback) => settingsRepo.get(deps.sql, key, fallback) };
+		return {
+			get: (key, fallback) => settingsRepo.get(deps.sql, key, fallback),
+			snapshot: () => Object.fromEntries(settingsRepo.listAll(deps.sql).map((row) => [row.key, row.value])),
+		};
 	}
 
 	private deps(input: {
