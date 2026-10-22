@@ -349,6 +349,15 @@ export function hubEntryInstallUrl(entry: SkillHubEntry): string {
 	return /^https?:\/\//i.test(source) ? source : "";
 }
 
+/**
+ * 安装失败首因（NERE-69）：`api.importSkill` 已把 `details.audit.reasons[].message`
+ * 展平成 `reasons`，这里取第一条非空文案；没有审计原因时回退接口 `error`。
+ */
+export function installFailureMessage(result: { reasons?: readonly string[]; error?: string }): string {
+	const first = result.reasons?.map((reason) => reason.trim()).find(Boolean);
+	return first || result.error?.trim() || "安装失败";
+}
+
 /** blocked 一律不可安装；没有安装地址的条目也不发请求。 */
 export function canInstallHubEntry(entry: SkillHubEntry): boolean {
 	return entry.audit.status !== "blocked" && hubEntryInstallUrl(entry) !== "";

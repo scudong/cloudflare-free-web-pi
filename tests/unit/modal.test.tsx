@@ -87,7 +87,7 @@ describe("ModalShell SSR 标记（契约 §4.4 / §10）", () => {
 				error={null}
 				onAdd={async () => true}
 				onDelete={async () => true}
-				onImport={async () => true}
+				onImport={async () => ({ ok: true })}
 				onTry={noop}
 				prompts={[]}
 				rules={[]}

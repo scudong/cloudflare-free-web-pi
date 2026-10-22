@@ -11,6 +11,7 @@ import {
 	filterHubSkills,
 	hasActiveHubFilters,
 	hubEntryInstallUrl,
+	installFailureMessage,
 	isHubEntryUpdatable,
 	parseHubPage,
 	parseHubSkills,
@@ -467,9 +468,12 @@ describe("SkillHubRow · blocked 详情（验收 2）", () => {
 				entry={entry}
 				expanded
 				installed={false}
+				installedNow={false}
 				installing={false}
+				installError={null}
 				onToggle={() => {}}
 				onInstall={onClick}
+				onTry={() => {}}
 			/>,
 		);
 		expect(html).toContain(BLOCKED_HINT);
@@ -491,9 +495,12 @@ describe("SkillHubRow · blocked 详情（验收 2）", () => {
 				entry={byName("web-snapshot")}
 				expanded
 				installed={false}
+				installedNow={false}
 				installing={false}
+				installError={null}
 				onToggle={() => {}}
 				onInstall={() => {}}
+				onTry={() => {}}
 			/>,
 		);
 		expect(html).toContain("审计通过");
@@ -511,9 +518,12 @@ describe("SkillHubRow · blocked 详情（验收 2）", () => {
 				entry={byName("meeting-notes")}
 				expanded
 				installed
+				installedNow={false}
 				installing={false}
+				installError={null}
 				onToggle={() => {}}
 				onInstall={() => {}}
+				onTry={() => {}}
 			/>,
 		);
 		expect(html).toContain("已安装");
@@ -526,9 +536,12 @@ describe("SkillHubRow · blocked 详情（验收 2）", () => {
 				entry={byName("crm-sync")}
 				expanded
 				installed={false}
+				installedNow={false}
 				installing={false}
+				installError={null}
 				onToggle={() => {}}
 				onInstall={() => {}}
+				onTry={() => {}}
 			/>,
 		);
 		expect(html).toContain("可更新");
@@ -536,9 +549,96 @@ describe("SkillHubRow · blocked 详情（验收 2）", () => {
 	});
 });
 
+describe("安装后行内反馈（NERE-69）", () => {
+	it("失败文案优先取 reasons[0]，其次 error，最后兜底", () => {
+		expect(installFailureMessage({ reasons: [" 首条原因 ", "第二条"], error: "接口错误" })).toBe("首条原因");
+		expect(installFailureMessage({ reasons: [], error: "接口错误" })).toBe("接口错误");
+		expect(installFailureMessage({})).toBe("安装失败");
+	});
+
+	it("安装成功：行内出现「已安装 · 试用」，点试用回调技能名", () => {
+		const onTry = vi.fn();
+		const html = renderToStaticMarkup(
+			<SkillHubRow
+				entry={byName("meeting-notes")}
+				expanded
+				installed
+				installedNow
+				installing={false}
+				installError={null}
+				onToggle={() => {}}
+				onInstall={() => {}}
+				onTry={onTry}
+			/>,
+		);
+		expect(html).toContain("已安装 ·");
+		expect(html).toContain('aria-label="试用技能 meeting-notes"');
+		expect(html).toContain(">试用<");
+	});
+
+	it("安装失败：红字取首条审计原因，按钮恢复可点", () => {
+		const html = renderToStaticMarkup(
+			<SkillHubRow
+				entry={byName("web-snapshot")}
+				expanded
+				installed={false}
+				installedNow={false}
+				installing={false}
+				installError="运行时 python 不受支持：仅支持 JS/TS 与纯提示词技能"
+				onToggle={() => {}}
+				onInstall={() => {}}
+				onTry={() => {}}
+			/>,
+		);
+		expect(html).toContain('role="alert"');
+		expect(html).toContain("安装失败：");
+		expect(html).toContain("运行时 python 不受支持");
+		// 失败后不残留「安装中…」，按钮仍可点。
+		expect(html).not.toContain("安装中…");
+		expect(html).toContain('aria-label="安装技能 web-snapshot"');
+	});
+
+	it("blocked 条目：按钮禁用，首条原因就地在按钮上方展示", () => {
+		const html = renderToStaticMarkup(
+			<SkillHubRow
+				entry={byName("legacy-report")}
+				expanded
+				installed={false}
+				installedNow={false}
+				installing={false}
+				installError={null}
+				onToggle={() => {}}
+				onInstall={() => {}}
+				onTry={() => {}}
+			/>,
+		);
+		expect(html).toContain("原因：运行时 python 不受支持");
+		expect(html).toContain("不可安装技能 legacy-report");
+	});
+
+	it("刚刚装成功：目录快照的「可更新」让位给「已安装 · 试用」", () => {
+		const html = renderToStaticMarkup(
+			<SkillHubRow
+				entry={byName("crm-sync")}
+				expanded
+				installed
+				installedNow
+				installing={false}
+				installError={null}
+				onToggle={() => {}}
+				onInstall={() => {}}
+				onTry={() => {}}
+			/>,
+		);
+		expect(html).not.toContain("可更新");
+		expect(html).toContain('aria-label="重新安装技能 crm-sync"');
+		expect(html).toContain("已安装 ·");
+	});
+});
+
 describe("SkillHubPanel · 首屏状态", () => {
 	it("首次渲染是 loading 骨架，筛选控件齐全", () => {
-		const html = renderToStaticMarkup(<SkillHubPanel installed={[]} onInstall={async () => true} />);
+		const html = renderToStaticMarkup(<SkillHubPanel installed={[]} onInstall={async () => ({ ok: true })} onTry={() => {}} />);
 		expect(html).toContain('aria-busy="true"');
 		expect(html).toContain("搜索技能名称、描述或标签");
 		expect(html).toContain('aria-label="按运行时筛选"');
