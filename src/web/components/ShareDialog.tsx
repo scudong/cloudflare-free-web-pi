@@ -57,6 +57,8 @@ export function ShareDialog({ sessionId, name, onClose }: ShareDialogProps) {
 
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent) => {
+			// 上层（如 ModalShell）已处理 Esc 时不再重复关闭（NERE-62 契约 §4.1）
+			if (event.defaultPrevented) return;
 			if (event.key === "Escape") onClose();
 		};
 		window.addEventListener("keydown", onKey);

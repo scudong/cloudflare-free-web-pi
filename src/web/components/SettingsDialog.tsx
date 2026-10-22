@@ -482,6 +482,8 @@ export function SettingsDialog({
 	useEffect(() => {
 		if (!open) return;
 		const onKey = (e: KeyboardEvent) => {
+			// 上层（如 ModalShell）已处理 Esc 时不再重复关闭（NERE-62 契约 §4.1）
+			if (e.defaultPrevented) return;
 			if (e.key === "Escape") onClose();
 		};
 		window.addEventListener("keydown", onKey);

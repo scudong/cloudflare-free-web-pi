@@ -6,7 +6,7 @@
 
 分层与命名规则见 [`docs/adr/0002-frontend-layering.md`](./adr/0002-frontend-layering.md)。
 当前迭代的数据契约与组件落点见 [`docs/frontend-contract-w3.md`](./frontend-contract-w3.md)（NERE-44，W3 参考资料条 / 分享面板）。
-信息架构变更（知识库 / MCP / 技能三个左栏面板改为弹窗）见 [`docs/ui-modal-contract.md`](./ui-modal-contract.md)（NERE-62）。**该契约尚未实施**：本文 §2 组件树里这三个面板仍在左栏，实现合入后由实现方按契约 §9 第 11 条同步本文件。
+信息架构变更（知识库 / MCP / 技能三个左栏面板改为弹窗）见 [`docs/ui-modal-contract.md`](./ui-modal-contract.md)（NERE-62）。**已在 NERE-63 实施**：本文 §2 组件树、§3 状态表已同步（契约 §9 第 11 条）。
 
 ## 1. 目录即分层
 
@@ -25,21 +25,17 @@
 
 ## 2. 入口与页面
 
-单页应用，无路由库。`src/web/main.tsx` 挂载 `App`；「页面」由 `railView` + `leftOpen` + `rightOpen` + `mobileTab` 组合出来。
+单页应用，无路由库。`src/web/main.tsx` 挂载 `App`；「页面」由 `railView` + `activePanel` + `leftOpen` + `rightOpen` + `mobileTab` 组合出来。
 
 ```
-App（页面层，1689 行）
+App（页面层，1736 行）
 ├─ LoginGate                          未登录整屏闸门
-├─ Rail                               常驻竖栏：sessions / connections / automations / skills / users
+├─ Rail                               常驻竖栏：sessions / files / 分享 / 定时 / 用户 + kb / mcp / skills 三个弹窗入口
 ├─ 左栏内容（随 railView 切换，可收起）
 │  ├─ Sidebar          会话列表 + 搜索 + 重命名/删除
-│  ├─ McpPanel         连接（MCP 服务）
-│  ├─ AutomationPanel  定时任务
-│  ├─ SkillPanel       技能 / 提示模板 / 规则 / 自定义工具
-│  │  ├─ SkillCard     已安装技能行：运行时 / 审计 / 上次使用 / 试用（NERE-59）
-│  │  └─ SkillHubPanel 技能 Hub（已安装 / Hub 两个视图，自取数）
 │  ├─ FilesPanel       全库文件（自取数）
-│  ├─ KnowledgePanel   知识库（自取数）
+│  ├─ SharesPanel      分享清单（NERE-56 能力门禁）
+│  ├─ AutomationPanel  定时任务
 │  └─ UsersPanel       用户管理（owner 可见，自取数）
 ├─ TopBar              在线状态 / 会话名 / 打开设置 / 移动端抽屉
 ├─ 聊天栏
@@ -57,12 +53,18 @@ App（页面层，1689 行）
 │  ├─ AskUserCard      待回答问题
 │  └─ Composer         输入 / 图片 / 技能 / 模板 / 模型切换 / 插话
 ├─ Workbench           右栏文件阅读器（自取文件正文）
+├─ 面板弹窗（ModalShell，portal 到 body，同一时刻最多一个；NERE-62 / NERE-63）
+│  ├─ 知识库 ModalShell lg（880px）→ KnowledgePanel（自取数，5 处 api.*）
+│  ├─ 连接 · MCP ModalShell md（720px）→ McpPanel
+│  └─ 技能 ModalShell xl（960px）→ SkillPanel
+│     ├─ SkillCard         已安装技能行：运行时 / 审计 / 上次使用 / 试用（NERE-59）
+│     └─ SkillHubPanel     技能 Hub（已安装 / Hub 两个视图，自取数）
 ├─ GoalDialog          设定目标
 └─ SettingsDialog      设置（主题 / 聊天 / 模型 / 知识库 / 部署自检 / 分享 / 备份）
    └─ ShareDialog      文件分享链接弹窗
 ```
 
-移动端：`useMediaQuery` 切换 `mobileTab`（chat / files），左栏进抽屉。
+移动端：`useMediaQuery` 切换 `mobileTab`（chat / files），左栏进抽屉；Rail 上的 kb / mcp / skills 先收起抽屉，再以全屏 sheet 打开（≤720px，`ModalShell` 内切换形态）。
 
 ## 3. 状态归属
 
@@ -95,7 +97,10 @@ App（页面层，1689 行）
 
 | 组件 | 状态 | 性质 |
 | --- | --- | --- |
-| `App` | `leftOpen`/`rightOpen`/`leftWidth`/`rightWidth`/`mobileTab`/`drawerOpen`/`settingsOpen`/`railView` | 纯 UI，已用 `localStorage` 记住尺寸 |
+| `App` | `leftOpen`/`rightOpen`/`leftWidth`/`rightWidth`/`mobileTab`/`drawerOpen`/`settingsOpen`/`railView`/`activePanel` | 纯 UI，已用 `localStorage` 记住尺寸；`activePanel` 是知识库 / MCP / 技能三个弹窗的唯一开关（`RailPanel \| null`，同一时刻最多一个） |
+| `KnowledgePanel` | `viewMemory.query`（模块级） | 纯 UI：只保留检索词，重开弹窗时回填；结果 / 草稿 / 正在查看的文档关闭即丢 |
+| `SkillPanel` | `skillViewMemory.view`（模块级） | 纯 UI：记住「已安装 / Hub」tab |
+| `SkillHubPanel` | `viewMemory.filters`（模块级） | 纯 UI：记住 Hub 筛选词，避免重开回到默认 |
 | `Composer` | 草稿、`/` 菜单、附件 | 纯 UI |
 | `MessageList` | 滚动是否贴底 | 纯 UI |
 | `ShareLinkCard`、`ShareDialog` | `copied`、`result` | 纯 UI（`host`+`path` 不落地） |
@@ -122,6 +127,8 @@ App（页面层，1689 行）
 | `Composer.tsx` | 2 | `/api/context`, `/api/model` |
 | `Workbench.tsx` | 1 | `/api/files/content` |
 | `LeftPanels.tsx` | 1 | `/api/automations` |
+
+NERE-63 的面板弹窗外壳（`components/ModalShell.tsx`、`lib/focus.ts`）不调用任何 `api.*`；三个面板迁入弹窗后各自的调用点与次数不变。
 
 首屏业务请求数：旧版 18 个（session、entries、sessions、files、memories、settings、plan、goal、questions、approvals、prompts、rules、custom-tools、skills、automations、mcp、models、context），NERE-26 之后为 1 个 `/api/bootstrap`。`/api/auth` 是登录闸门（改造前后各 1 次，不计入面板读取）；Composer 的 `/api/context` 改为切换会话、轮次结束或点击刷新时再取，不再出现在首屏。
 
