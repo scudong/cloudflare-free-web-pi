@@ -2654,9 +2654,15 @@ export class SpikeAgent extends DurableObject {
 	private migrated: Promise<void> | null = null;
 
 	private ensureMigrated(): Promise<void> {
-		this.migrated ??= Promise.resolve().then(() => {
-			migrate(this.ctx.storage.sql as unknown as SqlHandle);
-		});
+		this.migrated ??= Promise.resolve()
+			.then(() => {
+				migrate(this.ctx.storage.sql as unknown as SqlHandle);
+			})
+			.catch((err) => {
+				// 迁移抛错不能封死这个 DO：清掉 memo，下次 open()/alarm() 重试（迁移自身可重入）。
+				this.migrated = null;
+				throw err;
+			});
 		return this.migrated;
 	}
 
@@ -3042,6 +3048,8 @@ export class SpikeAgent extends DurableObject {
 
 	/** DO alarm：执行到点的定时任务。 */
 	async alarm(): Promise<void> {
+		// 先迁移再看 app_settings（share_origin），失败交给平台重试 alarm。
+		await this.ensureMigrated();
 		return agentScope.run(
 			{
 				sql: this.ctx.storage.sql as unknown as SqlHandle,
@@ -3052,10 +3060,7 @@ export class SpikeAgent extends DurableObject {
 				origin: getSetting("share_origin", ""),
 				userKey: "",
 			},
-			async () => {
-				await this.ensureMigrated();
-				return this.handleAlarm();
-			},
+			() => this.handleAlarm(),
 		);
 	}
 

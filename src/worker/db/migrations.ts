@@ -85,6 +85,12 @@ const vfsRootConversation: Migration = {
 
 export const MIGRATIONS: readonly Migration[] = [initialSchema, vfsRootConversation];
 
+// 版本号是账本的唯一真源：重复或乱序会被 INSERT OR IGNORE 静默跳过，模块加载时就暴露。
+const migrationVersions = MIGRATIONS.map((migration) => migration.version);
+if (migrationVersions.some((version, i) => i > 0 && version <= migrationVersions[i - 1])) {
+	throw new Error("MIGRATIONS 必须按 version 严格递增且不重复");
+}
+
 /** 按 version 升序执行未应用的迁移，成功后写账本；返回本次应用条数。 */
 export function migrate(sql: SqlHandle, now: () => string = () => new Date().toISOString()): number {
 	sql.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)`);
