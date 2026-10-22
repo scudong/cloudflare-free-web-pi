@@ -1,0 +1,94 @@
+tests/unit/skillHub.test.tsx
+  32d2ea63adf8d95e 9,14-15,18,26,35,38-39,45-47,56,59-60,73,76-77,82,90-91,94-96,99-106,116,119-120,123-130,132,141,144-145,148-155,179-180,186-200,203-212,227,237-262,267-281,302,305,309,311-312,317-321,353,376-386,389,395-457,477-478,488,503,522-535,543
+src/web/App.tsx
+  32d2ea63adf8d95e 790-794
+src/web/components/SkillHubPanel.tsx
+  32d2ea63adf8d95e 65,96,98,124-132
+src/web/components/SkillHubRow.tsx
+  32d2ea63adf8d95e 12,14,25,28,36,55,57-61,64,73-86,116-118,135-139,152-156,169,180,183
+src/web/lib/skill-hub.ts
+  32d2ea63adf8d95e 4,9,12,18,30-36,67,95-96,146-181,185,190-195,201-202,206-207,219-221,230-234,241-303,306,310-318,321,325-327,356-364
+src/web/types.ts
+  32d2ea63adf8d95e 226-234,237-238,241,243-244,247,253,258-263
+src/web/hooks/useSkillHub.ts
+  32d2ea63adf8d95e 6-9,16,18-19,26,33,35-36,40-42,57-58,80,83-88,90-94,104,122-131
+src/web/lib/api.ts
+  32d2ea63adf8d95e 7,127,133,137-138,141-142,146-147,150,152-154,159-173,176,182-201,334-405,569,571,579-584
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "8b08cbabd3e8ca15a9b3ae3f4aa0f74a816ab31f",
+  "prompts": {
+    "32d2ea63adf8d95e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8634b447-f4fb-4cb8-9f89-df7a5ad18012",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 2236,
+      "total_deletions": 1846,
+      "accepted_lines": 2228,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/web/lib/skill-hub.ts": {
+          "additions": 164,
+          "deletions": 22,
+          "accepted_lines": 161
+        },
+        "docs/pr-nere54/skill-hub-list.png": {
+          "additions": 695,
+          "deletions": 798,
+          "accepted_lines": 695
+        },
+        "src/web/App.tsx": {
+          "additions": 5,
+          "deletions": 1,
+          "accepted_lines": 5
+        },
+        "docs/pr-nere54/skill-hub-blocked.png": {
+          "additions": 669,
+          "deletions": 707,
+          "accepted_lines": 669
+        },
+        "docs/pr-nere54/skill-hub-filtered.png": {
+          "additions": 215,
+          "deletions": 259,
+          "accepted_lines": 215
+        },
+        "src/web/hooks/useSkillHub.ts": {
+          "additions": 39,
+          "deletions": 11,
+          "accepted_lines": 39
+        },
+        "src/web/components/SkillHubPanel.tsx": {
+          "additions": 12,
+          "deletions": 2,
+          "accepted_lines": 12
+        },
+        "tests/unit/skillHub.test.tsx": {
+          "additions": 241,
+          "deletions": 22,
+          "accepted_lines": 238
+        },
+        "src/web/lib/api.ts": {
+          "additions": 131,
+          "deletions": 10,
+          "accepted_lines": 129
+        },
+        "src/web/types.ts": {
+          "additions": 22,
+          "deletions": 5,
+          "accepted_lines": 22
+        },
+        "src/web/components/SkillHubRow.tsx": {
+          "additions": 43,
+          "deletions": 9,
+          "accepted_lines": 43
+        }
+      }
+    }
+  }
+}
