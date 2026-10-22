@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import { parseKbDocs, parseKbHits } from "../lib/collections";
 import { formatSize, formatTime } from "../lib/format";
 import { renderMarkdown } from "../lib/rich";
-import type { KbDocInfo, KbHit } from "../types";
+import type { KbDocInfo, KbFocus, KbHit } from "../types";
 import { Icon } from "./Icon";
 import { KbImport, type IncomingDrop } from "./KbImport";
 
@@ -12,7 +12,7 @@ import { KbImport, type IncomingDrop } from "./KbImport";
  * 左栏「知识库」（v0.45.0）：每个用户一个独立库（后端按用户 DO 隔离）。
  * 支持检索、导入文件 / 链接、粘贴资料入库、查看与删除；模型侧对应 kb_search / kb_add。
  */
-export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
+export function KnowledgePanel({ onCollapse, focus }: { onCollapse?: () => void; focus?: KbFocus | null }) {
 	const [docs, setDocs] = useState<KbDocInfo[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -26,8 +26,8 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 	const [content, setContent] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [note, setNote] = useState("");
-	const [viewing, setViewing] = useState<{ title: string; content: string } | null>(null);
-	const [viewingBusy, setViewingBusy] = useState(false);
+	const [viewing, setViewing] = useState<{ title: string; content: string; hitSeq?: number } | null>(null);
+	const viewingBusy = useRef(false);
 	/** 拖拽悬停与待导入文件：面板任意位置都能投放，导入区在「新增」里。 */
 	const [dropActive, setDropActive] = useState(false);
 	const [incomingDrop, setIncomingDrop] = useState<IncomingDrop | null>(null);
@@ -110,20 +110,29 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 		})();
 	};
 
-	const view = (id: number) => {
-		if (viewingBusy) return;
-		setViewingBusy(true);
+	const view = useCallback((id: number, hitSeq?: number) => {
+		if (viewingBusy.current) return;
+		viewingBusy.current = true;
 		void (async () => {
 			try {
 				const data = await api.kbDoc(id);
-				setViewing({ title: data.title || "未命名文档", content: data.content || "" });
+				setViewing({ title: data.title || "未命名文档", content: data.content || "", hitSeq });
 			} catch (err) {
 				setError(err instanceof Error ? err.message : String(err));
 			} finally {
-				setViewingBusy(false);
+				viewingBusy.current = false;
 			}
 		})();
-	};
+	}, []);
+
+	// 从消息里的参考资料跳进来（NERE-41）：nonce 变化即打开对应文档，重复点同一篇也能再次触发。
+	const focusNonce = focus?.nonce;
+	const focusDocId = focus?.docId;
+	const focusSeq = focus?.chunkSeq;
+	useEffect(() => {
+		if (focusNonce === undefined || focusDocId === undefined) return;
+		view(focusDocId, focusSeq);
+	}, [focusNonce, focusDocId, focusSeq, view]);
 
 	/** 导入成功后回到完整列表：检索结果里不会有刚入库的文档。 */
 	const handleImported = useCallback(() => {
@@ -189,8 +198,13 @@ export function KnowledgePanel({ onCollapse }: { onCollapse?: () => void }) {
 					>
 						<Icon name="chevronsLeft" className="h-4 w-4" />
 					</button>
-					<span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-100" title={viewing.title}>
-						{viewing.title}
+					<span className="min-w-0 flex-1">
+						<span className="block truncate text-[13px] font-medium text-slate-100" title={viewing.title}>
+							{viewing.title}
+						</span>
+						{viewing.hitSeq !== undefined && (
+							<span className="block truncate text-[10.5px] text-slate-500">命中第 {viewing.hitSeq + 1} 段</span>
+						)}
 					</span>
 				</div>
 				<div className="min-h-0 flex-1 overflow-y-auto p-3">

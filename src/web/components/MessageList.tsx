@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
-import type { ChatMessage, FileInfo, PlanStep } from "../types";
+import type { ChatMessage, FileInfo, KbRef, PlanStep } from "../types";
 import { renderMarkdown, renderRichText } from "../lib/rich";
 import { ToolBar } from "./ToolBar";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { PlanCard } from "./PlanCard";
 import { ArtifactCard } from "./ArtifactCard";
 import { ShareLinkCard } from "./ShareLinkCard";
+import { KbRefsBar } from "./KbRefsBar";
 import { Icon } from "./Icon";
 
 const AUTO_SCROLL_THRESHOLD = 80;
@@ -58,10 +59,13 @@ function AssistantBubble({
 	message,
 	streaming,
 	onOpenFile,
+	onOpenKbRef,
 }: {
 	message: Extract<ChatMessage, { role: "assistant" }>;
 	streaming?: boolean;
 	onOpenFile?: (name: string) => void;
+	/** 点开参考资料里的某一篇（NERE-41）。 */
+	onOpenKbRef?: (ref: KbRef) => void;
 }) {
 	const hasBody = message.text.trim().length > 0 || !message.tools?.length;
 	return (
@@ -93,6 +97,7 @@ function AssistantBubble({
 					{renderMarkdown(message.text)}
 				</div>
 			)}
+			<KbRefsBar refs={message.kbRefs ?? []} onOpen={onOpenKbRef} />
 		</div>
 	);
 }
@@ -187,6 +192,8 @@ interface MessageListProps {
 	onOpenFile?: (name: string) => void;
 	/** 从某条用户消息分叉出新会话（v0.32.0）。 */
 	onBranch?: (entryId: number) => void;
+	/** 点开 assistant 回复下的参考资料（NERE-41）。 */
+	onOpenKbRef?: (ref: KbRef) => void;
 	/** 空会话起步卡：只把建议写入输入框，不发送请求。 */
 	onStartPrompt?: (prompt: string) => void;
 }
@@ -209,7 +216,7 @@ const STARTER_CARDS = [
 	},
 ];
 
-export function MessageList({ messages, pending, elapsed, loading, loadError, onRetry, plan, files = [], onOpenFile, onBranch, onStartPrompt }: MessageListProps) {
+export function MessageList({ messages, pending, elapsed, loading, loadError, onRetry, plan, files = [], onOpenFile, onBranch, onOpenKbRef, onStartPrompt }: MessageListProps) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const stickToBottomRef = useRef(true);
 
@@ -296,6 +303,7 @@ export function MessageList({ messages, pending, elapsed, loading, loadError, on
 										message={message}
 										streaming={message.id === lastAssistantId}
 										onOpenFile={onOpenFile}
+										onOpenKbRef={onOpenKbRef}
 									/>
 									{isLast && !pending && <ArtifactSummary files={files} onOpen={onOpenFile} />}
 								</div>

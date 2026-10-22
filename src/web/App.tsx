@@ -19,11 +19,11 @@ import { Icon } from "./components/Icon";
 import { api, type BootstrapKey } from "./lib/api";
 import { useBootstrap } from "./hooks/useBootstrap";
 import { shareUrlFor } from "./lib/format";
-import { parseEntries, truncateOneLine } from "./lib/entries";
+import { parseEntries, parseKbRefs, truncateOneLine } from "./lib/entries";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
-import type { ApprovalInfo, AskQuestion, AutomationInfo, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLink, SkillInfo, ToolCallInfo } from "./types";
+import type { ApprovalInfo, AskQuestion, AutomationInfo, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, KbFocus, KbRef, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLink, SkillInfo, ToolCallInfo } from "./types";
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -85,6 +85,9 @@ export default function App() {
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	// 左侧 Rail 当前展示的面板（v0.21.0）：会话 / 连接 / 定时 / 技能
 	const [railView, setRailView] = useState<RailView>("sessions");
+	// 从消息里的参考资料跳到知识库（NERE-41）：nonce 让「重复点同一篇」也能再次触发
+	const [kbFocus, setKbFocus] = useState<KbFocus | null>(null);
+	const kbFocusSeq = useRef(0);
 	// 右栏宽度（v0.16.0）：可拖拽分隔条、打开文档时自动加宽、可最大化阅读
 	const [rightWidth, setRightWidth] = useState(() => {
 		const saved = typeof window === "undefined" ? null : Number(localStorage.getItem("pi-right-width") ?? "");
@@ -487,6 +490,8 @@ export default function App() {
 								void refreshQuestions();
 								setContextTick((tick) => tick + 1);
 								const answer = typeof event.answer === "string" ? event.answer : "";
+								// 流式补齐（NERE-41）：done 事件与 entry 同一份 kbRefs；缺省不追请求
+								const kbRefs = parseKbRefs(event.kbRefs ?? []);
 								if (!bubbleShown) ensureBubble();
 								setMessages((prev) => {
 									const next = prev.map((m) =>
@@ -498,6 +503,7 @@ export default function App() {
 													tools: tools.length ? tools.map((t) => ({ ...t, status: (t.status === "running" ? "done" : t.status) as ToolCallInfo["status"] })) : [],
 													files: artifacts.length ? [...artifacts] : undefined,
 													shares: shareLinks.length ? [...shareLinks] : undefined,
+													kbRefs: kbRefs.length ? kbRefs : undefined,
 												}
 											: m,
 									);
@@ -982,6 +988,18 @@ export default function App() {
 		[sessionId, handleSelectSession, isDesktop],
 	);
 
+	/** 从消息里的参考资料跳到知识库（NERE-41）：切到知识库栏并打开原文，手机端顺带展开抽屉。 */
+	const handleOpenKbRef = useCallback(
+		(ref: KbRef) => {
+			kbFocusSeq.current += 1;
+			setRailView("kb");
+			setLeftOpen(true);
+			if (!isDesktop) setDrawerOpen(true);
+			setKbFocus({ docId: ref.docId, chunkSeq: ref.chunkSeq, nonce: kbFocusSeq.current });
+		},
+		[isDesktop],
+	);
+
 	/** 拖拽分隔条调整右栏宽度（限制在 260px ~ 视口 65%）。 */
 	const handleRightResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
 		event.preventDefault();
@@ -1378,7 +1396,7 @@ export default function App() {
 				onCollapse={toggleLeft}
 			/>
 		) : activeRailView === "kb" ? (
-			<KnowledgePanel onCollapse={toggleLeft} />
+			<KnowledgePanel onCollapse={toggleLeft} focus={kbFocus} />
 		) : activeRailView === "mcp" ? (
 			<McpPanel servers={mcpServers} loading={mcpLoading} error={mcpError} onAdd={handleAddMcp} onDelete={handleDeleteMcp} onCollapse={toggleLeft} />
 		) : activeRailView === "automations" ? (
@@ -1479,6 +1497,7 @@ export default function App() {
 							files={files}
 							onOpenFile={handleOpenFileFromChat}
 							onBranch={handleBranch}
+							onOpenKbRef={handleOpenKbRef}
 							onStartPrompt={setStarterDraft}
 						/>
 						{goal && <GoalBar goal={goal} onStop={() => void handleStopGoal()} onNew={() => setGoalDialogOpen(true)} />}
