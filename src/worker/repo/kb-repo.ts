@@ -1,4 +1,5 @@
 import type { SqlHandle } from "../db/migrations";
+import { chunkIds } from "../db/sql-batch";
 import type { KbHit } from "../lib/kb";
 
 /** 知识库仓储（ADR-0001 §3）：只做 `kb_docs` / `kb_chunks` / `kb_fts` 的 SQL，返回类型化记录。 */
@@ -178,15 +179,21 @@ export function searchLike(sql: SqlHandle, like: string, limit: number): KbHit[]
 		.toArray() as KbHit[];
 }
 
+/** 向量命中回读；id 集合按绑定参数上限分批，避免大 topK 时单个查询超限。 */
 export function chunksByIds(sql: SqlHandle, ids: number[]): KbChunkText[] {
-	if (!ids.length) return [];
-	return sql
-		.exec(
-			`SELECT c.id AS chunkId, c.doc_id AS docId, c.seq AS chunkSeq, c.text AS text, d.title AS title, d.source AS source
-			 FROM kb_chunks c JOIN kb_docs d ON d.id = c.doc_id WHERE c.id IN (${ids.map(() => "?").join(",")})`,
-			...ids,
-		)
-		.toArray() as KbChunkText[];
+	const rows: KbChunkText[] = [];
+	for (const batch of chunkIds(ids)) {
+		rows.push(
+			...(sql
+				.exec(
+					`SELECT c.id AS chunkId, c.doc_id AS docId, c.seq AS chunkSeq, c.text AS text, d.title AS title, d.source AS source
+			 FROM kb_chunks c JOIN kb_docs d ON d.id = c.doc_id WHERE c.id IN (${batch.map(() => "?").join(",")})`,
+					...batch,
+				)
+				.toArray() as KbChunkText[]),
+		);
+	}
+	return rows;
 }
 
 /** 未建向量的分块；`docId` 为空时跨文档取。 */
@@ -201,9 +208,11 @@ export function listUnvectorized(sql: SqlHandle, limit: number, docId?: number):
 		.toArray() as KbChunkRow[];
 }
 
+/** 一次重建最多 500 个分块，必须分批：单个 `IN (?…)` 会超过 DO SQLite 的 100 个绑定参数。 */
 export function markVectorized(sql: SqlHandle, ids: number[]): void {
-	if (!ids.length) return;
-	sql.exec(`UPDATE kb_chunks SET vectorized = 1 WHERE id IN (${ids.map(() => "?").join(",")})`, ...ids);
+	for (const batch of chunkIds(ids)) {
+		sql.exec(`UPDATE kb_chunks SET vectorized = 1 WHERE id IN (${batch.map(() => "?").join(",")})`, ...batch);
+	}
 }
 
 export function countChunks(sql: SqlHandle): number {

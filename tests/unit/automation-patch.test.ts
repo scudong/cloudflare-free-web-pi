@@ -131,6 +131,7 @@ describe("automationView", () => {
 				schedule: '{"kind":"daily","time":"08:03"}',
 				enabled: 0,
 				last_run_at: 123,
+				last_status: "failed",
 				next_run_at: 456,
 			}),
 		).toEqual({
@@ -141,6 +142,7 @@ describe("automationView", () => {
 			schedule: { kind: "daily", time: "08:03" },
 			enabled: false,
 			last_run_at: 123,
+			last_status: "failed",
 			next_run_at: 456,
 		});
 	});
@@ -154,6 +156,7 @@ describe("automationView", () => {
 			schedule: "{oops",
 			enabled: 1,
 			last_run_at: null,
+			last_status: null,
 			next_run_at: 0,
 		});
 		expect(view.schedule).toEqual({ kind: "daily", time: "09:00" });

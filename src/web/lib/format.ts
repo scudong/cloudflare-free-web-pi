@@ -44,6 +44,15 @@ export function formatNextRunAt(next: number | undefined): string | undefined {
 }
 
 /**
+ * 定时任务的上次执行时间（NERE-68）：缺失 / 非法 / 非正数一律 undefined，
+ * 列表据此整行不渲染（不显示占位 0 或假时间）。
+ */
+export function formatLastRunAt(lastRunAt: number | undefined): string | undefined {
+	if (typeof lastRunAt !== "number" || !Number.isFinite(lastRunAt) || lastRunAt <= 0) return undefined;
+	return formatTime(new Date(lastRunAt).toISOString());
+}
+
+/**
  * 分享链接归一化：只保留路径，域名换成当前页面的 origin。
  * pages.dev 反代到 Worker 时，服务端 request.url 是 workers.dev 地址，
  * 直接使用它拼链接在国内打不开（v0.38.1）。

@@ -1,6 +1,7 @@
 import type {
 	AllFileInfo,
 	AutomationInfo,
+	AutomationRunStatus,
 	CustomToolInfo,
 	FileInfo,
 	KbDocInfo,
@@ -108,8 +109,26 @@ export function parseAutomations(raw: unknown): AutomationInfo[] {
 			enabled: entry.enabled !== 0 && entry.enabled !== false,
 			schedule,
 			sessionId: pickString(entry, ["session_id", "sessionId"]) || undefined,
+			lastRunAt: pickLastRunAt(entry),
+			lastStatus: pickLastStatus(entry),
 		};
 	});
+}
+
+/** 上次运行结果（NERE-68 2b）：只认契约三值；NULL / 缺失 / 未知值一律 undefined（不猜状态）。 */
+function pickLastStatus(entry: Record<string, unknown>): AutomationRunStatus | undefined {
+	const value = pickString(entry, ["last_status", "lastStatus"]).toLowerCase();
+	return value === "ok" || value === "failed" || value === "deferred" ? value : undefined;
+}
+
+/** 上次执行时间（NERE-68）：缺失 / null / 非法值都当「没有」，避免列表渲染假时间。 */
+function pickLastRunAt(entry: Record<string, unknown>): number | undefined {
+	for (const key of ["last_run_at", "lastRunAt"]) {
+		const value = entry[key];
+		const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+		if (Number.isFinite(numeric) && numeric > 0) return numeric;
+	}
+	return undefined;
 }
 
 /**
