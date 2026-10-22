@@ -30,7 +30,7 @@
 ```
 App（页面层，1736 行）
 ├─ LoginGate                          未登录整屏闸门
-├─ Rail                               常驻竖栏：sessions / files / 分享 / 定时 / 用户 + kb / mcp / skills 三个弹窗入口
+├─ Rail                               常驻竖栏：sessions / files / 分享 / 定时 / 用户 + kb / mcp / skills 三个弹窗入口（分享 / 定时带未读圆点，NERE-74）
 ├─ 左栏内容（随 railView 切换，可收起）
 │  ├─ Sidebar          会话列表 + 搜索 + 重命名/删除
 │  ├─ FilesPanel       全库文件（自取数）
@@ -84,6 +84,8 @@ App（页面层，1736 行）
 | 文件（当前会话 / 全库） | `files`, `filesState` | bootstrap（`panelTick` 重取） |
 | 记忆 | `memories`, `memoriesState` | bootstrap（`panelTick` 重取） |
 | 技能 / 模板 / 规则 / 自定义工具 / MCP / 定时任务 | `skills`, `prompts`, `rules`, `customTools`, `mcpServers`, `automations` | bootstrap（`panelTick` 重取）；技能行额外带 `runtime` / `auditStatus` / `lastInvokedAt`（NERE-59）；定时任务编辑用 PATCH 返回值就地合并（NERE-65），不整表重取；定时任务行读 `last_run_at` / `session_id` / `last_status` 渲染「上次」、成功/失败/顺延徽标并可跳转会话（NERE-68） |
+| 分享清单（快照） | `useSharesSnapshot`（App 内，NERE-74） | 登录态确定后取一次 `GET /api/shares/all`（同时充当 NERE-56 能力探测）；切回标签页 / 窗口聚焦重拉。面板自身仍走 `useShares` |
+| 未读水位（NERE-74） | `useUnreadBadges`（App 内） | localStorage `pi-unread:<scope>:shares\|automations`；分享比 `lastOpenedAt`、定时比 `lastRunAt`，严格大于水位才算未读；首次加载用当前最大值做种子；打开面板即推进水位；`storage` 事件同步多标签页 |
 | 技能 Hub 列表（NERE-54） | `useSkillHub`（SkillHubPanel 内） | 切到 Hub 视图时取 `GET /api/skills/hub`；筛选变化带查询串重取（q 防抖），失败保留旧数据并可重试 |
 | 全局设置 | `thinkingLevel`, `compaction`, `approvalSettings`, `webSearch`, `kbPrefetch`, `kbRetrieval`, `model`, `theme` | bootstrap `settings` + 局部回写 |
 | 计划 / 目标 / 审批 / 提问 | `plan`, `goal`, `approvals`, `askQuestions` | bootstrap + 每轮 `done` / `tool_end` 后增量刷新 |

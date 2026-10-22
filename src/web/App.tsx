@@ -22,7 +22,9 @@ import { api, ApiError, type BootstrapKey } from "./lib/api";
 import { mergeAutomationUpdate, parseAutomationUpdate } from "./lib/automation-edit";
 import { installFailureMessage } from "./lib/skill-hub";
 import { useBootstrap } from "./hooks/useBootstrap";
-import { useSharesAvailable } from "./hooks/useShares";
+import { useSharesSnapshot } from "./hooks/useShares";
+import { useUnreadBadges } from "./hooks/useUnreadBadges";
+import { unreadScope } from "./lib/unread";
 import { shareUrlFor } from "./lib/format";
 import { parseEntries, parseKbRefs, truncateOneLine } from "./lib/entries";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
@@ -117,8 +119,10 @@ export default function App() {
 	const [theme, setTheme] = useState<ThemeId>(() => readTheme());
 	const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean; owner?: boolean; demoUrl?: string } | null>(null);
 	const [loginError, setLoginError] = useState<string | null>(null);
-	// 分享入口能力门禁（NERE-56）：登录态确定后探测一次 /api/shares/all，接口没上线就不渲染入口与面板
-	const sharesAvailable = useSharesAvailable(!!auth?.authenticated);
+	// 分享入口能力门禁（NERE-56）+ 未读信号（NERE-74）：登录态确定后拉一次 /api/shares/all，
+	// 同一次请求既当能力探测、又给 Rail 算未读；切回标签页会重拉。
+	const sharesSnapshot = useSharesSnapshot(!!auth?.authenticated);
+	const sharesAvailable = sharesSnapshot.available;
 	const [models, setModels] = useState<string[]>([]);
 	/** 供应商变更后重新拉取模型列表（v0.27.0）。 */
 	const [modelsTick, setModelsTick] = useState(0);
@@ -183,6 +187,40 @@ export default function App() {
 	const [memoriesState, setMemoriesState] = useState<PanelState>("loading");
 	const [memoriesError, setMemoriesError] = useState<string | null>(null);
 	const [panelTick, setPanelTick] = useState(0);
+
+	// Rail 未读圆点（NERE-74）：分享看 lastOpenedAt、定时任务看 lastRunAt，水位存 localStorage。
+	// 先算出生效视图：邀请用户的「用户」入口、分享接口未上线时的「分享」入口都不算打开；
+	// 桌面端左栏收起了（或移动端抽屉没开）也不算看到内容，不能白白清掉圆点。
+	const activeRailView: RailView =
+		railView === "users" && !auth?.owner ? "sessions" : railView === "shares" && !sharesAvailable ? "sessions" : railView;
+	const leftPanelVisible = isDesktop ? leftOpen : drawerOpen;
+	const unread = useUnreadBadges({
+		scope: unreadScope(auth?.owner),
+		shares: {
+			ready: sharesSnapshot.ready,
+			items: sharesSnapshot.items,
+			active: leftPanelVisible && activeRailView === "shares",
+		},
+		automations: {
+			ready: !automationsLoading,
+			items: automations,
+			active: leftPanelVisible && activeRailView === "automations",
+		},
+	});
+
+	/**
+	 * 切回标签页时刷新一次面板数据（NERE-74）：定时任务在后台跑完后 bootstrap 不会自己重取，
+	 * 没有这一步就永远等不到新的 `last_run_at`，圆点也就不会亮。分享清单的重拉在
+	 * useSharesSnapshot 里自己监听 visibilitychange / focus。
+	 */
+	useEffect(() => {
+		if (typeof document === "undefined") return;
+		const onVisible = () => {
+			if (document.visibilityState === "visible") setPanelTick((tick) => tick + 1);
+		};
+		document.addEventListener("visibilitychange", onVisible);
+		return () => document.removeEventListener("visibilitychange", onVisible);
+	}, []);
 
 	// Chat state
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1448,9 +1486,6 @@ export default function App() {
 		/>
 	);
 
-	// 邀请用户没有用户管理入口；切回会话栏（v0.43.0）
-	const activeRailView =
-		railView === "users" && !auth?.owner ? "sessions" : railView === "shares" && !sharesAvailable ? "sessions" : railView;
 	const leftContent =
 		activeRailView === "sessions" ? (
 			sidebar
@@ -1462,7 +1497,7 @@ export default function App() {
 				onCollapse={toggleLeft}
 			/>
 		) : activeRailView === "shares" ? (
-			<SharesPanel onCollapse={toggleLeft} />
+			<SharesPanel onCollapse={toggleLeft} onLoaded={unread.observeShares} />
 		) : activeRailView === "automations" ? (
 			<AutomationPanel
 				items={automations}
@@ -1491,6 +1526,8 @@ export default function App() {
 			onOpenSettings={openSettings}
 			isOwner={!!auth?.owner}
 			sharesAvailable={sharesAvailable}
+			sharesUnread={unread.shares}
+			automationsUnread={unread.automations}
 		/>
 	);
 

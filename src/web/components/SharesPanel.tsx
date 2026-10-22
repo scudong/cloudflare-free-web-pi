@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import { useShares } from "../hooks/useShares";
 import { Icon } from "./Icon";
 import { PanelHeader } from "./LeftPanels";
 import { ShareRow } from "./ShareRow";
+import type { ShareRecord } from "../types";
 
 const refreshButton =
 	"inline-flex items-center justify-center rounded p-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200";
@@ -9,10 +11,21 @@ const refreshButton =
 /**
  * 左栏「分享」面板（NERE-43，L2）：取数只经 useShares，不直接碰传输层。
  * 三态（loading / error / empty）+ 有数据清单；行级撤销失败文案显示在清单顶部。
+ * `onLoaded`（NERE-74）：清单每次落地时把数据交给上层推进未读水位，面板行为本身不变。
  */
-export function SharesPanel({ onCollapse }: { onCollapse?: () => void }) {
+export function SharesPanel({
+	onCollapse,
+	onLoaded,
+}: {
+	onCollapse?: () => void;
+	onLoaded?: (items: ShareRecord[]) => void;
+}) {
 	const { items, status, error, actionError, revoking, reload, revoke, clearActionError } = useShares();
 	const loading = status === "idle" || status === "loading";
+
+	useEffect(() => {
+		if (status === "ready") onLoaded?.(items);
+	}, [status, items, onLoaded]);
 
 	return (
 		<div className="flex h-full w-full flex-col bg-slate-900/60">

@@ -5,6 +5,7 @@
  * - 撤销是乐观更新：先移出清单，失败按原索引插回；404 视为成功，403 / 网络错误给行级文案。
  * - 不做轮询：打开次数是快照，刷新由面板头部的手动按钮触发。
  * - 能力门禁（NERE-56）：useSharesAvailable 探测 `/api/shares/all`，失败即视为未上线，入口不渲染。
+ * - 未读信号（NERE-74）：App 改用 useSharesSnapshot，同一次请求兼做能力探测与未读计算。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -80,6 +81,67 @@ export function useSharesAvailable(enabled: boolean): boolean {
 	}, [enabled]);
 
 	return available;
+}
+
+/** 分享清单快照（NERE-74）：Rail 未读圆点用的轻量读数，面板本身仍走 useShares。 */
+export interface SharesSnapshot {
+	/** NERE-56 能力门禁：`/api/shares/all` 成功过就是 true，之后失败也不收回。 */
+	available: boolean;
+	/** 最近一次成功拉到的清单；失败时保留上一份。 */
+	items: ShareRecord[];
+	/** 是否至少成功拉取过一次：未就绪时不做未读水位种子，避免把历史当成新打开。 */
+	ready: boolean;
+}
+
+/**
+ * 分享清单快照（NERE-74）：一次请求同时充当 NERE-56 的能力探测，省掉启动时的重复调用。
+ *
+ * - 登录态确定后拉一次；
+ * - 切回标签页 / 窗口重新聚焦时再拉一次 —— 无痕窗口里打开自己的分享后，
+ *   回到应用就能立刻看到新的未读（也是「下次切回标签时刷新」的落点）；
+ * - 后续拉取失败不清空上一份，入口也不会因为一次网络错误消失。
+ */
+export function useSharesSnapshot(enabled: boolean): SharesSnapshot {
+	const [state, setState] = useState<SharesSnapshot>({ available: false, items: [], ready: false });
+	/** 请求序号：只有最后一次请求能落地。 */
+	const requestRef = useRef(0);
+	/** StrictMode 会把 effect 跑两遍：同一登录周期只允许首发一次。 */
+	const startedRef = useRef(false);
+
+	const load = useCallback(async () => {
+		const request = ++requestRef.current;
+		try {
+			const records = parseShareRecords(await api.sharesAll());
+			if (request !== requestRef.current) return;
+			setState({ available: true, items: records, ready: true });
+		} catch {
+			if (request !== requestRef.current) return;
+			// 第一次失败 = 接口未上线（入口不渲染）；之后的失败保留上一份数据。
+			setState((prev) => (prev.available ? prev : { ...prev, ready: false }));
+		}
+	}, []);
+
+	useEffect(() => {
+		if (!enabled) {
+			startedRef.current = false;
+			return;
+		}
+		if (!startedRef.current) {
+			startedRef.current = true;
+			void load();
+		}
+		const onVisible = () => {
+			if (document.visibilityState === "visible") void load();
+		};
+		document.addEventListener("visibilitychange", onVisible);
+		window.addEventListener("focus", onVisible);
+		return () => {
+			document.removeEventListener("visibilitychange", onVisible);
+			window.removeEventListener("focus", onVisible);
+		};
+	}, [enabled, load]);
+
+	return state;
 }
 
 export function useShares(): SharesState {
