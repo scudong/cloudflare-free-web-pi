@@ -3,7 +3,7 @@
 - 状态：已接受（Accepted，2026-10-22）
 - 日期：2026-10-22
 - 决策人：后端架构-hou（NERE-53）
-- 影响范围：`src/worker.ts` 的 `/skills*` 路由、NERE-55 新增的 `routes/skills.ts`、`services/skill-hub-service.ts`、`lib/skill-audit.ts`、`skills/catalog.json`
+- 影响范围：`src/worker.ts` 的 `/skills*` 路由、NERE-55 新增的 `routes/skills.ts`、`services/skill-service.ts`、`lib/skill-audit.ts`、`skills/catalog.json`
 - 关联：[`docs/skill-hub-contract.md`](../skill-hub-contract.md)、[`docs/adr/0001-layering.md`](./0001-layering.md)
 
 ## 背景
