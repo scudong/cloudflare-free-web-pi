@@ -1,16 +1,18 @@
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
+import { toResponse } from "../http/errors";
 import { CustomToolApiError, listTools } from "../services/custom-tool-service";
-import { createPromptsService, PromptsApiError } from "../services/prompts-service";
+import { createPromptsService } from "../services/prompts-service";
 
 /**
  * 提示模板 / 规则文件 / 自定义工具路由（阶段 6）。
  * 校验与写入在 prompts-service，自定义工具的扩展重建通过 DO 端口完成。
  */
-function failure(err: unknown): Response {
-	if (err instanceof PromptsApiError) return Response.json({ error: err.message }, { status: err.status });
-	if (err instanceof CustomToolApiError) return Response.json({ ok: false, error: err.message }, { status: err.status });
-	throw err;
+
+/** 自定义工具保留 `{ ok:false }` 兼容字段；其余错误交给 dispatch 的 toResponse。 */
+function customToolFailure(err: unknown): Response {
+	if (!(err instanceof CustomToolApiError)) throw err;
+	return toResponse(err, { ok: false });
 }
 
 export const promptRoutes: readonly Route[] = [
@@ -25,12 +27,8 @@ export const promptRoutes: readonly Route[] = [
 		path: "/prompts",
 		needsHarness: true,
 		handle: async (ctx) => {
-			try {
-				createPromptsService(ctx.sql()).savePrompt((await ctx.req.json()) as never);
-				return Response.json({ ok: true });
-			} catch (err) {
-				return failure(err);
-			}
+			createPromptsService(ctx.sql()).savePrompt((await ctx.req.json()) as never);
+			return Response.json({ ok: true });
 		},
 	},
 	{
@@ -53,12 +51,8 @@ export const promptRoutes: readonly Route[] = [
 		path: "/rules",
 		needsHarness: true,
 		handle: async (ctx) => {
-			try {
-				createPromptsService(ctx.sql()).saveRule((await ctx.req.json()) as never);
-				return Response.json({ ok: true });
-			} catch (err) {
-				return failure(err);
-			}
+			createPromptsService(ctx.sql()).saveRule((await ctx.req.json()) as never);
+			return Response.json({ ok: true });
 		},
 	},
 	{
@@ -66,13 +60,9 @@ export const promptRoutes: readonly Route[] = [
 		path: "/rules",
 		needsHarness: true,
 		handle: async (ctx) => {
-			try {
-				const body = (await ctx.req.json()) as { name?: string; enabled?: boolean };
-				createPromptsService(ctx.sql()).setRuleEnabled(body.name, body.enabled);
-				return Response.json({ ok: true });
-			} catch (err) {
-				return failure(err);
-			}
+			const body = (await ctx.req.json()) as { name?: string; enabled?: boolean };
+			createPromptsService(ctx.sql()).setRuleEnabled(body.name, body.enabled);
+			return Response.json({ ok: true });
 		},
 	},
 	{
@@ -99,7 +89,7 @@ export const promptRoutes: readonly Route[] = [
 				const saved = ctx.customToolsRuntime.save(await ctx.req.json().catch(() => ({})));
 				return Response.json({ ok: true, name: saved.name, tools: saved.tools });
 			} catch (err) {
-				return failure(err);
+				return customToolFailure(err);
 			}
 		},
 	},
@@ -112,7 +102,7 @@ export const promptRoutes: readonly Route[] = [
 				const removed = ctx.customToolsRuntime.remove(ctx.url.searchParams.get("name") ?? "");
 				return Response.json({ ok: true, tools: removed.tools });
 			} catch (err) {
-				return failure(err);
+				return customToolFailure(err);
 			}
 		},
 	},

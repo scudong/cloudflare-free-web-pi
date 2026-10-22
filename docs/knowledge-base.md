@@ -65,7 +65,7 @@ kb_fts    FTS5(title_tokens, body_tokens)   -- rowid = kb_chunks.id
   MD / TXT 直接读文本；PDF / DOCX 走 Workers AI 的 `toMarkdown()`（不需要额外解析库，也不需要 R2）。
 - 链接：`application/json`，`{"url":"https://..."}`。复用 DeepSeek Fetch API 抓正文，标题取页面 `<title>`，失败时回落到域名。
 
-成功返回 `{ ok: true, docId, title, chunks, chars, updated }`。失败统一返回 `{ ok: false, code, message }`：
+成功返回 `{ ok: true, docId, title, chunks, chars, updated }`。失败返回统一错误体并保留兼容字段：`{ error, code, details?, ok: false, message }`（`error` 与 `message` 同值；NERE-79）：
 
 | HTTP | code | 含义 |
 |---|---|---|

@@ -1,5 +1,6 @@
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
+import { AppError, errorText } from "../http/errors";
 import { capabilities } from "../services/capability-service";
 import { listServers, removeServer, saveServer, type SavedMcpServer } from "../services/mcp-service";
 import { approvalSettings, toolCategory, toolPolicy } from "../services/approval-service";
@@ -54,7 +55,7 @@ export const capabilityRoutes: readonly Route[] = [
 			try {
 				saved = saveServer(ctx.sql(), (await ctx.req.json()) as never);
 			} catch (err) {
-				return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
+				throw new AppError("invalid_mcp_server", 400, errorText(err));
 			}
 			const tools = await ctx.mcpRuntime.rebuild();
 			return Response.json({ ok: true, id: saved.id, tools });

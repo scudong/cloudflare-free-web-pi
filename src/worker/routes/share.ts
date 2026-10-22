@@ -1,5 +1,6 @@
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
+import { AppError, errorText } from "../http/errors";
 import { demoShareToken } from "../lib/share-render";
 import { createShareService } from "../services/share-service";
 
@@ -47,7 +48,7 @@ export const shareRoutes: readonly Route[] = [
 				// 用请求自身的域名拼绝对地址：页面在哪个域名打开，链接就指向哪里
 				return Response.json({ ok: true, token, url: share.urlFor(token), expiresAt });
 			} catch (err) {
-				return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
+				throw new AppError("share_failed", 400, errorText(err));
 			}
 		},
 	},
@@ -68,9 +69,7 @@ export const shareRoutes: readonly Route[] = [
 		handle: async (ctx) => {
 			const kind = ctx.url.searchParams.get("kind") === "file" ? "file" : "conversation";
 			const name = ctx.url.searchParams.get("name") ?? undefined;
-			if (kind === "file" && !name?.trim()) {
-				return Response.json({ error: "缺少文件名" }, { status: 400 });
-			}
+			if (kind === "file" && !name?.trim()) throw new AppError("bad_request", 400, "缺少文件名");
 			const share = service(ctx);
 			const shares = (await share.list(ctx.url.searchParams.get("sessionId") ?? undefined, kind, name)).map(
 				(record) => ({ ...record, url: share.urlFor(record.token) }),

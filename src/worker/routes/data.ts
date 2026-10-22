@@ -1,5 +1,6 @@
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
+import { AppError, errorText, toResponse } from "../http/errors";
 import { createDataService } from "../services/data-service";
 import { createKbService } from "../services/kb-service";
 import { createMemoryService } from "../services/memory-service";
@@ -39,7 +40,7 @@ export const dataRoutes: readonly Route[] = [
 				return Response.json({ ok: true, counts: await service(ctx).restore(await ctx.req.json()) });
 			} catch (err) {
 				// 旧行为：恢复失败是 400 + 200 字符截断，不是 dispatch 的 500。
-				return Response.json({ error: String(err).slice(0, 200) }, { status: 400 });
+				return toResponse(new AppError("restore_failed", 400, errorText(err, 200)));
 			}
 		},
 	},

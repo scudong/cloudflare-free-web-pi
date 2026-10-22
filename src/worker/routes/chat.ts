@@ -1,5 +1,6 @@
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
+import { AppError, errorText, toResponse } from "../http/errors";
 import { createChatService, type ChatEvent } from "../services/chat-service";
 
 /**
@@ -65,11 +66,11 @@ export const chatRoutes: readonly Route[] = [
 		handle: async (ctx) => {
 			const body = (await ctx.req.json().catch(() => ({}))) as { sessionId?: string; message?: string };
 			const message = String(body.message ?? "").trim();
-			if (!message) return Response.json({ ok: false, error: "插话内容不能为空" }, { status: 400 });
+			if (!message) return toResponse(new AppError("bad_request", 400, "插话内容不能为空"), { ok: false });
 			try {
 				return Response.json(await service(ctx).interject(message, body.sessionId));
 			} catch (err) {
-				return Response.json({ ok: false, error: String(err).slice(0, 200) }, { status: 500 });
+				return toResponse(new AppError("interject_failed", 500, errorText(err)), { ok: false });
 			}
 		},
 	},

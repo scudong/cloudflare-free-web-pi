@@ -1,5 +1,5 @@
 import type { RequestContext } from "../http/context";
-import { toResponse } from "../http/errors";
+import { AppError, toResponse } from "../http/errors";
 import { matchRoute, type Route } from "../http/router";
 import { approvalRoutes } from "./approvals";
 import { automationRoutes } from "./automations";
@@ -43,8 +43,8 @@ export const ROUTES: readonly Route[] = [
 
 export async function dispatch(ctx: RequestContext, routes: readonly Route[] = ROUTES): Promise<Response> {
 	const route = matchRoute(routes, ctx.req.method, ctx.url.pathname);
-	// 阶段 6：没有 legacy 兜底；未知路径不触发迁移/ Harness，响应体与旧 handler 一致。
-	if (!route) return Response.json({ error: "not found" }, { status: 404 });
+	// 阶段 6：没有 legacy 兜底；未知路径不触发迁移/ Harness，错误体统一经 toResponse。
+	if (!route) return toResponse(new AppError("not_found", 404, "not found"));
 	try {
 		await ctx.ready();
 		if (route.needsHarness) await ctx.harness();

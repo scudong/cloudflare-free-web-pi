@@ -1,4 +1,4 @@
-import { AppError } from "../http/errors";
+import { AppError, errorText, toResponse } from "../http/errors";
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
 import { createKbService, KbIngestError, KB_VECTOR_BATCH, type KbService } from "../services/kb-service";
@@ -14,12 +14,13 @@ function service(ctx: RequestContext): KbService {
 	});
 }
 
-/** ingest 的失败体是 `{ ok:false, code, message }`（契约固定），不是 AppError 的 `{ error }`。 */
+/**
+ * ingest 保留 `{ ok:false, code, message }` 兼容字段（一个版本），并新增统一字段
+ * `error` / `details`；状态码与旧实现一致（NERE-79）。
+ */
 function ingestFailure(err: unknown): Response {
-	if (err instanceof KbIngestError) {
-		return Response.json({ ok: false, code: err.code, message: err.message }, { status: err.status });
-	}
-	throw err;
+	if (!(err instanceof KbIngestError)) throw err;
+	return toResponse(err, { ok: false, message: err.message });
 }
 
 export const kbRoutes: readonly Route[] = [
@@ -136,7 +137,7 @@ export const kbRoutes: readonly Route[] = [
 				const result = await kb.reindex(Number(ctx.url.searchParams.get("limit") ?? KB_VECTOR_BATCH));
 				return Response.json({ ok: true, ...result });
 			} catch (err) {
-				throw new AppError("reindex_failed", 500, String(err).slice(0, 200));
+				throw new AppError("reindex_failed", 500, errorText(err, 200));
 			}
 		},
 	},

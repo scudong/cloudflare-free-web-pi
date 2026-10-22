@@ -1,4 +1,5 @@
 import type { SqlHandle } from "../db/migrations";
+import { AppError } from "../http/errors";
 import {
 	KB_MAX_CHUNKS,
 	KB_MAX_CONTENT,
@@ -83,13 +84,10 @@ export type KbIngestErrorCode =
 	| "fetch_failed"
 	| "internal_error";
 
-export class KbIngestError extends Error {
-	constructor(
-		readonly status: number,
-		readonly code: KbIngestErrorCode,
-		message: string,
-	) {
-		super(message);
+export class KbIngestError extends AppError {
+	declare readonly code: KbIngestErrorCode;
+	constructor(status: number, code: KbIngestErrorCode, message: string) {
+		super(code, status, message);
 		this.name = "KbIngestError";
 	}
 }

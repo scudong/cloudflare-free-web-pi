@@ -1,5 +1,6 @@
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
+import { AppError, toResponse } from "../http/errors";
 import { createSkillService, SkillApiError, type SkillService } from "../services/skill-service";
 
 /**
@@ -11,22 +12,10 @@ function service(ctx: RequestContext): SkillService {
 	return createSkillService({ sql: ctx.sql(), settings: ctx.settings });
 }
 
-function failure(err: unknown): Response {
-	if (err instanceof SkillApiError) {
-		const body: Record<string, unknown> = { error: err.message, code: err.code, ...(err.details ? { details: err.details } : {}) };
-		return Response.json(body, { status: err.status });
-	}
-	return Response.json({ error: String(err).slice(0, 500), code: "internal_error" }, { status: 500 });
-}
-
+/** 导入保留 `ok` / `installed` 兼容字段（一个版本）；统一字段由 toResponse 输出（NERE-79）。 */
 function importFailure(err: unknown): Response {
-	if (err instanceof SkillApiError) {
-		return Response.json(
-			{ ok: false, installed: false, error: err.message, code: err.code, ...(err.details ? { details: err.details } : {}) },
-			{ status: err.status },
-		);
-	}
-	return failure(err);
+	if (!(err instanceof SkillApiError)) return toResponse(err);
+	return toResponse(err, { ok: false, installed: false });
 }
 
 /** `/skills/<name>/audit` 是唯一带路径参数的路由；name 由路由表断言过形状。 */
@@ -41,24 +30,20 @@ export const skillRoutes: readonly Route[] = [
 		path: "/skills/hub",
 		needsHarness: false,
 		handle: async (ctx) => {
-			try {
-				const params = ctx.url.searchParams;
-				const result = await service(ctx).hub({
-					q: params.get("q"),
-					runtime: params.get("runtime"),
-					tag: params.get("tag"),
-					audit: params.get("audit"),
-					source: params.get("source"),
-					origin: params.get("origin"),
-					installed: params.get("installed"),
-					sort: params.get("sort"),
-					limit: params.get("limit"),
-					offset: params.get("offset"),
-				});
-				return Response.json(result, { headers: { "cache-control": "private, max-age=30" } });
-			} catch (err) {
-				return failure(err);
-			}
+			const params = ctx.url.searchParams;
+			const result = await service(ctx).hub({
+				q: params.get("q"),
+				runtime: params.get("runtime"),
+				tag: params.get("tag"),
+				audit: params.get("audit"),
+				source: params.get("source"),
+				origin: params.get("origin"),
+				installed: params.get("installed"),
+				sort: params.get("sort"),
+				limit: params.get("limit"),
+				offset: params.get("offset"),
+			});
+			return Response.json(result, { headers: { "cache-control": "private, max-age=30" } });
 		},
 	},
 	// 旧社区入口收口（追加范围 C）：8 条固定 blocked，不再裸写库。
@@ -87,13 +72,8 @@ export const skillRoutes: readonly Route[] = [
 		method: "GET",
 		path: "/skills/:name/audit",
 		needsHarness: false,
-		handle: async (ctx) => {
-			try {
-				return Response.json(await service(ctx).auditFor(pathName(ctx)), { headers: { "cache-control": "no-store" } });
-			} catch (err) {
-				return failure(err);
-			}
-		},
+		handle: async (ctx) =>
+			Response.json(await service(ctx).auditFor(pathName(ctx)), { headers: { "cache-control": "no-store" } }),
 	},
 	// 既有 CRUD 兼容（契约 §5.5）：字段只增不改。
 	{
@@ -107,16 +87,12 @@ export const skillRoutes: readonly Route[] = [
 		path: "/skills",
 		needsHarness: false,
 		handle: async (ctx) => {
-			try {
-				const body = (await ctx.req.json().catch(() => ({}))) as { name?: unknown; description?: unknown; content?: unknown };
-				const name = String(body.name ?? "").trim().slice(0, 40);
-				const content = String(body.content ?? "").trim();
-				if (!name || !content) return Response.json({ error: "需要名称与内容" }, { status: 400 });
-				await service(ctx).addManual({ name, description: String(body.description ?? "").trim().slice(0, 120), content });
-				return Response.json({ ok: true });
-			} catch (err) {
-				return failure(err);
-			}
+			const body = (await ctx.req.json().catch(() => ({}))) as { name?: unknown; description?: unknown; content?: unknown };
+			const name = String(body.name ?? "").trim().slice(0, 40);
+			const content = String(body.content ?? "").trim();
+			if (!name || !content) throw new AppError("bad_request", 400, "需要名称与内容");
+			await service(ctx).addManual({ name, description: String(body.description ?? "").trim().slice(0, 120), content });
+			return Response.json({ ok: true });
 		},
 	},
 	{
@@ -133,12 +109,6 @@ export const skillRoutes: readonly Route[] = [
 		method: "GET",
 		path: "/metrics/skill-hub",
 		needsHarness: false,
-		handle: async (ctx) => {
-			try {
-				return Response.json(service(ctx).metrics(ctx.url.searchParams.get("days")));
-			} catch (err) {
-				return failure(err);
-			}
-		},
+		handle: async (ctx) => Response.json(service(ctx).metrics(ctx.url.searchParams.get("days"))),
 	},
 ];

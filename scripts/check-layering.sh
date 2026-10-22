@@ -13,6 +13,10 @@ chkf() {
 	return 0
 }
 chk src/worker/routes   'sqlFacade|sql\.exec\('
+# 阶段 7（NERE-79）：错误只经 toResponse；禁止路由内 String(err) 与手写错误响应体。
+chk src/worker/routes   'String[(]err[)]'
+chk src/worker/routes   'new Response[(][[:space:]]*JSON[.]stringify[(][[:space:]]*[{][[:space:]]*error'
+chk src/worker/routes   'Response[.]json[(][[:space:]]*[{][[:space:]]*(ok:[[:space:]]*false,[[:space:]]*)?error'
 chk src/worker/services 'new Response|Response\.(json|redirect)|^\s*import .*routes/'
 chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./services|from "\.\./routes'
 # 阶段 6：兼容层归零（含 worker/ 下除 db 外的全部新模块；db/migrations.ts 不含这些标识符）。

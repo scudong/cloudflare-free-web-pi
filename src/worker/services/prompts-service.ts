@@ -1,16 +1,14 @@
 import type { SqlHandle } from "../db/migrations";
+import { AppError, defaultErrorCode } from "../http/errors";
 import * as promptsRepo from "../repo/prompts-repo";
 
 /**
  * 提示模板与规则文件（v0.31.0 / ADR-0001 §2）：HTTP 之外的校验与编排。
  * 直接 SQL 在 `repo/prompts-repo.ts`。
  */
-export class PromptsApiError extends Error {
-	constructor(
-		readonly status: number,
-		message: string,
-	) {
-		super(message);
+export class PromptsApiError extends AppError {
+	constructor(status: number, message: string, code = defaultErrorCode(status)) {
+		super(code, status, message);
 		this.name = "PromptsApiError";
 	}
 }

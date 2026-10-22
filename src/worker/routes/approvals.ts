@@ -1,10 +1,12 @@
 import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
-import { ApprovalApiError, decide, listPending } from "../services/approval-service";
-import { answer, listPending as listQuestions, QuestionApiError, type QuestionAnswer } from "../services/question-service";
+import { toResponse } from "../http/errors";
+import { decide, listPending } from "../services/approval-service";
+import { answer, listPending as listQuestions, type QuestionAnswer } from "../services/question-service";
 
 /**
- * 审批 / 问答路由（ADR-0001 §1）：失败体固定 `{ ok:false, error }`（契约不动）。
+ * 审批 / 问答路由（ADR-0001 §1）：失败体保留 `{ ok:false, error }`，
+ * 并新增统一 `code` / `details`（NERE-79）。
  */
 
 export const approvalRoutes: readonly Route[] = [
@@ -24,10 +26,7 @@ export const approvalRoutes: readonly Route[] = [
 			try {
 				return Response.json(decide(ctx.sql(), body.id, body.action));
 			} catch (err) {
-				if (err instanceof ApprovalApiError) {
-					return Response.json({ ok: false, error: err.message }, { status: err.status });
-				}
-				throw err;
+				return toResponse(err, { ok: false });
 			}
 		},
 	},
@@ -47,10 +46,7 @@ export const approvalRoutes: readonly Route[] = [
 			try {
 				return Response.json(answer(ctx.sql(), body.id, body.answers));
 			} catch (err) {
-				if (err instanceof QuestionApiError) {
-					return Response.json({ ok: false, error: err.message }, { status: err.status });
-				}
-				throw err;
+				return toResponse(err, { ok: false });
 			}
 		},
 	},

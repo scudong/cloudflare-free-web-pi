@@ -1,9 +1,10 @@
 import type { SqlHandle } from "../db/migrations";
+import { AppError, defaultErrorCode } from "../http/errors";
 import * as questionsRepo from "../repo/questions-repo";
 
 /**
  * 交互式问答用例（ADR-0001 §2）：ask_user 落库与 `/questions` 回答编排。
- * 端点失败体固定为 `{ ok:false, error }`，由 Route 映射，不走 AppError。
+ * 端点失败体保留 `{ ok:false, error }` 兼容字段，统一经 `toResponse` 输出（NERE-79）。
  */
 export type AskOption = { label: string; description?: string; recommended?: boolean };
 export type AskItem = { id: string; question: string; options?: AskOption[]; allowText?: boolean };
@@ -43,12 +44,10 @@ export function record(sql: SqlHandle, sessionId: string, payload: AskPayload): 
 	}
 }
 
-export class QuestionApiError extends Error {
-	constructor(
-		readonly status: number,
-		message: string,
-	) {
-		super(message);
+export class QuestionApiError extends AppError {
+	constructor(status: number, message: string, code = defaultErrorCode(status)) {
+		super(code, status, message);
+		this.name = "QuestionApiError";
 	}
 }
 
