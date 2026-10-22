@@ -208,13 +208,15 @@ export type RequestContext = {
   readonly scopeId: string;
   readonly userKey: string;
   readonly origin: string;
-  sql(): SqlHandle;                 // 已执行迁移的句柄
-  harness(): Promise<Harness>;      // 惰性 open；只有需要的端点调用
+  sql(): SqlHandle;                 // 已执行迁移的句柄；调用前 dispatch 已 await ready()
+  ready(): Promise<void>;           // 只跑迁移（ensureMigrated），不建 Harness
+  harness(): Promise<Harness>;      // 惰性 open（内部含 ready）；只有需要的端点调用
   legacy(): Promise<Response>;      // 阶段 0/1-4 的过渡委托，阶段 6 删除
 };
 ```
 
-- Route：`{ method, path, needsHarness: boolean, handle(ctx): Promise<Response> }`；`matchRoute` 先于 DO 初始化执行，`sql()`/`harness()` 各自惰性触发。
+- Route：`{ method, path, needsHarness: boolean, handle(ctx): Promise<Response> }`；`matchRoute` 先于 DO 初始化执行。
+- **dispatch 对每个命中路由先 `await ctx.ready()`，再按 `needsHarness` 决定是否 `await ctx.harness()`。** 迁移与 Harness 是两件事：阶段 3 把 `/s/*` 标成 `needsHarness: false` 后，分享页仍要读 `shares` 表，`sql()` 必须已经可用；把迁移绑在 `open()` 上会让冷启动分享页拿到未建表的库。
 - 阶段 0b 所有现存端点 `needsHarness: true`（与现状"每个请求先 `open()`"等价）；阶段 3 起 `/s/*` 与只读端点按实测改为 `false`，这是 NERE-22 的落地方式，不另写实现。
 - `agentScope`/`scope()` 保留为兼容层，供尚未迁移的模块级 helper 使用；**新代码不得调用 `scope()`**，阶段 6 删除。
 
@@ -296,7 +298,8 @@ chk src/worker/repo     'new Response|Response\.(json|redirect)|from "\.\./servi
 
 ## 10. 执行状态
 
-- 2026-10-21：ADR 转 Accepted（PR #18）。NERE-21 子任务按 stage 排期：0a=NERE-27（in_progress，后端-bei）、0b=NERE-28（等 PR #17 合并）、1=NERE-29、2=NERE-30、3=NERE-31（吸收 NERE-22）、4=NERE-32、5=NERE-33、6=NERE-34。
+- 2026-10-21：ADR 转 Accepted（PR #18）。NERE-21 子任务按 stage 排期：0a=NERE-27、0b=NERE-28、1=NERE-29、2=NERE-30、3=NERE-31（吸收 NERE-22）、4=NERE-32、5=NERE-33、6=NERE-34。
+- 2026-10-22：阶段 0a 合并（PR #21，`958c950`）：`src/worker/db/migrations.ts` 落地，`worker.ts` 内 `ensureTables` 计数 0，`open()` 走 `ensureMigrated()`。空的 `sessions_meta` 首启五列由 `tests/unit/migrations.test.ts` 与 `tests/api/api.test.ts` 空库用例守住。0b 启动。
 - 后续每个阶段完成后在本节追加一行：阶段号、PR、验收命令结果。
 
 ## 后果
