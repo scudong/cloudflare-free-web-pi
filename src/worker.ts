@@ -2431,7 +2431,7 @@ html{scroll-behavior:smooth}
 .toc a.l2{padding-left:1rem}
 .toc a.l3{padding-left:1.8rem}
 .toc a.l4{padding-left:2.6rem}
-@media (max-width:900px){main.with-toc{grid-template-columns:minmax(0,1fr);gap:.9rem}.toc{position:static;max-height:40vh}}
+@media (max-width:900px){main.with-toc{grid-template-columns:minmax(0,1fr);gap:.9rem}.toc{position:static;max-height:40vh}.demo-note{margin:1rem .9rem 0}}
 article.article{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:1.4rem 1.6rem}
 article.article>*:first-child{margin-top:0}
 h1,h2,h3,h4{line-height:1.35;color:var(--fg);scroll-margin-top:4.5rem}
@@ -2470,6 +2470,12 @@ a.fcard:hover{border-color:var(--accent-border);background:var(--accent-soft)}
 .fcard-meta{color:var(--muted);font-size:12px}
 .fcard-action{margin-left:auto;color:var(--accent);font-size:12px;white-space:nowrap}
 footer{text-align:center;color:var(--muted);font-size:12px;padding:1.4rem 1rem 2rem}
+/* 出口（NERE-46）：页脚一行跳到仓库 Deploy 段；演示页顶部说明这是只读样例 */
+.share-cta{margin-top:.5rem}
+.share-cta a{color:var(--accent);text-decoration:none;font-weight:600}
+.share-cta a:hover{text-decoration:underline}
+.demo-note{max-width:1180px;margin:1rem auto 0;padding:.6rem 1rem;background:var(--accent-soft);border:1px solid var(--accent-border);border-radius:10px;font-size:13px;color:var(--fg)}
+.demo-note strong{color:var(--accent)}
 .expired{max-width:520px;margin:14vh auto;text-align:center;padding:2rem}
 .expired h1{font-size:1.3rem;margin:0 0 .6rem;border:0}
 .expired p{color:var(--muted)}
@@ -2503,6 +2509,8 @@ tr:nth-child(even) td{background:transparent}
 pre{white-space:pre-wrap;word-break:break-word}
 img{break-inside:avoid;page-break-inside:avoid}
 footer{break-inside:avoid;page-break-inside:avoid;border-top:1px solid var(--border);padding:.8rem 0 0}
+/* 出口与演示横条只服务屏幕浏览：打印 / 存 PDF 时不出现（NERE-46） */
+.share-cta,.demo-note{display:none}
 }
 `;
 }
@@ -2535,6 +2543,7 @@ function sharePage(
 	theme: ShareThemeId = "dark",
 	toc = "",
 	meta: { author: string; createdAt: string } = { author: "π Harness", createdAt: new Date().toISOString() },
+	demo = false,
 ): string {
 	const until =
 		expiresAt > 0
@@ -2544,8 +2553,9 @@ function sharePage(
 	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} · 分享</title>
 <style>${shareCss(theme)}</style></head><body>
 <header><span class="badge">只读分享</span><h1>${escapeHtml(title)}</h1><button class="print-btn" type="button" onclick="window.print()">打印 / 存为 PDF</button></header>
+${demo ? `<div class="demo-note"><strong>这是只读样例</strong>：内容是一份只读快照，看懂了就自己部署一个。</div>` : ""}
 <main class="${toc ? "with-toc" : "single"}">${toc}${body}</main>
-<footer>由 ${escapeHtml(meta.author)} 分享 · 生成于 ${escapeHtml(generated)} · 只读视图${escapeHtml(until)}</footer>
+<footer>由 ${escapeHtml(meta.author)} 分享 · 生成于 ${escapeHtml(generated)} · 只读视图${escapeHtml(until)}<div class="share-cta"><a href="https://github.com/scudong/cloudflare-free-web-pi?utm_source=share#deploy" target="_blank" rel="noopener noreferrer">用同样的方式做一个 →</a></div></footer>
 </body></html>`;
 }
 
@@ -3434,6 +3444,9 @@ export class SpikeAgent extends DurableObject {
 				: "dark";
 		const expiresAt = Number(share.expires_at ?? 0);
 		if (expiresAt > 0 && expiresAt <= Date.now()) return expiredSharePage(share.name, expiresAt, theme);
+		// 登录页「看一个真实对话」落到的那条分享：顶部加一条只读样例说明（NERE-46）。
+		const demoToken = demoShareToken((this.env as { DEMO_SHARE_URL?: string }).DEMO_SHARE_URL);
+		const demo = demoToken !== "" && demoToken === token;
 
 		if (share.kind === "file") {
 			const file = sqlFacade!.exec(
@@ -3467,6 +3480,7 @@ export class SpikeAgent extends DurableObject {
 					theme,
 					shareToc(headings),
 					{ author: shareAuthor(), createdAt: share.created_at },
+					demo,
 				),
 			};
 		}
@@ -3518,6 +3532,7 @@ export class SpikeAgent extends DurableObject {
 				theme,
 				shareToc(headings),
 				{ author: shareAuthor(), createdAt: share.created_at },
+				demo,
 			),
 		};
 	}
@@ -4905,6 +4920,21 @@ function demoShareUrl(raw: unknown): string {
 	if (/^\/s\/[A-Za-z0-9._~-]+$/.test(value)) return value;
 	if (/^https:\/\/[^\s"'<>]+$/.test(value)) return value;
 	return "";
+}
+
+/**
+ * 演示分享的 token（NERE-46）：DEMO_SHARE_URL 指向的那条 /s/<token> 在分享页顶部
+ * 加「这是只读样例」横条。配置是绝对地址时取 pathname，取不到就不加横幅。
+ */
+function demoShareToken(raw: unknown): string {
+	const value = demoShareUrl(raw);
+	if (!value) return "";
+	try {
+		const parts = new URL(value, "https://demo.invalid").pathname.split("/");
+		return parts.length === 3 && parts[1] === "s" ? decodeURIComponent(parts[2]) : "";
+	} catch {
+		return "";
+	}
 }
 
 /** 旧版主人令牌 = HMAC(ACCESS_PASSWORD, 固定串)，改密码即全体失效。 */
