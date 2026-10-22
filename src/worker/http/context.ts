@@ -1,5 +1,6 @@
 import type { Harness } from "@earendil-works/pi-durable";
 import type { SqlHandle } from "../db/migrations";
+import type { KbSettings, WebFetchResult } from "../services/kb-service";
 import type { SessionRuntime } from "../services/session-service";
 
 /** Worker 绑定（ADR-0001 §9.2）；只在 Http 层按需读取，不落库。 */
@@ -33,6 +34,10 @@ export type RequestContext = {
 	legacy(): Promise<Response>;
 	/** 会话域的 Harness 端口（open/重试/模型配置在 DO 组合根）；由路由注入 session-service。 */
 	readonly sessionRuntime: SessionRuntime;
+	/** 设置读取端口（DO 用既有 getSetting 实现），供服务替代模块级 getSetting。 */
+	readonly settings: KbSettings;
+	/** DeepSeek 网页抓取端口（web_fetch_page 与链接 ingest 共用适配器）。 */
+	webFetch(url: string): Promise<WebFetchResult>;
 };
 
 export type BuildContextInput = {
@@ -46,6 +51,8 @@ export type BuildContextInput = {
 	open(): Promise<Harness>;
 	legacy(): Promise<Response>;
 	sessionRuntime: SessionRuntime;
+	settings: KbSettings;
+	webFetch(url: string): Promise<WebFetchResult>;
 };
 
 export function buildContext(input: BuildContextInput): RequestContext {
@@ -61,5 +68,7 @@ export function buildContext(input: BuildContextInput): RequestContext {
 		harness: () => input.open(),
 		legacy: () => input.legacy(),
 		sessionRuntime: input.sessionRuntime,
+		settings: input.settings,
+		webFetch: (url: string) => input.webFetch(url),
 	};
 }
