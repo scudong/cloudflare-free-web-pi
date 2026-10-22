@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { KbRefsBar, groupByDoc } from "../../src/web/components/KbRefsBar";
 import { parseEntries, parseKbRefs } from "../../src/web/lib/entries";
-import { PANEL_IDLE, reducePanel } from "../../src/web/lib/panels";
+import { PANEL_IDLE, isSettingsOpen, panelOf, reducePanel } from "../../src/web/lib/panels";
 import type { KbRef } from "../../src/web/types";
 
 const REFS: KbRef[] = [
@@ -78,20 +78,22 @@ describe("知识库定位生命周期 · 重开弹窗不重放（NERE-75 P1-1）
 
 	it("点参考资料 A → Esc → 点 Rail「知识库」：停在列表", () => {
 		const opened = reducePanel(PANEL_IDLE, { type: "kb-ref", focus });
-		expect(opened).toEqual({ active: "kb", kbFocus: focus });
+		expect(opened).toEqual({ overlay: { kind: "panel", id: "kb" }, kbFocus: focus });
+		expect(panelOf(opened)).toBe("kb");
+		expect(isSettingsOpen(opened)).toBe(false);
 
 		const closed = reducePanel(opened, { type: "close" });
 		expect(closed).toEqual(PANEL_IDLE);
 
 		const reopened = reducePanel(closed, { type: "toggle", panel: "kb" });
-		expect(reopened.active).toBe("kb");
+		expect(panelOf(reopened)).toBe("kb");
 		expect(reopened.kbFocus).toBeNull();
 	});
 
 	it("消费后立即清空：即使没有经过 close，重开也不会用旧 nonce 再打开一次", () => {
 		const opened = reducePanel(PANEL_IDLE, { type: "kb-ref", focus });
 		const consumed = reducePanel(opened, { type: "kb-focus-consumed" });
-		expect(consumed).toEqual({ active: "kb", kbFocus: null });
+		expect(consumed).toEqual({ overlay: { kind: "panel", id: "kb" }, kbFocus: null });
 
 		expect(reducePanel(consumed, { type: "toggle", panel: "kb" })).toEqual(PANEL_IDLE);
 		expect(reducePanel(consumed, { type: "close" })).toEqual(PANEL_IDLE);
@@ -99,7 +101,25 @@ describe("知识库定位生命周期 · 重开弹窗不重放（NERE-75 P1-1）
 
 	it("切到别的弹窗 / 打开设置同样丢弃未消费的定位", () => {
 		const opened = reducePanel(PANEL_IDLE, { type: "kb-ref", focus });
-		expect(reducePanel(opened, { type: "toggle", panel: "mcp" })).toEqual({ active: "mcp", kbFocus: null });
-		expect(reducePanel(opened, { type: "settings" })).toEqual(PANEL_IDLE);
+		expect(reducePanel(opened, { type: "toggle", panel: "mcp" })).toEqual({
+			overlay: { kind: "panel", id: "mcp" },
+			kbFocus: null,
+		});
+		expect(reducePanel(opened, { type: "settings" })).toEqual({ overlay: { kind: "settings" }, kbFocus: null });
+	});
+
+	it("设置与面板互斥（NERE-81）：定位知识库会关掉设置，打开设置也会关掉面板", () => {
+		const settings = reducePanel(PANEL_IDLE, { type: "settings" });
+		expect(isSettingsOpen(settings)).toBe(true);
+		expect(panelOf(settings)).toBeNull();
+
+		const focused = reducePanel(settings, { type: "kb-ref", focus });
+		expect(isSettingsOpen(focused)).toBe(false);
+		expect(panelOf(focused)).toBe("kb");
+
+		const backToSettings = reducePanel(focused, { type: "settings" });
+		expect(isSettingsOpen(backToSettings)).toBe(true);
+		expect(panelOf(backToSettings)).toBeNull();
+		expect(backToSettings.kbFocus).toBeNull();
 	});
 });

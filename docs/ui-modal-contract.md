@@ -69,7 +69,7 @@ interface RailProps {
 | `src/web/components/Rail.tsx` | 特性组件 | `RailView` 收窄 + `RailPanel` + 两个回调 | +15 |
 | `src/web/App.tsx` | 页面层 | `activePanel` 一个 state；三个弹窗挂载点；`kbFocus` 联动 | ±25 |
 | `src/web/components/KnowledgePanel.tsx` | 特性组件 | 去掉外层 `h-full`/`bg-slate-900/60` 与 `PanelHeader`，改收 `onClose` | −15 |
-| `src/web/components/LeftPanels.tsx` | 特性组件 | `McpPanel` / `SkillPanel` 同上；`AutomationPanel` 与 `PanelHeader` 不动 | −20 |
+| `src/web/components/LeftPanels.tsx` | 特性组件 | `McpPanel` / `SkillPanel` 同上；`AutomationPanel` 与 `PanelHeader` 不动（NERE-81 已拆成 `McpPanel.tsx` / `SkillPanel.tsx` / `AutomationPanel.tsx` / `PanelHeader.tsx`） | −20 |
 | `src/web/styles/index.css` | 样式 | sheet 进出场动画 + reduced-motion 兜底 | +25 |
 | `tests/unit/modal.test.tsx` | 测试（新增） | SSR 标记断言 + 纯函数 | 新增 |
 | `docs/frontend-map.md` | 文档 | 组件树、状态表、API 依赖表同步 | 见 §9 |
@@ -302,7 +302,7 @@ const handleOpenKbRef = useCallback((ref: KbRef) => {
 
 - 不新增 / 不修改任何 `api.*` 调用；`KnowledgePanel` 仍是 5 处、`LeftPanels` 仍是 1 处（`automations`）。
 - 不动 bootstrap 的 17 个面板与首屏 1 次请求（`tests/unit/bootstrap-web.test.ts` 断言）。
-- 不动 `SettingsDialog` 内部的 18 处 `api.*`（那是 `[ARCH]` R2 的事）。
+- 不动 `SettingsDialog` 内部的 18 处 `api.*`（那是 `[ARCH]` R2 的事；NERE-81 已收敛到 `hooks/useSettingsData.ts`，组件文件为 0）。
 - 不动 `SkillHubPanel` 的取数逻辑（`hooks/useSkillHub`），只把它放进更宽的容器。
 - 不动 `sharesAvailable` / `isOwner` 门禁。
 

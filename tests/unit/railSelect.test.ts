@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadBoolOrNull, saveBool } from "../../src/web/lib/localStore";
-import { LEFT_OPEN_KEY, selectRailView } from "../../src/web/lib/layout";
+import { LEFT_OPEN_KEY, effectiveRailView, leftPaneWidth, selectRailView } from "../../src/web/lib/layout";
 
 describe("selectRailView · 收起左栏后点 Rail（NERE-75 P1-3）", () => {
 	it("桌面端：一律展开左栏并写回偏好", () => {
@@ -51,5 +51,28 @@ describe("selectRailView · 收起左栏后点 Rail（NERE-75 P1-3）", () => {
 		);
 		expect(opened).toEqual([]);
 		expect(saved).toEqual([]);
+	});
+});
+
+describe("左栏宽度读生效视图（NERE-81 P2-1）", () => {
+	it("非 owner 的 railView=\"users\" 回落到会话列表", () => {
+		expect(effectiveRailView("users", { owner: false, sharesAvailable: true })).toBe("sessions");
+		expect(effectiveRailView("users", { owner: true, sharesAvailable: true })).toBe("users");
+	});
+
+	it("分享接口未上线时 railView=\"shares\" 回落到会话列表", () => {
+		expect(effectiveRailView("shares", { owner: true, sharesAvailable: false })).toBe("sessions");
+		expect(effectiveRailView("shares", { owner: true, sharesAvailable: true })).toBe("shares");
+	});
+
+	it("非 owner 的 users 视图宽度 = leftWidth，不是 300", () => {
+		const view = effectiveRailView("users", { owner: false, sharesAvailable: true });
+		expect(leftPaneWidth(view, 240)).toBe(240);
+		expect(leftPaneWidth(view, 400)).toBe(400);
+	});
+
+	it("其它面板保持 300px 下限", () => {
+		expect(leftPaneWidth("automations", 240)).toBe(300);
+		expect(leftPaneWidth("automations", 420)).toBe(420);
 	});
 });

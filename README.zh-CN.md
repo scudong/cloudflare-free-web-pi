@@ -207,7 +207,7 @@ npx wrangler deploy
 src/
   worker.ts              # Worker 入口 + Durable Object（API、工具、存储、调度）
   web/                   # React 前端
-    components/          #   Rail / Sidebar / LeftPanels / ChatHeader / MessageList / Composer / Workbench / TopBar / SettingsDialog
+    components/          #   Rail / Sidebar / AutomationPanel / ChatHeader / MessageList / Composer / Workbench / TopBar / SettingsDialog
     lib/                 #   api 客户端、SSE 解析、Markdown 渲染、宽容解析器
 wrangler.jsonc           # Worker + DO + 静态资源绑定
 .github/workflows/deploy.yml

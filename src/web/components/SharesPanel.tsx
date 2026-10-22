@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useShares } from "../hooks/useShares";
 import { Icon } from "./Icon";
-import { PanelHeader } from "./LeftPanels";
+import { PanelHeader } from "./PanelHeader";
 import { ShareRow } from "./ShareRow";
 import type { ShareRecord } from "../types";
 

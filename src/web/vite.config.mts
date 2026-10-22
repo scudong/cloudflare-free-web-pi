@@ -13,6 +13,8 @@ export default defineConfig({
 		},
 	},
 	build: {
+		// 首包 gzip 预算 150 KB（NERE-81）。entry 目前 ≈112 KB；设置 / 知识库+MCP / 技能
+		// 三个弹窗走动态 import 分包（见 App.tsx）。超预算先看 `vite build` 的 gzip 行。
 		// 相对路径以 vite root（src/web）为基准：../../dist-web = 项目根下的 dist-web
 		outDir: "../../dist-web",
 		emptyOutDir: true,

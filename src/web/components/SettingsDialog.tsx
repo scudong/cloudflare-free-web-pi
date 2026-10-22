@@ -1,29 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api } from "../lib/api";
+import { useSettingsData, type CheckState, type DeploymentCheckRow, type SettingsTab } from "../hooks/useSettingsData";
 import { formatTime } from "../lib/format";
+import { DEFAULT_PROVIDER_HOST, PROVIDER_BASE_URL_PLACEHOLDER } from "../lib/provider";
 import { THEMES, type ThemeId } from "../lib/theme";
 import { Icon, type IconName } from "./Icon";
 import type { MemoryInfo } from "../types";
-
-type ProviderInfo = {
-	id: string;
-	name: string;
-	baseUrl: string;
-	models: string[];
-	keyHint?: string;
-	active?: boolean;
-};
-
-type CheckState = "loading" | "ok" | "warning" | "error";
-
-type DeploymentCheckRow = {
-	label: string;
-	state: CheckState;
-	detail: string;
-	fix?: string;
-};
-
-type SettingsTab = "general" | "chat" | "model" | "memory" | "data";
 
 interface SettingsDialogProps {
 	open: boolean;
@@ -106,88 +87,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 	);
 }
 
-function DeploymentCheck() {
-	const [rows, setRows] = useState<DeploymentCheckRow[]>([]);
-	const [checking, setChecking] = useState(false);
-
-	const check = async () => {
-		setChecking(true);
-		setRows([
-			{ label: "模型密钥", state: "loading", detail: "正在检查…" },
-			{ label: "模型供应商", state: "loading", detail: "正在检查…" },
-			{ label: "知识库检索", state: "loading", detail: "正在检查…" },
-			{ label: "分享域名", state: "loading", detail: "正在检查…" },
-			{ label: "线上构建号", state: "loading", detail: "正在检查…" },
-		]);
-
-		const [providers, models, kb, settings, version] = await Promise.allSettled([
-			api.providers(),
-			api.models(),
-			api.kbStatus(),
-			api.settings(),
-			api.version(),
-		]);
-		const providerData = providers.status === "fulfilled" ? providers.value : null;
-		const modelData = models.status === "fulfilled" ? models.value : null;
-		const kbData = kb.status === "fulfilled" ? kb.value : null;
-		const settingsData = settings.status === "fulfilled" ? settings.value : null;
-		const versionData = version.status === "fulfilled" ? version.value : null;
-		const activeId = providerData?.active || modelData?.provider || providerData?.default?.id || "";
-		const customProvider = providerData?.providers?.find((provider) => provider.id === activeId);
-		const defaultProvider = !customProvider && providerData?.default?.id === activeId ? providerData.default : null;
-		// `hasKey` 是已有 providers 响应在可提供时的非敏感布尔值；绝不读取或展示密钥本身。
-		const hasKey = customProvider?.hasKey ?? defaultProvider?.hasKey;
-		const providerReachable = Boolean(providerData && modelData && activeId);
-		const kbMode = settingsData?.kbRetrieval ?? kbData?.mode;
-		const kbReady = Boolean(kbData && (kbMode === "fts" || kbData.available));
-		const origin = typeof window === "undefined" ? "" : window.location.origin;
-		const build = versionData?.build?.trim() ?? "";
-
-		setRows([
-			{
-				label: "模型密钥",
-				state: hasKey === false ? "warning" : hasKey === true ? "ok" : providerData ? "warning" : "error",
-				detail:
-					hasKey === false
-						? "未配置 DeepSeek API Key。"
-						: hasKey === true
-							? "已配置，密钥不会在浏览器中显示。"
-							: providerData
-								? "默认供应商未返回密钥状态，请在本地或部署配置中确认。"
-								: "无法读取模型配置。",
-				fix: hasKey === false || hasKey === undefined ? "npx wrangler secret put DEEPSEEK_API_KEY" : undefined,
-			},
-			{
-				label: "模型供应商",
-				state: providerReachable ? "ok" : "error",
-				detail: providerReachable ? `当前使用 ${activeId}。` : "模型供应商接口不可用。",
-				fix: providerReachable ? undefined : "在设置 → 模型中配置供应商后重试。",
-			},
-			{
-				label: "知识库检索",
-				state: kbReady ? "ok" : kbData ? "warning" : "error",
-				detail: kbReady ? `检索模式：${kbMode ?? "fts"}。` : kbData ? "向量检索绑定未启用。" : "无法读取知识库状态。",
-				fix: kbReady ? undefined : "检查 AI / KB_VEC 绑定，或在设置中切换为 FTS。",
-			},
-			{
-				label: "分享域名",
-				state: origin ? "ok" : "error",
-				detail: origin ? `公开链接将使用 ${origin}。` : "无法识别当前站点域名。",
-			},
-			{
-				label: "线上构建号",
-				state: build && build !== "dev" ? "ok" : build ? "warning" : "error",
-				detail: build ? (build === "dev" ? "当前为本地开发构建。" : `SHA：${build.slice(0, 7)}。`) : "无法读取构建号。",
-				fix: build && build !== "dev" ? undefined : "重新部署后确认 BUILD 注入了当前提交 SHA。",
-			},
-		]);
-		setChecking(false);
-	};
-
-	useEffect(() => {
-		void check();
-	}, []);
-
+/** 部署自检（NERE-81：取数在 useSettingsData 里，这里只渲染）。 */
+function DeploymentCheck({ rows, checking, onRecheck }: { rows: DeploymentCheckRow[]; checking: boolean; onRecheck: () => void }) {
 	const icon = (state: CheckState) => (state === "ok" ? "✅" : state === "loading" ? "…" : "⚠️");
 	return (
 		<Section title="部署自检">
@@ -206,7 +107,7 @@ function DeploymentCheck() {
 					</li>
 				))}
 			</ul>
-			<button type="button" onClick={() => void check()} disabled={checking} className="mt-3 rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-300 transition-colors hover:bg-sky-500/20 disabled:opacity-50">
+			<button type="button" onClick={onRecheck} disabled={checking} className="mt-3 rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-300 transition-colors hover:bg-sky-500/20 disabled:opacity-50">
 				{checking ? "检查中…" : "重新检查"}
 			</button>
 		</Section>
@@ -279,205 +180,31 @@ export function SettingsDialog({
 	const [nameDraft, setNameDraft] = useState(displayName);
 	const [clearing, setClearing] = useState(false);
 	/** 工具清单（v0.33.0）：打开「对话」tab 时读取，用于逐工具覆盖。 */
-	const [toolList, setToolList] = useState<{ name: string; category: string; policy: string; override: string }[]>([]);
-	/** pi 内核版本（v0.35.0）。 */
-	const [kernel, setKernel] = useState<{
-		current?: Record<string, string>;
-		latest?: Record<string, string>;
-		checkedAt?: string;
-		updateAvailable?: boolean;
-		outdated?: string[];
-		upgrade?: { manual?: string; auto?: string };
-	} | null>(null);
-	const [kernelBusy, setKernelBusy] = useState(false);
-	/** 知识库向量索引状态（v0.53.0）。 */
-	const [kbStatus, setKbStatus] = useState<{ mode?: string; available?: boolean; index?: string; total?: number; indexed?: number } | null>(null);
-	const [kbReindexBusy, setKbReindexBusy] = useState(false);
-	const [kbReindexMessage, setKbReindexMessage] = useState("");
-
-	const loadKernel = async (refresh: boolean) => {
-		setKernelBusy(true);
-		try {
-			const data = await api.kernel(refresh);
-			setKernel(data);
-		} catch {
-			setKernel(null);
-		} finally {
-			setKernelBusy(false);
-		}
-	};
-
-	/** 手动压缩（v0.31.0）。 */
-	const [compactState, setCompactState] = useState<"idle" | "running" | "done" | "error">("idle");
-	const [compactMessage, setCompactMessage] = useState("");
-
-	const handleCompactNow = async () => {
-		setCompactState("running");
-		setCompactMessage("");
-		try {
-			const res = await api.compact(sessionId);
-			if (res.error) {
-				setCompactState("error");
-				setCompactMessage(res.error);
-			} else {
-				setCompactState("done");
-				setCompactMessage("已提交压缩任务，完成后聊天里会出现提示。");
-			}
-		} catch (err) {
-			setCompactState("error");
-			setCompactMessage(err instanceof Error ? err.message : String(err));
-		}
-	};
-
-	// pi 内核版本（v0.35.0）：打开设置时读一次（走 6 小时缓存）
-	useEffect(() => {
-		if (!open) return;
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.kernel(false);
-				if (alive) setKernel(data);
-			} catch {
-				// 接口不可用时保持空
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [open]);
-
-	// 知识库索引状态（v0.53.0）
-	useEffect(() => {
-		if (!open || tab !== "chat") return;
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.kbStatus();
-				if (alive) setKbStatus(data);
-			} catch {
-				if (alive) setKbStatus(null);
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [open, tab]);
-
-	const reindexKb = () => {
-		if (kbReindexBusy) return;
-		setKbReindexBusy(true);
-		setKbReindexMessage("");
-		void (async () => {
-			try {
-				const data = await api.kbReindex();
-				if (data.error) throw new Error(data.error);
-				const remaining = Number(data.remaining ?? 0);
-				setKbReindexMessage(
-					`已索引 ${data.indexed ?? 0} 段${remaining > 0 ? `，剩余 ${remaining} 段，再点一次继续` : "，全部完成"}`,
-				);
-				setKbStatus(await api.kbStatus());
-			} catch (err) {
-				setKbReindexMessage(err instanceof Error ? err.message : String(err));
-			} finally {
-				setKbReindexBusy(false);
-			}
-		})();
-	};
-
-	// 工具清单（v0.33.0）
-	useEffect(() => {
-		if (!open || tab !== "chat") return;
-		let alive = true;
-		void (async () => {
-			try {
-				const data = await api.tools();
-				if (alive && Array.isArray(data.tools)) setToolList(data.tools);
-			} catch {
-				// 接口不可用时保持空列表
-			}
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [open, tab]);
-
-	// 供应商（v0.27.0）
-	const [providers, setProviders] = useState<ProviderInfo[]>([]);
-	const [defaultProvider, setDefaultProvider] = useState<{ id: string; name: string; models: string[] } | null>(null);
-	const [activeProvider, setActiveProvider] = useState("");
-	const [providersLoading, setProvidersLoading] = useState(false);
-	const [providerError, setProviderError] = useState<string | null>(null);
-	const [providerBusy, setProviderBusy] = useState(false);
-	const [form, setForm] = useState<{ id?: string; name: string; baseUrl: string; apiKey: string; models: string } | null>(null);
-
-	const loadProviders = async () => {
-		setProvidersLoading(true);
-		try {
-			const data = await api.providers();
-			setProviders(Array.isArray(data.providers) ? data.providers : []);
-			setDefaultProvider(data.default ?? null);
-			setActiveProvider(data.active ?? "");
-			setProviderError(null);
-		} catch (err) {
-			setProviderError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setProvidersLoading(false);
-		}
-	};
-
-	useEffect(() => {
-		if (open && tab === "model") void loadProviders();
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [open, tab]);
-
-	const activateProvider = async (id: string) => {
-		if (providerBusy) return;
-		setProviderBusy(true);
-		try {
-			await api.activateProvider(id);
-			await loadProviders();
-			onModelsChanged?.();
-		} catch (err) {
-			setProviderError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setProviderBusy(false);
-		}
-	};
-
-	const saveProvider = async () => {
-		if (!form || providerBusy) return;
-		setProviderBusy(true);
-		try {
-			await api.saveProvider({
-				id: form.id,
-				name: form.name,
-				baseUrl: form.baseUrl,
-				apiKey: form.apiKey,
-				models: form.models,
-			});
-			setForm(null);
-			await loadProviders();
-			onModelsChanged?.();
-		} catch (err) {
-			setProviderError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setProviderBusy(false);
-		}
-	};
-
-	const removeProvider = async (id: string, name: string) => {
-		if (!window.confirm(`删除供应商「${name}」？`)) return;
-		setProviderBusy(true);
-		try {
-			await api.deleteProvider(id);
-			await loadProviders();
-			onModelsChanged?.();
-		} catch (err) {
-			setProviderError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setProviderBusy(false);
-		}
-	};
+	const { deployment, kernel: kernelData, compaction: compact, kbIndex, tools, providers: providerData } = useSettingsData({
+		open,
+		tab,
+		sessionId,
+		kbRetrieval,
+		onModelsChanged,
+	});
+	const { rows: checkRows, checking, recheck } = deployment;
+	const { kernel, kernelBusy, loadKernel } = kernelData;
+	const { compactState, compactMessage, compactNow } = compact;
+	const { kbStatus, kbReindexBusy, kbReindexMessage, reindexKb } = kbIndex;
+	const { toolList, setToolList } = tools;
+	const {
+		providers,
+		defaultProvider,
+		activeProvider,
+		providersLoading,
+		providerError,
+		providerBusy,
+		form,
+		setForm,
+		activateProvider,
+		saveProvider,
+		removeProvider,
+	} = providerData;
 
 	useEffect(() => {
 		if (!open) return;
@@ -596,7 +323,7 @@ export function SettingsDialog({
 								</div>
 							</Section>
 
-							<DeploymentCheck />
+							<DeploymentCheck rows={checkRows} checking={checking} onRecheck={() => void recheck()} />
 
 							{authRequired && (
 								<Section title="账号">
@@ -728,7 +455,7 @@ export function SettingsDialog({
 								<div className="mt-3 flex flex-wrap items-center gap-2">
 									<button
 										type="button"
-										onClick={() => void handleCompactNow()}
+										onClick={() => void compactNow()}
 										disabled={compactState === "running"}
 										className="rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-300 transition-colors hover:bg-sky-500/20 disabled:opacity-50"
 									>
@@ -935,7 +662,7 @@ export function SettingsDialog({
 													{activeProvider === "" && <span className="ml-1.5 text-[11px] text-sky-300">使用中</span>}
 												</span>
 												<span className="block truncate text-[11px] text-slate-500">
-													api.deepseek.com · {(defaultProvider?.models ?? []).join(" / ")}
+													{DEFAULT_PROVIDER_HOST} · {(defaultProvider?.models ?? []).join(" / ")}
 												</span>
 											</span>
 											{activeProvider !== "" && (
@@ -1021,7 +748,7 @@ export function SettingsDialog({
 										<input
 											value={form.baseUrl}
 											onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
-											placeholder="https://api.example.com/v1"
+											placeholder={PROVIDER_BASE_URL_PLACEHOLDER}
 											className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500"
 										/>
 										<input
