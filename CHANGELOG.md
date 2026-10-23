@@ -2,6 +2,13 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## v1.0.1（2026-10-23）
+
+### 定时任务立即运行 + 白屏修复（v1.0.1）
+- 新增 `POST /api/automations/run`：手动执行指定定时任务，返回回答或错误，用于诊断和补跑
+- 修复登录后白屏（React error #310）：Rail 的 `useCallback` 移到登录 early return 之前
+- 2026-10-23 08:03「每日科技日报」`last_status=failed`；本版本用于复现失败原因
+
 ## v1.0.0（2026-10-22）
 
 首个稳定版本。基线 `main@36ada72`：49 个 issue 关闭、8/8 架构阶段合并、12 条可安装技能、515 个测试（514 通过 / 1 跳过，`npm test`）。生产实例：<https://pi-harness-gw.pages.dev>。

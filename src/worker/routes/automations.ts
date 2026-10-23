@@ -2,6 +2,7 @@ import type { RequestContext } from "../http/context";
 import type { Route } from "../http/router";
 import { AppError, toResponse } from "../http/errors";
 import { createAutomationService, type AutomationPatchInput, type AutomationService } from "../services/automation-service";
+import { createChatService } from "../services/chat-service";
 import { createGoalService } from "../services/goal-service";
 import { readPlan } from "../services/plan-service";
 
@@ -49,6 +50,29 @@ export const automationRoutes: readonly Route[] = [
 			automations(ctx).remove(ctx.url.searchParams.get("id") ?? "");
 			await ctx.alarmRuntime.schedule();
 			return Response.json({ ok: true });
+		},
+	},
+	// 立即运行（v0.55.1）：诊断定时任务失败 / 手动补跑，不走 alarm。
+	{
+		method: "POST",
+		path: "/automations/run",
+		needsHarness: true,
+		handle: async (ctx) => {
+			const body = (await ctx.req.json().catch(() => ({}))) as { id?: string };
+			const id = String(body.id ?? "");
+			const rows = ctx.sql().exec("SELECT prompt, session_id FROM automations WHERE id = ?", id).toArray() as {
+				prompt: string;
+				session_id: string;
+			}[];
+			const job = rows[0];
+			if (!job) throw new AppError("automation_not_found", 404, "定时任务不存在");
+			const chat = createChatService({ sql: ctx.sql(), runtime: ctx.chatRuntime });
+			try {
+				const result = await chat.chat({ message: job.prompt, sessionId: job.session_id || undefined });
+				return Response.json({ ok: true, answer: result.answer, tools: result.tools });
+			} catch (err) {
+				return Response.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+			}
 		},
 	},
 	{
