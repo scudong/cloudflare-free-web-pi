@@ -2,6 +2,13 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## v1.0.2（2026-10-23）
+
+### 定时任务立即运行（v1.0.2）
+- 修复 v1.0.1 的分层检查失败：`/automations/run` 不再在路由里直接读 SQL，改用 automation service 的 `list()`
+- 路由直接抛出 `AppError`，由统一错误层返回，不再手写错误响应
+- 保留 `POST /api/automations/run`：手动执行定时任务，用于诊断 08:03 日报失败与补跑
+
 ## v1.0.1（2026-10-23）
 
 ### 定时任务立即运行 + 白屏修复（v1.0.1）

@@ -60,19 +60,11 @@ export const automationRoutes: readonly Route[] = [
 		handle: async (ctx) => {
 			const body = (await ctx.req.json().catch(() => ({}))) as { id?: string };
 			const id = String(body.id ?? "");
-			const rows = ctx.sql().exec("SELECT prompt, session_id FROM automations WHERE id = ?", id).toArray() as {
-				prompt: string;
-				session_id: string;
-			}[];
-			const job = rows[0];
+			const job = automations(ctx).list().find((item) => item.id === id);
 			if (!job) throw new AppError("automation_not_found", 404, "定时任务不存在");
 			const chat = createChatService({ sql: ctx.sql(), runtime: ctx.chatRuntime });
-			try {
-				const result = await chat.chat({ message: job.prompt, sessionId: job.session_id || undefined });
-				return Response.json({ ok: true, answer: result.answer, tools: result.tools });
-			} catch (err) {
-				return Response.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
-			}
+			const result = await chat.chat({ message: job.prompt, sessionId: job.sessionId || undefined });
+			return Response.json({ ok: true, answer: result.answer, tools: result.tools });
 		},
 	},
 	{
