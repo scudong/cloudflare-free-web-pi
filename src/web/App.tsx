@@ -1473,6 +1473,18 @@ export default function App() {
 		[sessionId, nextId],
 	);
 
+	/**
+	 * 点 Rail 的左栏内容入口（NERE-75 P1-3）：桌面端收起左栏后点「定时」等入口，
+	 * 必须重新展开左栏并写回偏好，否则点了没有任何反馈。
+	 */
+	const handleSelectRailView = useCallback(
+		(view: RailView) => {
+			setRailView(view);
+			selectRailView(isDesktop, setLeftOpen, saveBool);
+		},
+		[isDesktop],
+	);
+
 	// 未登录：整屏登录闸门（登录成功后同一组件继续渲染）
 	if (auth && auth.required && !auth.authenticated) {
 		return <LoginGate onSubmit={handleLogin} error={loginError} demoUrl={auth.demoUrl} />;
@@ -1534,18 +1546,6 @@ export default function App() {
 		) : (
 			<UsersPanel onCollapse={toggleLeft} />
 		);
-
-	/**
-	 * 点 Rail 的左栏内容入口（NERE-75 P1-3）：桌面端收起左栏后点「定时」等入口，
-	 * 必须重新展开左栏并写回偏好，否则点了没有任何反馈。
-	 */
-	const handleSelectRailView = useCallback(
-		(view: RailView) => {
-			setRailView(view);
-			selectRailView(isDesktop, setLeftOpen, saveBool);
-		},
-		[isDesktop],
-	);
 
 	const rail = (
 		<Rail

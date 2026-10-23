@@ -134,7 +134,13 @@
 - 修复长会话 500：`entry-kb-refs-repo.getMany` 改用 `entry_id BETWEEN ? AND ?`（恒定 3 个绑定参数），不再因 `/entries` 页内 ≥100 条 assistant entry 撞 DO SQLite 每查询 100 参数上限；新增 120 条单测与 101 轮对话的 API 回归（旧实现复现 500）
 - 删除会话时一并清理该会话的 `entry_kb_refs` 行；goal 续转复用同一份 `kbRefs` 的语义补注释
 
-## 2026-10-21（公开发布准备）
+## 2026-10-23
+
+### 修复登录后白屏（v0.54.3）
+- 根因：React error #310。`handleSelectRailView` 这个 `useCallback` 位于登录闸门的 early return 之后
+- 未登录首帧会跳过它，登录成功后同一组件多执行一个 hook → hooks 数量不一致 → 白屏
+- 将该 hook 移到 early return 之前；所有 hooks 在组件顶层无条件执行
+- 构建通过；598 条测试通过（1 skipped）
 
 ### 首屏聚合 `/api/bootstrap`（v0.57.0）
 - 新增 `GET /api/bootstrap?sessionId=`：一次返回首屏 17 个只读面板（会话/条目/文件/记忆/审批/设置/计划/目标/问答/模板/规则/自定义工具/技能/定时任务/MCP/模型）
