@@ -1,0 +1,131 @@
+src/web/lib/api.ts
+  00512495ff504ece 746-749
+docs/frontend-map.md
+  00512495ff504ece 31
+src/web/components/AutomationPanel.tsx
+  00512495ff504ece 43-65,67,80,93-94,109-120,224-231
+src/web/App.tsx
+  00512495ff504ece 981-991,1553
+src/worker/services/automation-service.ts
+  00512495ff504ece 66-67,158,173-174,195,211,217-218,226,277,284
+src/worker/db/migrations.ts
+  00512495ff504ece 204-212,222
+src/worker/routes/automations.ts
+  00512495ff504ece 56,64-65,68-76
+CHANGELOG.md
+  00512495ff504ece 5-12
+tests/unit/automation-last-status.test.ts
+  00512495ff504ece 73,75,81,84,86-87,118,171-172
+src/worker/repo/automations-repo.ts
+  00512495ff504ece 16,33,117,124,126-133
+src/web/lib/collections.ts
+  00512495ff504ece 114
+src/web/types.ts
+  00512495ff504ece 160-161
+tests/unit/automation-patch.test.ts
+  00512495ff504ece 135,147,162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "45fc045804bf70c37957a55bd135038f67de1076",
+  "prompts": {
+    "00512495ff504ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b4311142-66bf-467d-b5d5-4ee32194f41e",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 135,
+      "total_deletions": 34,
+      "accepted_lines": 135,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/unit/automation-last-status.test.ts": {
+          "additions": 9,
+          "deletions": 6,
+          "accepted_lines": 9
+        },
+        "src/web/lib/collections.ts": {
+          "additions": 1,
+          "accepted_lines": 1
+        },
+        "docs/frontend-map.md": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "CHANGELOG.md": {
+          "additions": 8,
+          "accepted_lines": 8
+        },
+        "src/web/lib/api.ts": {
+          "additions": 4,
+          "accepted_lines": 4
+        },
+        "src/worker/services/automation-service.ts": {
+          "additions": 12,
+          "deletions": 6,
+          "accepted_lines": 12
+        },
+        "src/worker/db/migrations.ts": {
+          "additions": 10,
+          "accepted_lines": 10
+        },
+        "src/worker/repo/automations-repo.ts": {
+          "additions": 12,
+          "deletions": 2,
+          "accepted_lines": 12
+        },
+        "src/web/types.ts": {
+          "additions": 2,
+          "accepted_lines": 2
+        },
+        "src/web/components/AutomationPanel.tsx": {
+          "additions": 49,
+          "deletions": 16,
+          "accepted_lines": 49
+        },
+        "tests/unit/automation-patch.test.ts": {
+          "additions": 3,
+          "accepted_lines": 3
+        },
+        "src/worker/routes/automations.ts": {
+          "additions": 12,
+          "deletions": 3,
+          "accepted_lines": 12
+        },
+        "src/web/App.tsx": {
+          "additions": 12,
+          "accepted_lines": 12
+        }
+      }
+    },
+    "def3fbf2514ceb7e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9be19253-b8ea-41e1-8699-583ea39103c5",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 782,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/unit/skill-projection.test.ts": {
+          "accepted_lines": 114
+        },
+        "src/web/components/SkillPanel.tsx": {
+          "accepted_lines": 532
+        },
+        "tests/unit/chat-gate.test.ts": {
+          "accepted_lines": 136
+        }
+      }
+    }
+  }
+}
