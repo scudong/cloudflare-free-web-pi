@@ -1,0 +1,29 @@
+tsconfig.ci.json
+  62451ee138aee532 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "7b55f87986f623418b5ab01e802701f02a7ea5dd",
+  "prompts": {
+    "62451ee138aee532": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0d1462e-073b-4b02-a4a7-a8c4cd702dcb",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 0,
+      "accepted_lines": 1,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tsconfig.ci.json": {
+          "additions": 1,
+          "accepted_lines": 1
+        }
+      }
+    }
+  }
+}
