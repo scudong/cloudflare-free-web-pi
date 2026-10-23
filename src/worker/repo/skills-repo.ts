@@ -42,12 +42,23 @@ export type SkillWrite = {
 	updatedAt: string;
 };
 
+/** 列表/索引投影：除正文外的全部元数据（hub、instructions、list_skills 用）。 */
+export type SkillMeta = Omit<SkillRow, "content">;
+
 const SELECT =
 	"SELECT name, description, content, created_at AS createdAt, version, source, author, license, runtime, tags, " +
+	"content_hash AS contentHash, audit_status AS auditStatus, audit_report AS auditReport, manifest, updated_at AS updatedAt FROM skills";
+const SELECT_META =
+	"SELECT name, description, created_at AS createdAt, version, source, author, license, runtime, tags, " +
 	"content_hash AS contentHash, audit_status AS auditStatus, audit_report AS auditReport, manifest, updated_at AS updatedAt FROM skills";
 
 export function listSkillRows(sql: SqlHandle): SkillRow[] {
 	return sql.exec(`${SELECT} ORDER BY name`).toArray() as SkillRow[];
+}
+
+/** 不读正文：100 个技能时列表字节数取决于元数据，而不是 SKILL.md 体积。 */
+export function listSkillMeta(sql: SqlHandle): SkillMeta[] {
+	return sql.exec(`${SELECT_META} ORDER BY name`).toArray() as SkillMeta[];
 }
 
 export function getSkillRow(sql: SqlHandle, name: string): SkillRow | undefined {

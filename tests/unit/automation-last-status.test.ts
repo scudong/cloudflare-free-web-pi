@@ -173,4 +173,24 @@ describe("runDueAutomations 三态（NERE-68）", () => {
 			warn.mockRestore();
 		}
 	});
+
+	it("recover 自身失败不吞掉 failed 状态，也不阻断后续任务", async () => {
+		const { sql, service } = twoJobs();
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const failing = runner({
+				fail: ["a1"],
+				recover: async () => {
+					throw new Error("harness rebuild failed");
+				},
+			});
+			await runDueAutomations(jobs, NOW, service, failing.impl);
+			expect(row(sql, "a1")).toMatchObject({ last_status: "failed", last_run_at: NOW });
+			expect(row(sql, "a2")).toMatchObject({ last_status: "ok", last_run_at: NOW });
+			expect(failing.calls.run).toEqual(["a1", "a2"]);
+			expect(warn).toHaveBeenCalledWith("automation a1 recover failed", "Error: harness rebuild failed");
+		} finally {
+			warn.mockRestore();
+		}
+	});
 });

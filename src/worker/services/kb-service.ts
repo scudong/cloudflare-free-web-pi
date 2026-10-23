@@ -451,14 +451,20 @@ export function createKbService(deps: KbServiceDeps): KbService {
 		}
 	}
 
+	type PrefetchResult = KbPrefetch & { enabled: boolean; hits: KbHit[] };
+
 	/**
 	 * 本轮预检索：一个检索结果同时产出注入块与结构化引用。
 	 * 引用只覆盖真正写进块的片段（去重与截断规则与旧 prefetchBlock 一致），
 	 * 保证「注入过哪些资料」与「entry 上记了哪些资料」逐条对得上。
+	 *
+	 * 一次检索同时产出预览命中、注入块与引用（NERE-82 P2-3）：
+	 * `/kb/prefetch` 不再先 searchAsync、再经 prefetch 二次检索。
 	 */
-	async function prefetch(message: string): Promise<KbPrefetch> {
-		const empty: KbPrefetch = { block: "", refs: [] };
-		if (settings.get("kb_prefetch", "1") !== "1") return empty;
+	async function retrieveForPrefetch(message: string): Promise<PrefetchResult> {
+		const enabled = settings.get("kb_prefetch", "1") === "1";
+		const empty: PrefetchResult = { enabled, hits: [], block: "", refs: [] };
+		if (!enabled) return empty;
 		const query = message.trim().slice(0, 200);
 		if (query.length < 2) return empty;
 		const hits = await searchAsync(query, KB_PREFETCH_TOP);
@@ -484,11 +490,18 @@ export function createKbService(deps: KbServiceDeps): KbService {
 				ref,
 			});
 		}
-		if (!entries.length) return empty;
+		if (!entries.length) return { ...empty, hits };
 		return {
+			enabled,
+			hits,
 			block: `\n\n## 知识库参考资料（按当前问题自动检索，可能相关；不相关就忽略）\n${entries.map((entry) => entry.line).join("\n\n---\n\n")}\n\n需要更多内容时调用 kb_search 继续检索；引用资料时注明文档标题。`,
 			refs: entries.map((entry) => entry.ref),
 		};
+	}
+
+	async function prefetch(message: string): Promise<KbPrefetch> {
+		const { block, refs } = await retrieveForPrefetch(message);
+		return { block, refs };
 	}
 
 	return {
@@ -556,12 +569,8 @@ export function createKbService(deps: KbServiceDeps): KbService {
 		prefetchBlock: async (message) => (await prefetch(message)).block,
 
 		async prefetchPreview(query) {
-			const q = query.trim();
-			return {
-				enabled: settings.get("kb_prefetch", "1") === "1",
-				hits: q ? await searchAsync(q, KB_PREFETCH_TOP) : [],
-				block: q ? await this.prefetchBlock(q) : "",
-			};
+			const { enabled, hits, block } = await retrieveForPrefetch(query);
+			return { enabled, hits, block };
 		},
 
 		ingestUrl: (rawUrl) =>

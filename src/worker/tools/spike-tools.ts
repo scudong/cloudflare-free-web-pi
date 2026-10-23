@@ -135,7 +135,7 @@ export function createAgentExtensions(deps: SpikeToolDeps): AgentExtensions {
 				description: "列出已安装的技能（名称与用途）",
 				parameters: Type.Object({}),
 				execute: async () => {
-					const rows = skillsRepo.listSkillRows(sql).filter((row) => row.auditStatus !== "blocked");
+					const rows = skillsRepo.listSkillMeta(sql).filter((row) => row.auditStatus !== "blocked");
 					const text = rows.length
 						? rows.map((r) => `- ${r.name}：${r.description || "（无描述）"}`).join("\n")
 						: "还没有安装任何技能。";

@@ -164,8 +164,6 @@ export function createDataService({ sql, kb, runtime, alarm, now = () => new Dat
 				mcpRepo.restoreRow(sql, { id, name: str(s.name), url: str(s.url), headers: str(s.headers) || "{}" }, now());
 				counts.mcpServers = (counts.mcpServers ?? 0) + 1;
 			}
-			// MCP 配置变化后必须重建本 DO 的扩展（旧 restore 的 fixed 行为）
-			await runtime.afterRestore();
 			for (const s of list("settings")) {
 				const key = str(s.key).trim();
 				if (!key) continue;
@@ -239,6 +237,8 @@ export function createDataService({ sql, kb, runtime, alarm, now = () => new Dat
 				});
 				counts.sessions = (counts.sessions ?? 0) + 1;
 			}
+			// 全部数据落库后再重建扩展与重排闹钟：settings / prompts / MCP 都已是恢复后的状态。
+			await runtime.afterRestore();
 			// 恢复后可能带回进行中的目标：重排闹钟（与旧 restore 的顺序一致，放在最后）
 			await alarm.schedule();
 			return counts;

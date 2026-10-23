@@ -32,6 +32,7 @@ import {
 	getSkillRow,
 	invokedNames,
 	lastInvokedMap,
+	listSkillMeta,
 	listSkillRows,
 	putCachedAudit,
 	recordEvent,
@@ -39,6 +40,7 @@ import {
 	upsertManualSkill,
 	upsertSkill,
 	type SkillEventType,
+	type SkillMeta,
 	type SkillRow,
 } from "../repo/skills-repo";
 
@@ -206,7 +208,7 @@ function snapshotAudit(entry: CatalogEntry, generatedAt: string): AuditReport {
 	return { ...audit, detected: { ...audit.detected, runtime }, auditSource: "catalog" };
 }
 
-function rowManifest(row: SkillRow): SkillManifest {
+function rowManifest(row: SkillMeta): SkillManifest {
 	const stored = parseJson<unknown>(row.manifest, null);
 	if (stored) {
 		const parsed = parseManifest(stored);
@@ -220,7 +222,7 @@ function rowManifest(row: SkillRow): SkillManifest {
 	});
 }
 
-function hubFromCatalog(entry: CatalogEntry, installed: SkillRow | undefined, installedAudit: AuditReport | undefined, generatedAt: string): HubSkill {
+function hubFromCatalog(entry: CatalogEntry, installed: SkillMeta | undefined, installedAudit: AuditReport | undefined, generatedAt: string): HubSkill {
 	const runtime = catalogRuntime(entry);
 	const contentHash = String(entry.contentHash ?? "");
 	return {
@@ -250,7 +252,7 @@ function hubFromCatalog(entry: CatalogEntry, installed: SkillRow | undefined, in
 	};
 }
 
-function hubFromInstalled(row: SkillRow, audit: AuditReport): HubSkill {
+function hubFromInstalled(row: SkillMeta, audit: AuditReport): HubSkill {
 	const manifest = rowManifest(row);
 	return {
 		name: row.name,
@@ -355,10 +357,30 @@ export function createSkillService(deps: SkillServiceDeps): SkillService {
 		});
 	}
 
-	async function installedRows(): Promise<{ rows: SkillRow[]; audits: Map<string, AuditReport> }> {
-		const rows = listSkillRows(sql);
+	/**
+	 * 落库报告可以直接复用：哈希与规则版本都对得上，就不必读正文重算。
+	 * 旧库行（报告缺失 / 空 hash）与规则升级后的行回落到重审计。
+	 */
+	function storedAudit(row: SkillMeta): AuditReport | null {
+		const report = parseJson<AuditReport | null>(row.auditReport, null);
+		if (!report || !row.contentHash || report.hash !== row.contentHash) return null;
+		if (report.rulesVersion !== RULES_VERSION || !Array.isArray(report.reasons) || typeof report.status !== "string") return null;
+		return report;
+	}
+
+	async function installedRows(): Promise<{ rows: SkillMeta[]; audits: Map<string, AuditReport> }> {
+		const rows = listSkillMeta(sql);
 		const audits = new Map<string, AuditReport>();
-		for (const row of rows) audits.set(row.name, await auditRow(row));
+		for (const row of rows) {
+			const stored = storedAudit(row);
+			if (stored) {
+				audits.set(row.name, stored);
+				continue;
+			}
+			// 只有存量行 / 旧规则版本的报告才读正文重审计（正常路径零正文、零 SHA-256）。
+			const full = getSkillRow(sql, row.name);
+			if (full) audits.set(row.name, await auditRow(full));
+		}
 		return { rows, audits };
 	}
 

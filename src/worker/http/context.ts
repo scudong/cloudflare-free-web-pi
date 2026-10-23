@@ -110,7 +110,45 @@ export type BuildContextInput = {
 	webFetch(url: string): Promise<WebFetchResult>;
 };
 
+/**
+ * 请求级设置缓存（NERE-82 P2-2）：第一次读取时用 `snapshot` 一次拉全表，
+ * 之后同一请求内所有 get 都命中 Map；`/bootstrap` 的 13 条设置查询因此合成 1 条。
+ * 只有 `get` 的极简端口保持逐键读取（结果仍按 key 缓存）。
+ */
+export function requestSettings(port: SettingsPort): SettingsPort & { invalidate(key: string): void } {
+	const cache = new Map<string, string>();
+	let bulkLoaded = false;
+	let bulkOk = false;
+	const load = () => {
+		if (bulkLoaded || !port.snapshot) return;
+		bulkLoaded = true;
+		try {
+			for (const [key, value] of Object.entries(port.snapshot())) cache.set(key, value);
+			bulkOk = true;
+		} catch {
+			// 全表读取失败：回落到逐键 get（repo.get 自己有兜底）。
+		}
+	};
+	return {
+		get(key, fallback) {
+			load();
+			if (!cache.has(key)) cache.set(key, bulkOk ? fallback : port.get(key, fallback));
+			return cache.get(key) ?? fallback;
+		},
+		snapshot() {
+			load();
+			return Object.fromEntries(cache);
+		},
+		invalidate(key) {
+			cache.delete(key);
+			// 表已变：之后的未命中键回到逐键读取，避免把旧快照的“缺省”当真。
+			bulkOk = false;
+		},
+	};
+}
+
 export function buildContext(input: BuildContextInput): RequestContext {
+	const settings = requestSettings(input.settings);
 	return {
 		req: input.req,
 		url: new URL(input.req.url),
@@ -124,8 +162,12 @@ export function buildContext(input: BuildContextInput): RequestContext {
 		sessionRuntime: input.sessionRuntime,
 		shareRuntime: input.shareRuntime,
 		userLifecycleRuntime: input.userLifecycleRuntime,
-		settings: input.settings,
-		setSetting: (key, value) => input.setSetting(key, value),
+		settings,
+		setSetting: (key, value) => {
+			input.setSetting(key, value);
+			// 同一请求里先写后读（`/kernel`）必须看到新值。
+			settings.invalidate(key);
+		},
 		settingsRuntime: input.settingsRuntime,
 		alarmRuntime: input.alarmRuntime,
 		contextRuntime: input.contextRuntime,

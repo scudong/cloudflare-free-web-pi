@@ -210,7 +210,12 @@ export async function runDueAutomations(
 		} catch (err) {
 			console.warn(`automation ${job.id} failed`, String(err).slice(0, 200));
 			status = "failed";
-			await runner.recover();
+			// recover 失败不能吞掉本次运行结果，也不能中断后续任务。
+			try {
+				await runner.recover();
+			} catch (recoverErr) {
+				console.warn(`automation ${job.id} recover failed`, String(recoverErr).slice(0, 200));
+			}
 		}
 		service.markRun(job, now, status);
 	}

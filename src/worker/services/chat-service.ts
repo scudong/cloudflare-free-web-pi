@@ -1,4 +1,5 @@
 import type { SqlHandle } from "../db/migrations";
+import { AppError } from "../http/errors";
 import type {
 	ChatEntry,
 	ChatHandle,
@@ -263,29 +264,46 @@ export function createChatService({ sql, runtime }: ChatServiceDeps): ChatServic
 		}
 	}
 
+	/** 闸门由调用方持有；这里只做 prepare 本身。 */
+	async function prepareInner(input: ChatInput): Promise<PreparedChat> {
+		const root = await runtime.conversation(input.sessionId);
+		// 显式技能调用（v0.23.0）：`/技能名` 命中后把技能正文注入本轮 instructions。
+		const inv = runtime.skillInvocation(input.message);
+		const effectiveMessage = inv ? inv.rest || `请按技能「${inv.name}」执行。` : input.message;
+		// 会话首次创建后 agent 选择会固化在 pi.agent 文档里；幂等重设，保证新扩展开关对老会话也生效。
+		const turn = await runtime.instructions({ inv, sessionId: input.sessionId, message: effectiveMessage });
+		await runtime.configure(root, { sessionId: input.sessionId, instructions: turn.instructions });
+		const tools = await runtime.toolNames(root);
+		console.debug("CHAT_TOOLS", tools.length);
+		// 记录本轮起点：之后只把新增条目里的工具结果算作本轮工具活动。
+		const beforeId = await runtime.lastEntryId(root);
+		return {
+			root,
+			sessionId: String(root.id),
+			input,
+			effectiveMessage,
+			kbRefs: turn.kbRefs,
+			beforeId,
+		};
+	}
+
+	/** 调用方已持有闸门的一轮完整提交（`/chat` 与 goalTick 共用）。 */
+	async function runChat(input: ChatInput): Promise<{ answer: string; tools: ChatToolSummary[] }> {
+		const prepared = await prepareInner(input);
+		const outcome = await submit(prepared, { message: input.message, images: input.images });
+		if (!outcome.ok) throw new Error(`run failed: ${outcome.raw}`);
+		const final = await finish(prepared);
+		// 与原 runChat 一致：反思在后台跑，不阻塞本轮返回。
+		runtime.waitUntil(service.maybeReflect(prepared.root, final.lastId));
+		return { answer: outcome.answer || "(empty)", tools: final.tools };
+	}
+
 	const service: ChatService = {
 		async prepare(input) {
 			const key = input.sessionId || "1";
-			gate.enter(key);
+			if (!gate.tryEnter(key)) throw new AppError("chat_busy", 409, "该会话已有正在进行的对话，请等待完成或先中止。", true);
 			try {
-				const root = await runtime.conversation(input.sessionId);
-				// 显式技能调用（v0.23.0）：`/技能名` 命中后把技能正文注入本轮 instructions。
-				const inv = runtime.skillInvocation(input.message);
-				const effectiveMessage = inv ? inv.rest || `请按技能「${inv.name}」执行。` : input.message;
-				// 会话首次创建后 agent 选择会固化在 pi.agent 文档里；幂等重设，保证新扩展开关对老会话也生效。
-				const turn = await runtime.instructions({ inv, sessionId: input.sessionId, message: effectiveMessage });
-				await runtime.configure(root, { sessionId: input.sessionId, instructions: turn.instructions });
-				console.log("CHAT_TOOLS", JSON.stringify(await runtime.toolNames(root)));
-				// 记录本轮起点：之后只把新增条目里的工具结果算作本轮工具活动。
-				const beforeId = await runtime.lastEntryId(root);
-				return {
-					root,
-					sessionId: String(root.id),
-					input,
-					effectiveMessage,
-					kbRefs: turn.kbRefs,
-					beforeId,
-				};
+				return await prepareInner(input);
 			} catch (err) {
 				gate.exit(key);
 				// 旧 chatStream 包装会在 prepare 阶段重建 Harness；保持同样的错误恢复语义。
@@ -300,14 +318,9 @@ export function createChatService({ sql, runtime }: ChatServiceDeps): ChatServic
 
 		async chat(input) {
 			const key = input.sessionId || "1";
+			if (!gate.tryEnter(key)) throw new AppError("chat_busy", 409, "该会话已有正在进行的对话，请等待完成或先中止。", true);
 			try {
-				const prepared = await service.prepare(input);
-				const outcome = await submit(prepared, { message: input.message, images: input.images });
-				if (!outcome.ok) throw new Error(`run failed: ${outcome.raw}`);
-				const final = await finish(prepared);
-				// 与原 runChat 一致：反思在后台跑，不阻塞本轮返回。
-				runtime.waitUntil(service.maybeReflect(prepared.root, final.lastId));
-				return { answer: outcome.answer || "(empty)", tools: final.tools };
+				return await runChat(input);
 			} catch (err) {
 				maybeRecover(err);
 				throw err;
@@ -420,10 +433,11 @@ export function createChatService({ sql, runtime }: ChatServiceDeps): ChatServic
 				return;
 			}
 			writeGoal(sql, sessionId, { next_run_at: 0 });
-			gate.enter(sessionId);
+			// 已有对话在跑就不抢：alarm 下一轮再看（闸门现在会拒绝，而不是覆盖）。
+			if (!gate.tryEnter(sessionId)) return;
 			try {
 				const conversation = await runtime.conversation(sessionId);
-				await service.chat({ message: goalContinuePrompt(row), sessionId });
+				await runChat({ message: goalContinuePrompt(row), sessionId });
 				const updated = await syncGoalProgress(conversation, sessionId, true);
 				if (updated?.status === "active") {
 					writeGoal(sql, sessionId, { next_run_at: Date.now() + 15_000 });

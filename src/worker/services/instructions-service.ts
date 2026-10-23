@@ -1,7 +1,7 @@
 import type { SqlHandle } from "../db/migrations";
 import type { SettingsPort } from "../http/ports";
 import type { KbRef } from "../lib/kb";
-import { listSkillRows } from "../repo/skills-repo";
+import { listSkillMeta } from "../repo/skills-repo";
 import type { KbService } from "./kb-service";
 import { enabledRuleContents } from "./prompts-service";
 import { goalInstructionsBlock, readGoal } from "./goal-service";
@@ -22,7 +22,7 @@ export type SkillInvocation = { name: string; content: string; rest: string };
 /** 已安装技能索引（blocked 不进入模型视野）。读取失败时回退空数组。 */
 function skillIndex(sql: SqlHandle): { name: string; description: string }[] {
 	try {
-		return listSkillRows(sql)
+		return listSkillMeta(sql)
 			.filter((skill) => skill.auditStatus !== "blocked")
 			.map((skill) => ({ name: skill.name, description: skill.description }));
 	} catch {
