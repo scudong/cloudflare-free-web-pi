@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AutomationPanel } from "../../src/web/components/LeftPanels";
+import { AutomationPanel } from "../../src/web/components/AutomationPanel";
 import { parseAutomations } from "../../src/web/lib/collections";
 import { formatLastRunAt } from "../../src/web/lib/format";
 import type { AutomationInfo } from "../../src/web/types";

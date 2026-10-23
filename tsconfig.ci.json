@@ -5,6 +5,7 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2024", "DOM"],
     "types": ["@cloudflare/workers-types", "node"],
+    "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true

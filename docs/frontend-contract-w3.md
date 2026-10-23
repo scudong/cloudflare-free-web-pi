@@ -276,7 +276,7 @@ export interface KbFocus {
 
 ```
 SharesPanel（L2 容器，取数只经 hook）
-├─ PanelHeader（复用 LeftPanels.tsx 现有实现，不复制）
+├─ PanelHeader（复用 components/PanelHeader.tsx，不复制；NERE-81 从 LeftPanels 拆出）
 ├─ 状态区：loading / error / empty
 └─ <ul> ShareRow（L3，纯展示 + onCopy / onRevoke 回调）
 ```

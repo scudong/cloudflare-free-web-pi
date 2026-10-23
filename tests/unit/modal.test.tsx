@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { KnowledgePanel } from "../../src/web/components/KnowledgePanel";
-import { McpPanel, SkillPanel } from "../../src/web/components/LeftPanels";
+import { McpPanel } from "../../src/web/components/McpPanel";
+import { SkillPanel } from "../../src/web/components/SkillPanel";
 import { MODAL_SIZE, ModalShell } from "../../src/web/components/ModalShell";
 import { Rail } from "../../src/web/components/Rail";
 import { nextFocusIndex } from "../../src/web/lib/focus";

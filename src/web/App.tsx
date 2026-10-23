@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { TopBar } from "./components/TopBar";
 import { ChatHeader } from "./components/ChatHeader";
 import { MessageList } from "./components/MessageList";
@@ -6,15 +6,13 @@ import { Composer } from "./components/Composer";
 import { Sidebar } from "./components/Sidebar";
 import { Workbench } from "./components/Workbench";
 import { Rail, type RailPanel, type RailView } from "./components/Rail";
-import { AutomationPanel, McpPanel, SkillPanel } from "./components/LeftPanels";
+import { AutomationPanel } from "./components/AutomationPanel";
 import { ModalShell } from "./components/ModalShell";
-import { SettingsDialog } from "./components/SettingsDialog";
 import { GoalBar, GoalDialog } from "./components/GoalBar";
 import { ApprovalBar } from "./components/ApprovalBar";
 import { AskUserCard } from "./components/AskUserCard";
 import { UsersPanel } from "./components/UsersPanel";
 import { FilesPanel } from "./components/FilesPanel";
-import { KnowledgePanel } from "./components/KnowledgePanel";
 import { SharesPanel } from "./components/SharesPanel";
 import { LoginGate } from "./components/LoginGate";
 import { Icon } from "./components/Icon";
@@ -28,11 +26,26 @@ import { unreadScope } from "./lib/unread";
 import { shareUrlFor } from "./lib/format";
 import { parseEntries, parseKbRefs, truncateOneLine } from "./lib/entries";
 import { loadBoolOrNull, saveBool } from "./lib/localStore";
-import { LEFT_OPEN_KEY, selectRailView } from "./lib/layout";
-import { PANEL_IDLE, reducePanel } from "./lib/panels";
+import { LEFT_OPEN_KEY, effectiveRailView, leftPaneWidth, selectRailView } from "./lib/layout";
+import { PANEL_IDLE, isSettingsOpen, panelOf, reducePanel } from "./lib/panels";
 import { applyTheme, readTheme, type ThemeId } from "./lib/theme";
 import { useMediaQuery } from "./lib/useMediaQuery";
 import type { ApprovalInfo, AskQuestion, AutomationInfo, AutomationPatch, ChatMessage, CustomToolInfo, FileArtifact, FileInfo, GoalInfo, KbRef, McpServerInfo, MemoryInfo, PlanStep, PromptInfo, RuleInfo, SessionListItem, ShareLink, SkillInfo, SkillInstallOutcome, ToolCallInfo } from "./types";
+
+/**
+ * 弹窗按需加载（NERE-81）：设置 / 知识库 + MCP / 技能都不在首屏路径上，走动态 import 分包。
+ * 知识库与 MCP 共用一个 chunk（同一时刻只会开一个），技能与设置各自一个。
+ */
+const loadPanelDialogs = () => import("./components/PanelDialogs");
+const LazyKnowledgePanel = lazy(async () => ({ default: (await loadPanelDialogs()).KnowledgePanel }));
+const LazyMcpPanel = lazy(async () => ({ default: (await loadPanelDialogs()).McpPanel }));
+const LazySkillPanel = lazy(async () => ({ default: (await import("./components/SkillPanel")).SkillPanel }));
+const LazySettingsDialog = lazy(async () => ({ default: (await import("./components/SettingsDialog")).SettingsDialog }));
+
+/** 弹窗内容 chunk 到达前的占位：只在第一次打开对应弹窗时出现。 */
+function PanelLoading() {
+	return <p className="flex flex-1 items-center justify-center p-6 text-xs text-slate-500">正在加载…</p>;
+}
 
 const TOOL_SUMMARY_MAX = 60;
 const DESKTOP_QUERY = "(min-width: 768px)";
@@ -90,13 +103,18 @@ export default function App() {
 	});
 	const [mobileTab, setMobileTab] = useState<MobileTab>("chat");
 	const [drawerOpen, setDrawerOpen] = useState(false);
-	const [settingsOpen, setSettingsOpen] = useState(false);
 	// 左侧 Rail 当前展示的面板（v0.21.0）：会话 / 定时 / 用户等左栏内容
 	const [railView, setRailView] = useState<RailView>("sessions");
 	// 知识库 / MCP / 技能三个弹窗（NERE-62）+ 知识库定位（NERE-41）。
 	// 状态机保证定位请求只属于这一次打开：关闭 / 重开都会清空，不会重放上一篇（NERE-75 P1-1）。
 	const [panel, dispatchPanel] = useReducer(reducePanel, PANEL_IDLE);
-	const activePanel = panel.active;
+	const activePanel = panelOf(panel);
+	const settingsOpen = isSettingsOpen(panel);
+	/** 设置弹窗第一次打开前不加载它的 chunk；打开过就保持挂载，关闭再开不丢局部状态。 */
+	const [settingsMounted, setSettingsMounted] = useState(false);
+	useEffect(() => {
+		if (settingsOpen) setSettingsMounted(true);
+	}, [settingsOpen]);
 	const kbFocus = panel.kbFocus;
 	const kbFocusSeq = useRef(0);
 	// 右栏宽度（v0.16.0）：可拖拽分隔条、打开文档时自动加宽、可最大化阅读
@@ -193,8 +211,7 @@ export default function App() {
 	// Rail 未读圆点（NERE-74）：分享看 lastOpenedAt、定时任务看 lastRunAt，水位存 localStorage。
 	// 先算出生效视图：邀请用户的「用户」入口、分享接口未上线时的「分享」入口都不算打开；
 	// 桌面端左栏收起了（或移动端抽屉没开）也不算看到内容，不能白白清掉圆点。
-	const activeRailView: RailView =
-		railView === "users" && !auth?.owner ? "sessions" : railView === "shares" && !sharesAvailable ? "sessions" : railView;
+	const activeRailView = effectiveRailView(railView, { owner: !!auth?.owner, sharesAvailable });
 	const leftPanelVisible = isDesktop ? leftOpen : drawerOpen;
 	const unread = useUnreadBadges({
 		scope: unreadScope(auth?.owner),
@@ -1082,17 +1099,13 @@ export default function App() {
 	const togglePanel = useCallback(
 		(panel: RailPanel) => {
 			dispatchPanel({ type: "toggle", panel });
-			// 面板弹窗与设置弹窗互斥（契约 §1.4）
-			setSettingsOpen(false);
 			if (!isDesktop) setDrawerOpen(false);
 		},
 		[isDesktop],
 	);
 	const closePanel = useCallback(() => dispatchPanel({ type: "close" }), []);
-	const openSettings = useCallback(() => {
-		dispatchPanel({ type: "settings" });
-		setSettingsOpen(true);
-	}, []);
+	const openSettings = useCallback(() => dispatchPanel({ type: "settings" }), []);
+	const closeSettings = useCallback(() => dispatchPanel({ type: "close" }), []);
 
 	/** 知识库面板按定位请求打开过文档后调用：消费掉 nonce，重开弹窗不再重放（NERE-75 P1-1）。 */
 	const handleKbFocusConsumed = useCallback(() => dispatchPanel({ type: "kb-focus-consumed" }), []);
@@ -1407,7 +1420,7 @@ export default function App() {
 
 	/** 退出登录：清 cookie 并回到登录闸门。 */
 	const handleLogout = useCallback(() => {
-		setSettingsOpen(false);
+		dispatchPanel({ type: "close" });
 		void (async () => {
 			try {
 				await api.logout();
@@ -1565,7 +1578,7 @@ export default function App() {
 					<>
 						<div
 							className="min-w-0 shrink-0"
-							style={{ width: railView === "sessions" ? leftWidth : Math.max(leftWidth, 300) }}
+							style={{ width: leftPaneWidth(activeRailView, leftWidth) }}
 						>
 							{leftContent}
 						</div>
@@ -1673,82 +1686,92 @@ export default function App() {
 			<GoalDialog open={goalDialogOpen} onClose={() => setGoalDialogOpen(false)} onSubmit={handleCreateGoal} />
 
 			{/* 设置弹窗（v0.20.0）：顶栏菜单收纳于此 */}
-			<SettingsDialog
-				open={settingsOpen}
-				onClose={() => setSettingsOpen(false)}
-				theme={theme}
-				onThemeChange={handleThemeChange}
-				leftOpen={leftOpen}
-				rightOpen={rightOpen}
-				onToggleLeft={toggleLeft}
-				onToggleRight={toggleRight}
-				onExport={handleExport}
-				onShare={handleShare}
-				onBackup={handleBackup}
-				onRestore={handleRestore}
-				webSearch={webSearch}
-				onToggleWebSearch={handleToggleWebSearch}
-				kbPrefetch={kbPrefetch}
-				onToggleKbPrefetch={handleToggleKbPrefetch}
-				kbRetrieval={kbRetrieval}
-				onChangeKbRetrieval={handleChangeKbRetrieval}
-				thinkingLevel={thinkingLevel}
-				onChangeThinkingLevel={handleChangeThinkingLevel}
-				displayName={displayName}
-				onSaveDisplayName={handleSaveDisplayName}
-				shareTtlSeconds={shareTtlSeconds}
-				onChangeShareTtl={handleChangeShareTtl}
-				compaction={compaction}
-				onChangeCompaction={handleChangeCompaction}
-				sessionId={sessionId}
-				approval={approvalSettings}
-				onChangeApproval={handleChangeApproval}
-				onChangeApprovalTool={handleChangeApprovalTool}
-				memories={memories}
-				memoriesLoading={memoriesState === "loading" || bootstrapPending}
-				memoriesError={memoriesError}
-				onDeleteMemory={handleDeleteMemory}
-				onClearMemories={handleClearMemories}
-				onModelsChanged={() => setModelsTick((t) => t + 1)}
-				authRequired={!!auth?.required}
-				onLogout={handleLogout}
-			/>
+			{settingsMounted && (
+				<Suspense fallback={null}>
+					<LazySettingsDialog
+						open={settingsOpen}
+						onClose={closeSettings}
+						theme={theme}
+						onThemeChange={handleThemeChange}
+						leftOpen={leftOpen}
+						rightOpen={rightOpen}
+						onToggleLeft={toggleLeft}
+						onToggleRight={toggleRight}
+						onExport={handleExport}
+						onShare={handleShare}
+						onBackup={handleBackup}
+						onRestore={handleRestore}
+						webSearch={webSearch}
+						onToggleWebSearch={handleToggleWebSearch}
+						kbPrefetch={kbPrefetch}
+						onToggleKbPrefetch={handleToggleKbPrefetch}
+						kbRetrieval={kbRetrieval}
+						onChangeKbRetrieval={handleChangeKbRetrieval}
+						thinkingLevel={thinkingLevel}
+						onChangeThinkingLevel={handleChangeThinkingLevel}
+						displayName={displayName}
+						onSaveDisplayName={handleSaveDisplayName}
+						shareTtlSeconds={shareTtlSeconds}
+						onChangeShareTtl={handleChangeShareTtl}
+						compaction={compaction}
+						onChangeCompaction={handleChangeCompaction}
+						sessionId={sessionId}
+						approval={approvalSettings}
+						onChangeApproval={handleChangeApproval}
+						onChangeApprovalTool={handleChangeApprovalTool}
+						memories={memories}
+						memoriesLoading={memoriesState === "loading" || bootstrapPending}
+						memoriesError={memoriesError}
+						onDeleteMemory={handleDeleteMemory}
+						onClearMemories={handleClearMemories}
+						onModelsChanged={() => setModelsTick((t) => t + 1)}
+						authRequired={!!auth?.required}
+						onLogout={handleLogout}
+					/>
+				</Suspense>
+			)}
 
 			{/* 知识库 / MCP / 技能三个互斥弹窗（NERE-62）：外壳由 ModalShell 统一提供 */}
 			<ModalShell open={activePanel === "kb"} title="知识库" size="lg" onClose={closePanel} testId="kb-modal" triggerKey="kb">
-				<KnowledgePanel onClose={closePanel} focus={kbFocus} onFocusConsumed={handleKbFocusConsumed} />
+				<Suspense fallback={<PanelLoading />}>
+					<LazyKnowledgePanel onClose={closePanel} focus={kbFocus} onFocusConsumed={handleKbFocusConsumed} />
+				</Suspense>
 			</ModalShell>
 			<ModalShell open={activePanel === "mcp"} title="连接 · MCP" size="md" onClose={closePanel} testId="mcp-modal" triggerKey="mcp">
-				<McpPanel
-					servers={mcpServers}
-					loading={mcpLoading}
-					error={mcpError}
-					onAdd={handleAddMcp}
-					onDelete={handleDeleteMcp}
-					onClose={closePanel}
-				/>
+				<Suspense fallback={<PanelLoading />}>
+					<LazyMcpPanel
+						servers={mcpServers}
+						loading={mcpLoading}
+						error={mcpError}
+						onAdd={handleAddMcp}
+						onDelete={handleDeleteMcp}
+						onClose={closePanel}
+					/>
+				</Suspense>
 			</ModalShell>
 			<ModalShell open={activePanel === "skills"} title="技能" size="xl" onClose={closePanel} testId="skills-modal" triggerKey="skills">
-				<SkillPanel
-					items={skills}
-					loading={skillsLoading}
-					error={skillsError}
-					onAdd={handleAddSkill}
-					onDelete={handleDeleteSkill}
-					onImport={handleImportSkill}
-					onTry={handleTrySkill}
-					prompts={prompts}
-					rules={rules}
-					onAddPrompt={handleAddPrompt}
-					onDeletePrompt={handleDeletePrompt}
-					onAddRule={handleAddRule}
-					onToggleRule={handleToggleRule}
-					onDeleteRule={handleDeleteRule}
-					customTools={customTools}
-					onAddCustomTool={handleAddCustomTool}
-					onDeleteCustomTool={handleDeleteCustomTool}
-					onClose={closePanel}
-				/>
+				<Suspense fallback={<PanelLoading />}>
+					<LazySkillPanel
+						items={skills}
+						loading={skillsLoading}
+						error={skillsError}
+						onAdd={handleAddSkill}
+						onDelete={handleDeleteSkill}
+						onImport={handleImportSkill}
+						onTry={handleTrySkill}
+						prompts={prompts}
+						rules={rules}
+						onAddPrompt={handleAddPrompt}
+						onDeletePrompt={handleDeletePrompt}
+						onAddRule={handleAddRule}
+						onToggleRule={handleToggleRule}
+						onDeleteRule={handleDeleteRule}
+						customTools={customTools}
+						onAddCustomTool={handleAddCustomTool}
+						onDeleteCustomTool={handleDeleteCustomTool}
+						onClose={closePanel}
+					/>
+				</Suspense>
 			</ModalShell>
 
 			{/* Mobile drawer: the session sidebar slides over the chat */}

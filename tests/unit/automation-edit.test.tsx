@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AutomationEditDialog } from "../../src/web/components/AutomationEditDialog";
-import { AutomationPanel } from "../../src/web/components/LeftPanels";
+import { AutomationPanel } from "../../src/web/components/AutomationPanel";
 import {
 	buildAutomationPatch,
 	draftFromJob,

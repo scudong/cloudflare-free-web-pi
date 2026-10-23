@@ -25,10 +25,10 @@
 
 ## 2. 入口与页面
 
-单页应用，无路由库。`src/web/main.tsx` 挂载 `App`；「页面」由 `railView` + `activePanel` + `leftOpen` + `rightOpen` + `mobileTab` 组合出来。
+单页应用，无路由库。`src/web/main.tsx` 挂载 `App`；「页面」由 `railView` + `overlay`（设置 / 知识库 / MCP / 技能）+ `leftOpen` + `rightOpen` + `mobileTab` 组合出来。
 
 ```
-App（页面层，1736 行）
+App（页面层，1834 行）
 ├─ LoginGate                          未登录整屏闸门
 ├─ Rail                               常驻竖栏：sessions / files / 分享 / 定时 / 用户 + kb / mcp / skills 三个弹窗入口（分享 / 定时带未读圆点，NERE-74）
 ├─ 左栏内容（随 railView 切换，可收起）
@@ -55,12 +55,13 @@ App（页面层，1736 行）
 ├─ Workbench           右栏文件阅读器（自取文件正文）
 ├─ 面板弹窗（ModalShell，portal 到 body，同一时刻最多一个；NERE-62 / NERE-63）
 │  ├─ 知识库 ModalShell lg（880px）→ KnowledgePanel（自取数，5 处 api.*）
+│  │  └─ KbImport 导入文件 / 链接 / 粘贴（自取数，3 处 api.*）
 │  ├─ 连接 · MCP ModalShell md（720px）→ McpPanel
 │  └─ 技能 ModalShell xl（960px）→ SkillPanel
 │     ├─ SkillCard         已安装技能行：运行时 / 审计 / 上次使用 / 试用（NERE-59）
 │     └─ SkillHubPanel     技能 Hub（已安装 / Hub 两个视图，自取数；安装结果行内反馈 + 一键试用，NERE-69）
 ├─ GoalDialog          设定目标
-└─ SettingsDialog      设置（主题 / 聊天 / 模型 / 知识库 / 部署自检 / 分享 / 备份）
+└─ SettingsDialog      设置（主题 / 聊天 / 模型 / 知识库 / 部署自检 / 分享 / 备份；懒加载，NERE-81）
    └─ ShareDialog      文件分享链接弹窗
 ```
 
@@ -99,7 +100,7 @@ App（页面层，1736 行）
 
 | 组件 | 状态 | 性质 |
 | --- | --- | --- |
-| `App` | `leftOpen`/`rightOpen`/`leftWidth`/`rightWidth`/`mobileTab`/`drawerOpen`/`settingsOpen`/`railView`/`activePanel` | 纯 UI，已用 `localStorage` 记住尺寸；`activePanel` 是知识库 / MCP / 技能三个弹窗的唯一开关（`RailPanel \| null`，同一时刻最多一个） |
+| `App` | `leftOpen`/`rightOpen`/`leftWidth`/`rightWidth`/`mobileTab`/`drawerOpen`/`railView`/`overlay`/`kbFocus`/`kbFocusSeq` | 纯 UI，已用 `localStorage` 记住尺寸；`overlay`（`lib/panels.ts`）是设置与知识库 / MCP / 技能三个弹窗的唯一开关，同一时刻最多一个；`kbFocus` 是一次打开的定位请求，`kbFocusSeq` 是它的 nonce（关闭即丢弃） |
 | `KnowledgePanel` | `viewMemory.query`（模块级） | 纯 UI：只保留检索词，重开弹窗时回填；结果 / 草稿 / 正在查看的文档关闭即丢 |
 | `SkillPanel` | `skillViewMemory.view`（模块级） | 纯 UI：记住「已安装 / Hub」tab |
 | `SkillHubPanel` | `viewMemory.filters`（模块级）；`installedHere` / `installErrors`（组件内） | 纯 UI：记住 Hub 筛选词；安装成功立即标记「已安装 · 试用」，失败原因就地显示（NERE-69），不写聊天 notice |
@@ -110,8 +111,8 @@ App（页面层，1736 行）
 
 ### 3.3 已知反例（评审时要挡）
 
-- `ShareSettings` 自己 `api.settings()` 拉一遍 `displayName`/`shareTtlSeconds`，而 `App` 已经持有设置。同一个 payload 两个读者、两处 PATCH、默认值常量在前后端各写一遍（`SHARE_TTL_DEFAULT_SECONDS` / `7 * 24 * 3600`）。
-- `SettingsDialog` 内 18 处 `api.*`：设置项读写散落在多个 Section，而不是由页面层统一加载后向下传。
+- （已解决，NERE-81）`SettingsDialog` 曾自己拉 `displayName`/`shareTtlSeconds`：现在两者都由 `App` 从 bootstrap `settings` 面板读、向下传；部署自检也不再调用 `/api/settings`。
+- （已解决，NERE-81）`SettingsDialog` 内 18 处 `api.*` 已收敛到 `hooks/useSettingsData.ts`（16 处），组件文件为 0。
 - 同一份 TTL 选项表存在两份：`SettingsDialog.SHARE_TTL_OPTIONS` 与 `ShareDialog.TTL_OPTIONS`（文案还不一致：`长期有效` / `永久`）。
 
 ## 4. API 依赖
@@ -121,14 +122,16 @@ App（页面层，1736 行）
 | 调用点 | api.* 次数 | 主要接口 |
 | --- | --- | --- |
 | `App.tsx` | 48 | `/api/bootstrap`（经 `useBootstrap`）, `/api/stream`, `/api/files*`, `/api/memories`, `/api/skills`, `/api/prompts`, `/api/rules`, `/api/custom-tools`, `/api/mcp`, `/api/automations`, `/api/settings`, `/api/model(s)`, `/api/approvals`, `/api/questions`, `/api/goal`, `/api/sessions`, `/api/auth`, `/api/abort`, `/api/interject`, `/api/users` |
-| `SettingsDialog.tsx` | 18 | `/api/settings`, `/api/backup`, `/api/restore`, `/api/kernel`, `/api/tools`, `/api/compact`, `/api/providers`, `/api/models`, `/api/kb/status`, `/api/version` |
+| `SettingsDialog.tsx` | 0 | 全部迁到 `hooks/useSettingsData.ts`（16）：`/api/kernel`, `/api/tools`, `/api/compact`, `/api/providers`, `/api/models`, `/api/kb/status`, `/api/kb/reindex`, `/api/version`；`/api/backup` / `/api/restore` 走 `App` 传入的回调 |
 | `KnowledgePanel.tsx` | 5 | `/api/kb*` |
 | `UsersPanel.tsx` | 4 | `/api/users*` |
 | `ShareDialog.tsx` | 2 | `/api/shares`, `/api/share` |
 | `FilesPanel.tsx` | 2 | `/api/files/all`, `/api/files` |
 | `Composer.tsx` | 2 | `/api/context`, `/api/model` |
 | `Workbench.tsx` | 1 | `/api/files/content` |
-| `LeftPanels.tsx` | 1 | `/api/automations` |
+| `hooks/useSettingsData.ts` | 16 | 设置弹窗的全部读写（见上一行） |
+| `SkillPanel.tsx` | 1 | `/api/skills/community` |
+| `KbImport.tsx` | 3 | `/api/kb/ingest`、`/api/kb/docs` |
 
 NERE-63 的面板弹窗外壳（`components/ModalShell.tsx`、`lib/focus.ts`）不调用任何 `api.*`；三个面板迁入弹窗后各自的调用点与次数不变。NERE-65 的编辑弹窗（`components/AutomationEditDialog.tsx`）同样只接收 `onSave` 回调，PATCH 由 `App.tsx` 发出。
 
@@ -154,3 +157,4 @@ worker 工具结果（中文展示串）
 - `App` 60+ `useState`：任一处变化都重跑整个 `App` 渲染函数，`sidebar` 片段、`SettingsDialog` 的 props 每次都重建。
 - 图标统一走 `components/Icon.tsx` 的语义表（`lucide-react` 按名引用，tree-shaking 生效），不要直接 `import { X } from "lucide-react"`。
 - 无 Markdown 依赖，正文由 `lib/rich.tsx` 自渲染；bundle 主要是 React + 图标 + 应用代码。
+- 弹窗分包（NERE-81）：`SettingsDialog` / `KnowledgePanel` + `McpPanel` / `SkillPanel` 走动态 import，`dist-web/assets/` 产出 3 个懒加载 chunk；首包 gzip 预算 150 KB（`vite.config.mts` 注释），当前 entry gzip ≈ 112 KB。
