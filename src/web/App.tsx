@@ -978,6 +978,17 @@ export default function App() {
 		}
 	}, []);
 
+	/** 立即运行（v1.0.4）：手动补跑一次；服务端记 last_run_at / last_status / last_error，完成后刷新列表。 */
+	const handleRunAutomation = useCallback(async (id: string) => {
+		try {
+			await api.runAutomation(id);
+			setPanelTick((tick) => tick + 1);
+			return { ok: true };
+		} catch (err) {
+			return { ok: false, error: err instanceof ApiError ? err.message : "运行失败，请重试。" };
+		}
+	}, []);
+
 	/** 编辑保存（NERE-65）：按 NERE-64 契约，返回值含更新后字段与 next_run_at，就地更新列表。 */
 	const handleUpdateAutomation = useCallback(async (patch: AutomationPatch) => {
 		try {
@@ -1539,6 +1550,7 @@ export default function App() {
 				onToggle={handleToggleAutomation}
 				onDelete={handleDeleteAutomation}
 				onUpdate={handleUpdateAutomation}
+				onRun={handleRunAutomation}
 				defaultSessionId={sessionId}
 				onOpenSession={handleSelectSession}
 				onCollapse={toggleLeft}

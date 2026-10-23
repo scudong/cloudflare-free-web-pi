@@ -13,6 +13,7 @@ export type AutomationRow = {
 	enabled: number;
 	last_run_at: number | null;
 	last_status: string | null;
+	last_error: string | null;
 	next_run_at: number;
 };
 
@@ -29,7 +30,7 @@ export function parseLastStatus(raw: unknown): AutomationLastStatus | null {
 }
 
 const SELECT =
-	"SELECT id, name, prompt, session_id, schedule, enabled, last_run_at, last_status, next_run_at FROM automations";
+	"SELECT id, name, prompt, session_id, schedule, enabled, last_run_at, last_status, last_error, next_run_at FROM automations";
 
 export function list(sql: SqlHandle): AutomationRow[] {
 	return sql.exec(`${SELECT} ORDER BY created_at DESC`).toArray() as AutomationRow[];
@@ -113,14 +114,23 @@ export function markDeferred(sql: SqlHandle, id: string, nextRunAt: number): voi
 	sql.exec("UPDATE automations SET next_run_at = ?, last_status = 'deferred' WHERE id = ?", nextRunAt, id);
 }
 
+/** 执行完一轮：写 last_run_at、last_status（ok / failed）与下一次 next_run_at；失败时附原因（v1.0.4）。 */
 export function markRun(
 	sql: SqlHandle,
 	id: string,
 	lastRunAt: number,
 	nextRunAt: number,
 	status: Exclude<AutomationLastStatus, "deferred">,
+	error?: string | null,
 ): void {
-	sql.exec("UPDATE automations SET last_run_at = ?, last_status = ?, next_run_at = ? WHERE id = ?", lastRunAt, status, nextRunAt, id);
+	sql.exec(
+		"UPDATE automations SET last_run_at = ?, last_status = ?, last_error = ?, next_run_at = ? WHERE id = ?",
+		lastRunAt,
+		status,
+		error ?? null,
+		nextRunAt,
+		id,
+	);
 }
 
 /** 全部顺延（旧逻辑：本轮处理过任务时把所有仍在过去的 next_run_at 推到 now+60s）。 */

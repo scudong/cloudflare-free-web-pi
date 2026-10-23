@@ -53,6 +53,7 @@ export const automationRoutes: readonly Route[] = [
 		},
 	},
 	// 立即运行（v0.55.1）：诊断定时任务失败 / 手动补跑，不走 alarm。
+	// v1.0.4：手动运行同样记 last_run_at / last_status / last_error，面板能看到结果。
 	{
 		method: "POST",
 		path: "/automations/run",
@@ -60,11 +61,19 @@ export const automationRoutes: readonly Route[] = [
 		handle: async (ctx) => {
 			const body = (await ctx.req.json().catch(() => ({}))) as { id?: string };
 			const id = String(body.id ?? "");
-			const job = automations(ctx).list().find((item) => item.id === id);
+			const service = automations(ctx);
+			const job = service.list().find((item) => item.id === id);
 			if (!job) throw new AppError("automation_not_found", 404, "定时任务不存在");
 			const chat = createChatService({ sql: ctx.sql(), runtime: ctx.chatRuntime });
-			const result = await chat.chat({ message: job.prompt, sessionId: job.session_id || undefined });
-			return Response.json({ ok: true, answer: result.answer, tools: result.tools });
+			try {
+				const result = await chat.chat({ message: job.prompt, sessionId: job.session_id || undefined });
+				service.markRun({ id: job.id, schedule: job.schedule }, Date.now(), "ok");
+				return Response.json({ ok: true, answer: result.answer, tools: result.tools });
+			} catch (err) {
+				const message = err instanceof Error ? err.message.slice(0, 500) : "unknown error";
+				service.markRun({ id: job.id, schedule: job.schedule }, Date.now(), "failed", message);
+				throw err;
+			}
 		},
 	},
 	{

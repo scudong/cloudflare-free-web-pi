@@ -111,6 +111,7 @@ export function parseAutomations(raw: unknown): AutomationInfo[] {
 			sessionId: pickString(entry, ["session_id", "sessionId"]) || undefined,
 			lastRunAt: pickLastRunAt(entry),
 			lastStatus: pickLastStatus(entry),
+			lastError: pickString(entry, ["last_error", "lastError"]) || undefined,
 		};
 	});
 }

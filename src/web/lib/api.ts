@@ -743,6 +743,10 @@ export const api = {
 
 	deleteAutomation: (id: string) => requestJson<{ ok?: boolean }>(withQuery("/api/automations", { id }), { method: "DELETE" }),
 
+	/** 立即运行（v1.0.4）：手动执行一次定时任务；走完整 chat 回合，可能需要几分钟。 */
+	runAutomation: (id: string) =>
+		requestJson<{ ok?: boolean; answer?: string }>("/api/automations/run", jsonPost({ id })),
+
 	/** MCP 写入。 */
 	addMcp: (name: string, url: string, headers?: Record<string, string>) =>
 		requestJson<{ ok?: boolean; tools?: number; error?: string }>("/api/mcp", jsonPost({ name, url, headers })),

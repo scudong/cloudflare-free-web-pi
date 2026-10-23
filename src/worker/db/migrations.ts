@@ -201,6 +201,15 @@ const automationLastStatus: Migration = {
 	},
 };
 
+/** v1.0.4：失败原因落库（08:03 日报失败时只有 console.warn，事后无法回溯）。 */
+const automationLastError: Migration = {
+	version: 9,
+	name: "automation-last-error",
+	up(sql) {
+		ensureColumn(sql, "automations", "last_error TEXT");
+	},
+};
+
 export const MIGRATIONS: readonly Migration[] = [
 	initialSchema,
 	vfsRootConversation,
@@ -210,6 +219,7 @@ export const MIGRATIONS: readonly Migration[] = [
 	skillHubColumns,
 	skillEvents,
 	automationLastStatus,
+	automationLastError,
 ];
 
 // 版本号是账本的唯一真源：重复或乱序会被 INSERT OR IGNORE 静默跳过，模块加载时就暴露。

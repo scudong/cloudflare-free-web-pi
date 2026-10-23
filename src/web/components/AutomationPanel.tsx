@@ -40,23 +40,31 @@ function AutomationLastRun({
 	if (!lastRunLabel && !status) return null;
 	const sessionId = job.sessionId;
 	return (
-		<p className="mt-0.5 text-[11px] text-slate-600">
-			{lastRunLabel ? `上次 ${lastRunLabel}` : "上次运行"}
-			{status && <AutomationStatusBadge status={status} />}
-			{lastRunLabel && sessionId && onOpenSession && (
-				<>
-					{" · "}
-					<button
-						type="button"
-						onClick={() => onOpenSession(sessionId)}
-						aria-label={`查看 ${job.name} 上次运行的产出`}
-						className="text-sky-400 hover:text-sky-300 hover:underline"
-					>
-						查看产出
-					</button>
-				</>
+		<>
+			<p className="mt-0.5 text-[11px] text-slate-600">
+				{lastRunLabel ? `上次 ${lastRunLabel}` : "上次运行"}
+				{status && <AutomationStatusBadge status={status} />}
+				{lastRunLabel && sessionId && onOpenSession && (
+					<>
+						{" · "}
+						<button
+							type="button"
+							onClick={() => onOpenSession(sessionId)}
+							aria-label={`查看 ${job.name} 上次运行的产出`}
+							className="text-sky-400 hover:text-sky-300 hover:underline"
+						>
+							查看产出
+						</button>
+					</>
+				)}
+			</p>
+			{/* 失败原因（v1.0.4）：服务端把异常消息写进 last_error，失败时展示给用户自查。 */}
+			{status === "failed" && job.lastError && (
+				<p className="mt-0.5 break-all text-[10.5px] leading-relaxed text-rose-400/80" title={job.lastError}>
+					{job.lastError.length > 160 ? `${job.lastError.slice(0, 160)}…` : job.lastError}
+				</p>
 			)}
-		</p>
+		</>
 	);
 }
 
@@ -69,6 +77,7 @@ export function AutomationPanel({
 	onToggle,
 	onDelete,
 	onUpdate,
+	onRun,
 	defaultSessionId = "",
 	onOpenSession,
 	onCollapse,
@@ -81,6 +90,8 @@ export function AutomationPanel({
 	onDelete: (id: string) => Promise<boolean>;
 	/** 编辑保存（NERE-65）：走 PATCH，失败时返回可展示文案。 */
 	onUpdate: (patch: AutomationPatch) => Promise<{ ok: boolean; error?: string }>;
+	/** 立即运行（v1.0.4）：手动补跑一次；完整 chat 回合可能耗时几分钟，由调用方刷新列表。 */
+	onRun?: (id: string) => Promise<{ ok: boolean; error?: string }>;
 	/** 任务没有记录会话时的兜底回填。 */
 	defaultSessionId?: string;
 	/** 「查看产出」（NERE-68）：切到该任务上次运行的会话；缺省时不渲染入口。 */
@@ -95,6 +106,18 @@ export function AutomationPanel({
 	const [busy, setBusy] = useState(false);
 	/** 正在编辑的任务；非空即弹出编辑弹窗（NERE-65）。 */
 	const [editing, setEditing] = useState<AutomationInfo | null>(null);
+	/** 正在手动运行的任务（v1.0.4）：完整 chat 回合可能几分钟，按钮锁定到返回。 */
+	const [runningId, setRunningId] = useState<string | null>(null);
+
+	const runJob = (job: AutomationInfo) => {
+		if (!onRun || runningId) return;
+		setRunningId(job.id);
+		void (async () => {
+			const result = await onRun(job.id);
+			if (!result.ok && result.error) window.alert(`立即运行失败：${result.error}`);
+			setRunningId(null);
+		})();
+	};
 
 	const submit = () => {
 		if (!name.trim() || !prompt.trim() || busy) return;
@@ -195,6 +218,16 @@ export function AutomationPanel({
 									className="rounded p-1 text-slate-500 hover:bg-slate-700 hover:text-slate-200"
 								>
 									<Icon name="edit" className="h-3.5 w-3.5" />
+								</button>
+								<button
+									type="button"
+									title={runningId === job.id ? "运行中，完成后刷新" : "立即运行一次（不走闹钟）"}
+									aria-label={`立即运行 ${job.name}`}
+									disabled={runningId === job.id}
+									onClick={() => runJob(job)}
+									className="rounded p-1 text-slate-500 hover:bg-slate-700 hover:text-slate-200 disabled:opacity-50"
+								>
+									{runningId === job.id ? "运行中…" : "运行"}
 								</button>
 								<button
 									type="button"

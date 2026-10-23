@@ -132,6 +132,7 @@ describe("automationView", () => {
 				enabled: 0,
 				last_run_at: 123,
 				last_status: "failed",
+				last_error: "Error: boom",
 				next_run_at: 456,
 			}),
 		).toEqual({
@@ -143,6 +144,7 @@ describe("automationView", () => {
 			enabled: false,
 			last_run_at: 123,
 			last_status: "failed",
+			last_error: "Error: boom",
 			next_run_at: 456,
 		});
 	});
@@ -157,6 +159,7 @@ describe("automationView", () => {
 			enabled: 1,
 			last_run_at: null,
 			last_status: null,
+			last_error: null,
 			next_run_at: 0,
 		});
 		expect(view.schedule).toEqual({ kind: "daily", time: "09:00" });

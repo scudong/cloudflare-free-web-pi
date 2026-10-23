@@ -157,6 +157,8 @@ export interface AutomationInfo {
 	lastRunAt?: number;
 	/** 上次运行结果（NERE-68 2b）；NULL / 未知值解析为 undefined（不渲染徽标）。 */
 	lastStatus?: AutomationRunStatus;
+	/** 上次失败原因（v1.0.4）；仅 lastStatus = "failed" 时有值。 */
+	lastError?: string;
 }
 
 /** PATCH /api/automations 的请求体（NERE-64 契约；enabled 原样带回，编辑不改启停）。 */

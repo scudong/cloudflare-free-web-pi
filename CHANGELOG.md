@@ -2,6 +2,14 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## v1.0.4（2026-10-23）
+
+### 定时任务失败原因落库 + 面板立即运行（v1.0.4）
+- 08:03 日报失败只留下 `console.warn`（日志已丢，事后无法回溯）；现在失败原因写入 `last_error`（迁移 v9 `automation-last-error`），下次成功自动清空
+- alarm 与 run-now（手动运行）统一记 `last_run_at / last_status / last_error`；手动运行同样顺延 `next_run_at`
+- 定时面板新增「运行」按钮：手动补跑一次（完整 chat 回合可能耗时几分钟，按钮锁定到返回）；失败时面板直接显示原因
+- 复现结论：`amvj8h6jc`（每日科技日报）run-now 成功并产出分享链接，08:03 为瞬时故障；本次改动让下次失败可自查
+
 ## v1.0.3（2026-10-23）
 
 ### 修复 run-now 类型错误（v1.0.3）

@@ -63,6 +63,8 @@ export type AutomationView = {
 	last_run_at: number | null;
 	/** 上次运行结果（NERE-68）：ok / failed / deferred，老数据为 null。 */
 	last_status: automationsRepo.AutomationLastStatus | null;
+	/** 上次失败原因（v1.0.4）：仅 failed 时有值，成功 / 顺延 / 老数据为 null。 */
+	last_error: string | null;
 	next_run_at: number;
 };
 
@@ -153,6 +155,7 @@ export function automationView(row: automationsRepo.AutomationRow): AutomationVi
 		enabled: row.enabled === 1,
 		last_run_at: row.last_run_at,
 		last_status: automationsRepo.parseLastStatus(row.last_status),
+		last_error: row.last_error ?? null,
 		next_run_at: row.next_run_at,
 	};
 }
@@ -167,8 +170,8 @@ export type AutomationService = {
 	due(now: number): automationsRepo.AutomationDueRow[];
 	/** 会话忙：顺延 5 分钟，只记 `last_status = deferred`（不改 last_run_at）。 */
 	defer(id: string, now: number): void;
-	/** 执行完一轮：写 last_run_at、last_status（ok / failed）与下一次 next_run_at。 */
-	markRun(job: { id: string; schedule: string }, now: number, status: "ok" | "failed"): void;
+	/** 执行完一轮：写 last_run_at、last_status（ok / failed）与下一次 next_run_at；失败附原因（v1.0.4）。 */
+	markRun(job: { id: string; schedule: string }, now: number, status: "ok" | "failed", error?: string): void;
 	/** 本轮处理过任务时，把仍落在过去的时间统一顺延 60s。 */
 	rescheduleOverdue(now: number): void;
 	/** alarm：到点且 active 的目标会话。 */
@@ -189,7 +192,7 @@ export type AutomationRunner = {
 /**
  * 执行一轮到点任务（NERE-68 三态）：
  * - 会话忙 → `deferred` 且不改 last_run_at（顺延不算一次运行）；
- * - 成功 → `ok`；异常 → `failed`（console.warn 保留），两者都更新 last_run_at；
+ * - 成功 → `ok`；异常 → `failed`（console.warn 保留，原因写入 last_error），两者都更新 last_run_at；
  * - 单个任务的异常不外抛，后续任务照常执行。
  */
 export async function runDueAutomations(
@@ -205,11 +208,14 @@ export async function runDueAutomations(
 			continue;
 		}
 		let status: "ok" | "failed" = "ok";
+		let error: string | undefined;
 		try {
 			await runner.run(job);
 		} catch (err) {
 			console.warn(`automation ${job.id} failed`, String(err).slice(0, 200));
 			status = "failed";
+			// 失败原因落库（v1.0.4）：console.warn 会丢，SQL 里要能查到当时为什么失败。
+			error = String(err).slice(0, 500);
 			// recover 失败不能吞掉本次运行结果，也不能中断后续任务。
 			try {
 				await runner.recover();
@@ -217,7 +223,7 @@ export async function runDueAutomations(
 				console.warn(`automation ${job.id} recover failed`, String(recoverErr).slice(0, 200));
 			}
 		}
-		service.markRun(job, now, status);
+		service.markRun(job, now, status, error);
 	}
 }
 
@@ -268,14 +274,14 @@ export function createAutomationService(sql: SqlHandle): AutomationService {
 			automationsRepo.markDeferred(sql, id, now + 5 * 60_000);
 		},
 
-		markRun(job, now, status) {
+		markRun(job, now, status, error) {
 			let schedule: Schedule = DAILY_DEFAULT;
 			try {
 				schedule = JSON.parse(job.schedule) as Schedule;
 			} catch {
 				// 保持默认
 			}
-			automationsRepo.markRun(sql, job.id, now, nextRunAt(schedule, Date.now()), status);
+			automationsRepo.markRun(sql, job.id, now, nextRunAt(schedule, Date.now()), status, error);
 		},
 
 		rescheduleOverdue(now) {

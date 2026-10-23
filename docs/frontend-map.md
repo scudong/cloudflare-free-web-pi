@@ -28,7 +28,7 @@
 单页应用，无路由库。`src/web/main.tsx` 挂载 `App`；「页面」由 `railView` + `overlay`（设置 / 知识库 / MCP / 技能）+ `leftOpen` + `rightOpen` + `mobileTab` 组合出来。
 
 ```
-App（页面层，1834 行）
+App（页面层，1846 行）
 ├─ LoginGate                          未登录整屏闸门
 ├─ Rail                               常驻竖栏：sessions / files / 分享 / 定时 / 用户 + kb / mcp / skills 三个弹窗入口（分享 / 定时带未读圆点，NERE-74）
 ├─ 左栏内容（随 railView 切换，可收起）

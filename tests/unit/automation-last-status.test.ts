@@ -70,19 +70,21 @@ describe("last_status 落库（NERE-68）", () => {
 		expect(automationView(row(sql))).toMatchObject({ last_run_at: null, last_status: null });
 	});
 
-	it("成功写 ok，并更新 last_run_at 与 next_run_at", () => {
+	it("成功写 ok，并更新 last_run_at 与 next_run_at；last_error 一并清空", () => {
 		const { sql, service } = harness();
+		service.markRun({ id: "a1", schedule: SCHEDULE }, NOW - 60_000, "failed", "Error: boom");
 		service.markRun({ id: "a1", schedule: SCHEDULE }, NOW, "ok");
 		const stored = row(sql);
 		expect(stored.last_status).toBe("ok");
 		expect(stored.last_run_at).toBe(NOW);
 		expect(stored.next_run_at).toBeGreaterThan(NOW);
+		expect(stored.last_error).toBeNull();
 	});
 
-	it("异常写 failed，仍记这次运行时间", () => {
+	it("异常写 failed，仍记这次运行时间；原因写入 last_error（v1.0.4）", () => {
 		const { sql, service } = harness();
-		service.markRun({ id: "a1", schedule: SCHEDULE }, NOW, "failed");
-		expect(row(sql)).toMatchObject({ last_status: "failed", last_run_at: NOW });
+		service.markRun({ id: "a1", schedule: SCHEDULE }, NOW, "failed", "Error: boom");
+		expect(row(sql)).toMatchObject({ last_status: "failed", last_run_at: NOW, last_error: "Error: boom" });
 	});
 
 	it("顺延写 deferred，且不覆盖上一次的 last_run_at", () => {
@@ -113,6 +115,7 @@ describe("automationView 的 last_status 收口", () => {
 		enabled: 1,
 		last_run_at: 123,
 		last_status: "failed",
+		last_error: "Error: boom",
 		next_run_at: 456,
 	};
 
@@ -165,8 +168,8 @@ describe("runDueAutomations 三态（NERE-68）", () => {
 		try {
 			const failing = runner({ fail: ["a1"] });
 			await runDueAutomations(jobs, NOW, service, failing.impl);
-			expect(row(sql, "a1")).toMatchObject({ last_status: "failed", last_run_at: NOW });
-			expect(row(sql, "a2")).toMatchObject({ last_status: "ok", last_run_at: NOW });
+			expect(row(sql, "a1")).toMatchObject({ last_status: "failed", last_run_at: NOW, last_error: "Error: boom" });
+			expect(row(sql, "a2")).toMatchObject({ last_status: "ok", last_run_at: NOW, last_error: null });
 			expect(failing.calls).toEqual({ run: ["a1", "a2"], recover: 1 });
 			expect(warn).toHaveBeenCalledWith("automation a1 failed", "Error: boom");
 		} finally {
