@@ -2,6 +2,12 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## v1.0.3（2026-10-23）
+
+### 修复 run-now 类型错误（v1.0.3）
+- `automations.list()` 返回 `AutomationRow`，会话字段是 `session_id`；v1.0.2 写成了 `sessionId`
+- CI 的 `tsc -p tsconfig.ci.json` 拦下；已修正并在本地跑过类型检查
+
 ## v1.0.2（2026-10-23）
 
 ### 定时任务立即运行（v1.0.2）

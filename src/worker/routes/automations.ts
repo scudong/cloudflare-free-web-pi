@@ -63,7 +63,7 @@ export const automationRoutes: readonly Route[] = [
 			const job = automations(ctx).list().find((item) => item.id === id);
 			if (!job) throw new AppError("automation_not_found", 404, "定时任务不存在");
 			const chat = createChatService({ sql: ctx.sql(), runtime: ctx.chatRuntime });
-			const result = await chat.chat({ message: job.prompt, sessionId: job.sessionId || undefined });
+			const result = await chat.chat({ message: job.prompt, sessionId: job.session_id || undefined });
 			return Response.json({ ok: true, answer: result.answer, tools: result.tools });
 		},
 	},
