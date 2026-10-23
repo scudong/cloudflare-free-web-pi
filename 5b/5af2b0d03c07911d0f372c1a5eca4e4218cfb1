@@ -1,0 +1,32 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.9",
+  "base_commit_sha": "5b5af2b0d03c07911d0f372c1a5eca4e4218cfb1",
+  "prompts": {
+    "def3fbf2514ceb7e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9be19253-b8ea-41e1-8699-583ea39103c5",
+        "model": "deepseek-flash"
+      },
+      "human_author": "Gavin",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 782,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "tests/unit/skill-projection.test.ts": {
+          "accepted_lines": 114
+        },
+        "src/web/components/SkillPanel.tsx": {
+          "accepted_lines": 532
+        },
+        "tests/unit/chat-gate.test.ts": {
+          "accepted_lines": 136
+        }
+      }
+    }
+  }
+}
