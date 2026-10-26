@@ -28,14 +28,14 @@
 单页应用，无路由库。`src/web/main.tsx` 挂载 `App`；「页面」由 `railView` + `overlay`（设置 / 知识库 / MCP / 技能）+ `leftOpen` + `rightOpen` + `mobileTab` 组合出来。
 
 ```
-App（页面层，1846 行）
+App（页面层，1847 行）
 ├─ LoginGate                          未登录整屏闸门
 ├─ Rail                               常驻竖栏：sessions / files / 分享 / 定时 / 用户 + kb / mcp / skills 三个弹窗入口（分享 / 定时带未读圆点，NERE-74）
 ├─ 左栏内容（随 railView 切换，可收起）
 │  ├─ Sidebar          会话列表 + 搜索 + 重命名/删除
 │  ├─ FilesPanel       全库文件（自取数）
 │  ├─ SharesPanel      分享清单（NERE-56 能力门禁）
-│  ├─ AutomationPanel  定时任务（行内「编辑」→ AutomationEditDialog / ModalShell md，NERE-65；行内「上次 / 状态徽标 / 查看产出」跳转，NERE-68）
+│  ├─ AutomationPanel  定时任务（行内「编辑」→ AutomationEditDialog / ModalShell md，NERE-65；行内「上次 / 状态徽标 / 失败原因 / 查看产出」跳转，NERE-68 / NERE-86；编辑弹窗含「每次执行用新会话」开关，NERE-86）
 │  └─ UsersPanel       用户管理（owner 可见，自取数）
 ├─ TopBar              在线状态 / 会话名 / 打开设置 / 移动端抽屉
 ├─ 聊天栏

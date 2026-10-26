@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AutomationPanel } from "../../src/web/components/AutomationPanel";
+import { automationOutputSessionId } from "../../src/web/lib/automation-edit";
 import { parseAutomations } from "../../src/web/lib/collections";
 import { formatLastRunAt } from "../../src/web/lib/format";
 import type { AutomationInfo } from "../../src/web/types";
@@ -153,5 +154,45 @@ describe("AutomationPanel · 上次运行行", () => {
 		expect(html).toContain("上次运行");
 		expect(html).toContain("顺延");
 		expect(html).not.toContain("查看产出");
+	});
+});
+
+describe("失败原因摘要（NERE-86 验收 1）", () => {
+	it("failed + last_error：显示截断摘要，title 保留全文", () => {
+		const error = `reason:model_error / detail: Connection error ${"x".repeat(200)}`;
+		const html = render([job({ id: "a1", name: "早报", lastRunAt: LAST_RUN, lastStatus: "failed", lastError: error })]);
+		expect(html).toContain("reason:model_error");
+		expect(html).toContain("…");
+		expect(html).toContain(`title="${error}"`);
+	});
+
+	it("成功：即使带了 last_error 也不显示", () => {
+		const html = render([job({ id: "a1", name: "早报", lastRunAt: LAST_RUN, lastStatus: "ok", lastError: "boom" })]);
+		expect(html).not.toContain("boom");
+	});
+
+	it("failed 但没有 last_error：只有徽标，不渲染空摘要", () => {
+		const html = render([job({ id: "a1", name: "早报", lastRunAt: LAST_RUN, lastStatus: "failed" })]);
+		expect(html).toContain("失败");
+		expect(html).not.toContain("text-rose-400/80");
+	});
+});
+
+describe("查看产出目标（NERE-86 验收 2）", () => {
+	it("优先 last_session_id（最近一次执行实际用的会话）", () => {
+		expect(automationOutputSessionId({ lastSessionId: "4890", sessionId: "2991" })).toBe("4890");
+	});
+
+	it("老数据回落到 session_id", () => {
+		expect(automationOutputSessionId({ sessionId: "2991" })).toBe("2991");
+	});
+
+	it("都没有时返回 undefined", () => {
+		expect(automationOutputSessionId({})).toBeUndefined();
+	});
+
+	it("只有 last_session_id 的任务也渲染「查看产出」", () => {
+		const html = render([job({ id: "a1", name: "早报", lastRunAt: LAST_RUN, lastSessionId: "4890" })], () => {});
+		expect(html).toContain("查看产出");
 	});
 });

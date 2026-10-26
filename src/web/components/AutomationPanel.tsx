@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { automationOutputSessionId } from "../lib/automation-edit";
 import { formatLastRunAt } from "../lib/format";
 import { AutomationEditDialog } from "./AutomationEditDialog";
 import { Icon } from "./Icon";
@@ -38,7 +39,8 @@ function AutomationLastRun({
 	const lastRunLabel = formatLastRunAt(job.lastRunAt);
 	const status = job.lastStatus;
 	if (!lastRunLabel && !status) return null;
-	const sessionId = job.sessionId;
+	// NERE-86：跳最近一次执行实际用的会话；老数据回落到绑定会话。
+	const sessionId = automationOutputSessionId(job);
 	return (
 		<>
 			<p className="mt-0.5 text-[11px] text-slate-600">

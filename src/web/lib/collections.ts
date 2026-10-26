@@ -112,8 +112,24 @@ export function parseAutomations(raw: unknown): AutomationInfo[] {
 			lastRunAt: pickLastRunAt(entry),
 			lastStatus: pickLastStatus(entry),
 			lastError: pickString(entry, ["last_error", "lastError"]) || undefined,
+			// NERE-86：最近一次执行会话与「每轮新建会话」开关，snake_case 优先。
+			lastSessionId: pickString(entry, ["last_session_id", "lastSessionId"]) || undefined,
+			freshSession: pickFreshSession(entry),
 		};
 	});
+}
+
+/**
+ * 每轮新建会话（NERE-84 / NERE-86）：只认显式的布尔 / 0|1；缺失或未知值返回 undefined，
+ * 弹窗据此按默认「开」回填，而不是把老服务端的缺失误读成关闭。
+ */
+export function pickFreshSession(entry: Record<string, unknown>): boolean | undefined {
+	for (const key of ["fresh_session", "freshSession"]) {
+		const value = entry[key];
+		if (typeof value === "boolean") return value;
+		if (value === 0 || value === 1) return value === 1;
+	}
+	return undefined;
 }
 
 /** 上次运行结果（NERE-68 2b）：只认契约三值；NULL / 缺失 / 未知值一律 undefined（不猜状态）。 */

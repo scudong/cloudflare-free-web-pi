@@ -30,6 +30,25 @@ export interface AutomationEditDialogProps {
 const inputClass =
 	"w-full rounded-md border border-slate-700 bg-slate-800/70 px-2.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none";
 
+/** 开关（NERE-86）：与设置页同形的轻量 switch，本弹窗自持一份，避免跨面板耦合。 */
+function Switch({ checked, onChange, label }: { checked: boolean; onChange: (next: boolean) => void; label: string }) {
+	return (
+		<button
+			type="button"
+			role="switch"
+			aria-checked={checked}
+			aria-label={label}
+			onClick={() => onChange(!checked)}
+			className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${checked ? "bg-sky-600" : "bg-slate-600"}`}
+		>
+			<span
+				aria-hidden
+				className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/10 transition-all ${checked ? "left-[18px]" : "left-0.5"}`}
+			/>
+		</button>
+	);
+}
+
 export function AutomationEditDialog({ job, defaultSessionId = "", onClose, onSave }: AutomationEditDialogProps) {
 	const [draft, setDraft] = useState<AutomationDraft>(() => draftFromJob(job, defaultSessionId));
 	const [busy, setBusy] = useState(false);
@@ -178,6 +197,20 @@ export function AutomationEditDialog({ job, defaultSessionId = "", onClose, onSa
 						)}
 					</div>
 					<p className="text-[11px] text-slate-500">daily 按北京时间（UTC+8）执行；interval 从保存时刻起算。</p>
+				</div>
+
+				<div className="space-y-1.5">
+					<div className="flex items-center justify-between gap-3">
+						<span className="text-xs font-medium text-slate-300">每次执行用新会话</span>
+						<Switch
+							checked={draft.freshSession}
+							onChange={(next) => update("freshSession", next)}
+							label="每次执行用新会话"
+						/>
+					</div>
+					<p className="text-[11px] text-slate-500">
+						开启后每轮新建空会话执行，历史不再跨轮累积（推荐）；关闭则固定使用下面的会话 ID。
+					</p>
 				</div>
 
 				<div className="space-y-1.5">

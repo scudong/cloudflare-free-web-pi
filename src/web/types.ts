@@ -151,7 +151,7 @@ export interface AutomationInfo {
 	enabled: boolean;
 	/** 原始调度，供编辑弹窗回填（NERE-65）；解析失败时由解析器给默认值。 */
 	schedule?: AutomationSchedule;
-	/** 归属会话，供编辑弹窗回填（NERE-65），也是「查看产出」的跳转目标（NERE-68）。 */
+	/** 归属会话，供编辑弹窗回填（NERE-65）；「查看产出」的兜底目标（NERE-86 优先 lastSessionId）。 */
 	sessionId?: string;
 	/** 上次执行时间（毫秒）；后端写成功也写失败（NERE-68 2a 只展示，不判断成败）。缺失 / null 不渲染。 */
 	lastRunAt?: number;
@@ -159,6 +159,10 @@ export interface AutomationInfo {
 	lastStatus?: AutomationRunStatus;
 	/** 上次失败原因（v1.0.4）；仅 lastStatus = "failed" 时有值。 */
 	lastError?: string;
+	/** 最近一次执行实际用的会话（NERE-84）；老数据 / 未执行过为 undefined。 */
+	lastSessionId?: string;
+	/** 每轮新建会话（NERE-84）；缺失时按默认开处理（NERE-86 弹窗回填）。 */
+	freshSession?: boolean;
 }
 
 /** PATCH /api/automations 的请求体（NERE-64 契约；enabled 原样带回，编辑不改启停）。 */
@@ -169,6 +173,8 @@ export interface AutomationPatch {
 	schedule: AutomationSchedule;
 	sessionId: string;
 	enabled: boolean;
+	/** 每轮新建会话开关（NERE-84）：后端字段为 snake_case。 */
+	fresh_session: boolean;
 }
 
 /**
