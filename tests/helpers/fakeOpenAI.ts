@@ -12,7 +12,16 @@ export type FakeStep =
 export function startFakeOpenAI(port: number) {
 	let steps: FakeStep[] = [];
 	let served = 0;
+	/** 接下来若干次连接直接断开（NERE-85：模拟上游瞬时断流）。 */
+	let drops = 0;
+	let dropped = 0;
 	const server = http.createServer((req, res) => {
+		if (drops > 0) {
+			drops--;
+			dropped++;
+			req.socket.destroy();
+			return;
+		}
 		let body = "";
 		req.on("data", (chunk) => (body += chunk));
 		req.on("end", () => {
@@ -67,5 +76,11 @@ export function startFakeOpenAI(port: number) {
 			steps = [...next];
 			served = 0;
 		},
+		/** 接下来 count 次请求直接断连（不消耗步骤），用于验证重试。 */
+		dropNext: (count: number) => {
+			drops = count;
+		},
+		/** 已被断开的连接数（验证重试次数）。 */
+		droppedCount: () => dropped,
 	};
 }

@@ -2,6 +2,15 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## v1.0.6（2026-10-26）
+
+### 模型请求瞬时错误重试 + 空闲看门狗（NERE-85）
+- 新增 provider fetch 包装层（`src/worker/lib/provider-fetch.ts`）：连接失败、首个字节前的流中断、408 / 429 / 5xx 自动重试，最多 2 次额外尝试，退避 500ms → 2s；每次重试输出一行结构化 `console.warn`（`attempt` / `errorClass` / `elapsedMs`，不含密钥）
+- 401 / 403 / 400 等不可重试状态立即失败，0 次重试，不浪费按量配额
+- 空闲看门狗：从发起请求到收到首个响应字节，60s 内没有任何字节即中止本次尝试并按可重试处理；重试都在拿到首个字节前完成，SSE 事件不重复；首个字节之后的中断不重放
+- 自定义供应商与内置 DeepSeek 共用同一包装；关闭内核按错误文本重试整轮生成的策略（`retry.enabled=false`），瞬时重试只发生在这一层，一次断流最多 3 次请求
+- 最终失败的异常信息仍由 runner 摘要进 `automations.last_error`（配合 NERE-84）
+
 ## v1.0.5（2026-10-26）
 
 ### 定时任务执行隔离：每轮新建会话（NERE-84）
