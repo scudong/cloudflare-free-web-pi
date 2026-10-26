@@ -2,6 +2,14 @@
 
 本文件记录每次功能迭代。每次 push 到 `main` 都会自动部署（GitHub Actions → Cloudflare Worker）。
 
+## v1.0.5（2026-10-26）
+
+### 定时任务执行隔离：每轮新建会话（NERE-84）
+- 08:03「每日科技日报」连续失败的真因是单轮上下文过大：session 2991 已积累 4800+ 条目，每天执行都把全部历史塞进一次模型请求。现已改为**每次执行新建会话**（迁移 v10 新增 `automations.fresh_session`，默认 1），任务执行完历史不再跨轮累积
+- `automations.last_session_id` 记录最近一次执行实际用的会话；`last_error` 保留（≤300 字）并在成功时清空
+- `GET /api/automations` 返回 `fresh_session` / `last_session_id`；`PATCH /api/automations` 接受 `fresh_session`（`false` = 固定使用 `session_id`，兼容显式绑定会话的任务）
+- alarm 与「立即运行」同一语义；建会话失败记为 `failed` 并保留原绑定，下一轮重试
+
 ## v1.0.4（2026-10-23）
 
 ### 定时任务失败原因落库 + 面板立即运行（v1.0.4）

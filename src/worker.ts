@@ -769,7 +769,10 @@ export class SpikeAgent extends DurableObject {
 			const automations = this.automationService();
 			const due = automations.due(now);
 			const chat = this.chatService(deps);
+			// 每轮建新会话（NERE-84）：复用 `/sessions` 的创建路径，元数据与默认模型一致。
+			const sessions = createSessionService({ sql: deps.sql, runtime: this.sessionRuntime(deps) });
 			await runDueAutomations(due, now, automations, {
+				createSession: async () => (await sessions.create()).id,
 				hasActive: (sessionId) => chat.hasActive(sessionId),
 				run: async (job) => {
 					await chat.chat({ message: job.prompt, sessionId: job.session_id || undefined });

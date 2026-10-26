@@ -14,10 +14,20 @@ export type AutomationRow = {
 	last_run_at: number | null;
 	last_status: string | null;
 	last_error: string | null;
+	/** 每轮新建会话（NERE-84）：1 = 不继承历史，0 = 固定使用 `session_id`。 */
+	fresh_session: number;
+	/** 最近一次执行实际用的会话（NERE-84）。 */
+	last_session_id: string | null;
 	next_run_at: number;
 };
 
-export type AutomationDueRow = { id: string; prompt: string; session_id: string; schedule: string };
+export type AutomationDueRow = {
+	id: string;
+	prompt: string;
+	session_id: string;
+	schedule: string;
+	fresh_session: number;
+};
 
 /** 上次运行结果（NERE-68）：成功 / 异常 / 会话忙顺延。 */
 export type AutomationLastStatus = "ok" | "failed" | "deferred";
@@ -30,7 +40,7 @@ export function parseLastStatus(raw: unknown): AutomationLastStatus | null {
 }
 
 const SELECT =
-	"SELECT id, name, prompt, session_id, schedule, enabled, last_run_at, last_status, last_error, next_run_at FROM automations";
+	"SELECT id, name, prompt, session_id, schedule, enabled, last_run_at, last_status, last_error, fresh_session, last_session_id, next_run_at FROM automations";
 
 export function list(sql: SqlHandle): AutomationRow[] {
 	return sql.exec(`${SELECT} ORDER BY created_at DESC`).toArray() as AutomationRow[];
@@ -64,6 +74,8 @@ export type AutomationUpdate = {
 	sessionId?: string;
 	schedule?: string;
 	enabled?: boolean;
+	/** `fresh_session`（NERE-84）：每轮新建会话开关。 */
+	freshSession?: boolean;
 	nextRunAt?: number;
 };
 
@@ -90,6 +102,10 @@ export function update(sql: SqlHandle, id: string, patch: AutomationUpdate): voi
 		sets.push("enabled = ?");
 		values.push(patch.enabled ? 1 : 0);
 	}
+	if (patch.freshSession !== undefined) {
+		sets.push("fresh_session = ?");
+		values.push(patch.freshSession ? 1 : 0);
+	}
 	if (patch.nextRunAt !== undefined) {
 		sets.push("next_run_at = ?");
 		values.push(patch.nextRunAt);
@@ -105,7 +121,7 @@ export function remove(sql: SqlHandle, id: string): void {
 /** 到点且启用的任务（alarm 第一轮）。 */
 export function listDue(sql: SqlHandle, now: number): AutomationDueRow[] {
 	return sql
-		.exec("SELECT id, prompt, session_id, schedule FROM automations WHERE enabled = 1 AND next_run_at <= ?", now)
+		.exec("SELECT id, prompt, session_id, schedule, fresh_session FROM automations WHERE enabled = 1 AND next_run_at <= ?", now)
 		.toArray() as AutomationDueRow[];
 }
 
@@ -114,7 +130,18 @@ export function markDeferred(sql: SqlHandle, id: string, nextRunAt: number): voi
 	sql.exec("UPDATE automations SET next_run_at = ?, last_status = 'deferred' WHERE id = ?", nextRunAt, id);
 }
 
-/** 执行完一轮：写 last_run_at、last_status（ok / failed）与下一次 next_run_at；失败时附原因（v1.0.4）。 */
+/**
+ * 把任务指向一个具体会话（NERE-84）：`fresh_session = 1` 每轮执行前调用，
+ * `session_id` 与 `last_session_id` 一起更新，下一次执行从空会话开始。
+ */
+export function bindSession(sql: SqlHandle, id: string, sessionId: string): void {
+	sql.exec("UPDATE automations SET session_id = ?, last_session_id = ? WHERE id = ?", sessionId, sessionId, id);
+}
+
+/**
+ * 执行完一轮：写 last_run_at、last_status（ok / failed）、last_session_id 与下一次 next_run_at；
+ * 失败时附原因（v1.0.4）。`last_session_id` 传 null 时保留旧值（会话创建前就失败的场景）。
+ */
 export function markRun(
 	sql: SqlHandle,
 	id: string,
@@ -122,13 +149,15 @@ export function markRun(
 	nextRunAt: number,
 	status: Exclude<AutomationLastStatus, "deferred">,
 	error?: string | null,
+	sessionId?: string | null,
 ): void {
 	sql.exec(
-		"UPDATE automations SET last_run_at = ?, last_status = ?, last_error = ?, next_run_at = ? WHERE id = ?",
+		"UPDATE automations SET last_run_at = ?, last_status = ?, last_error = ?, next_run_at = ?, last_session_id = COALESCE(?, last_session_id) WHERE id = ?",
 		lastRunAt,
 		status,
 		error ?? null,
 		nextRunAt,
+		sessionId ?? null,
 		id,
 	);
 }

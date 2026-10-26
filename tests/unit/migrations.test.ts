@@ -312,4 +312,31 @@ describe("migrate", () => {
 		}
 	});
 
+	it("v10 给老库 automations 补 fresh_session / last_session_id，存量任务默认每轮新会话", () => {
+		const db = new DatabaseSync(":memory:");
+		try {
+			db.exec(
+				"CREATE TABLE automations (id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', schedule TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_run_at INTEGER, next_run_at INTEGER NOT NULL)",
+			);
+			db.exec(
+				`INSERT INTO automations (id, name, prompt, session_id, schedule, created_at, last_run_at, next_run_at) VALUES ('old', '日报', '跑', '2991', '{"kind":"daily","time":"08:03"}', '2026-01-01T00:00:00Z', 100, 200)`,
+			);
+			const sql = sqlHandle(db);
+			migrate(sql);
+			expect(columnsOf(db, "automations")).toEqual(
+				expect.arrayContaining(["fresh_session", "last_session_id"]),
+			);
+			// 存量任务：升级后默认新会话，旧的 2991 只作为最后一次执行的记录保留在 session_id 上。
+			expect(db.prepare("SELECT fresh_session, session_id, last_session_id FROM automations WHERE id = 'old'").all()).toEqual([
+				{ fresh_session: 1, session_id: "2991", last_session_id: null },
+			]);
+
+			expect(migrate(sql)).toBe(0);
+			db.exec("DELETE FROM schema_migrations WHERE version = 10");
+			expect(migrate(sql)).toBe(1);
+		} finally {
+			db.close();
+		}
+	});
+
 });

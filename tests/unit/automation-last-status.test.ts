@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { migrate, type SqlHandle } from "../../src/worker/db/migrations";
 import * as automationsRepo from "../../src/worker/repo/automations-repo";
 import {
+	AUTOMATION_ERROR_MAX,
 	automationView,
 	createAutomationService,
 	runDueAutomations,
@@ -49,11 +50,16 @@ function row(sql: SqlHandle, id = "a1") {
 
 /** 记录调用的假执行端口；`fail` 里的任务 id 会抛错。 */
 function runner(overrides: Partial<AutomationRunner> & { fail?: string[] } = {}) {
-	const calls = { run: [] as string[], recover: 0 };
+	const calls = { run: [] as string[], recover: 0, created: 0, sessions: [] as string[] };
 	const impl: AutomationRunner = {
+		createSession: async () => {
+			calls.created += 1;
+			return `s${calls.created}`;
+		},
 		hasActive: () => false,
 		run: async (job) => {
 			calls.run.push(job.id);
+			calls.sessions.push(job.session_id);
 			if (overrides.fail?.includes(job.id)) throw new Error("boom");
 		},
 		recover: async () => {
@@ -116,6 +122,8 @@ describe("automationView 的 last_status 收口", () => {
 		last_run_at: 123,
 		last_status: "failed",
 		last_error: "Error: boom",
+		fresh_session: 1,
+		last_session_id: "4889",
 		next_run_at: 456,
 	};
 
@@ -134,8 +142,8 @@ describe("automationView 的 last_status 收口", () => {
 
 describe("runDueAutomations 三态（NERE-68）", () => {
 	const jobs: automationsRepo.AutomationDueRow[] = [
-		{ id: "a1", prompt: "跑", session_id: "42", schedule: SCHEDULE },
-		{ id: "a2", prompt: "再跑", session_id: "", schedule: SCHEDULE },
+		{ id: "a1", prompt: "跑", session_id: "42", schedule: SCHEDULE, fresh_session: 0 },
+		{ id: "a2", prompt: "再跑", session_id: "", schedule: SCHEDULE, fresh_session: 0 },
 	];
 
 	function twoJobs() {
@@ -170,7 +178,7 @@ describe("runDueAutomations 三态（NERE-68）", () => {
 			await runDueAutomations(jobs, NOW, service, failing.impl);
 			expect(row(sql, "a1")).toMatchObject({ last_status: "failed", last_run_at: NOW, last_error: "Error: boom" });
 			expect(row(sql, "a2")).toMatchObject({ last_status: "ok", last_run_at: NOW, last_error: null });
-			expect(failing.calls).toEqual({ run: ["a1", "a2"], recover: 1 });
+			expect(failing.calls).toMatchObject({ run: ["a1", "a2"], recover: 1 });
 			expect(warn).toHaveBeenCalledWith("automation a1 failed", "Error: boom");
 		} finally {
 			warn.mockRestore();
@@ -192,6 +200,80 @@ describe("runDueAutomations 三态（NERE-68）", () => {
 			expect(row(sql, "a2")).toMatchObject({ last_status: "ok", last_run_at: NOW });
 			expect(failing.calls.run).toEqual(["a1", "a2"]);
 			expect(warn).toHaveBeenCalledWith("automation a1 recover failed", "Error: harness rebuild failed");
+		} finally {
+			warn.mockRestore();
+		}
+	});
+});
+
+describe("runDueAutomations 会话隔离（NERE-84）", () => {
+	/** markRun 的 next_run_at 按真实时钟算（interval 30 分钟），下一轮用更晚的 now 取 due。 */
+	const later = () => Date.now() + 31 * 60_000;
+
+	it("迁移后存量任务默认 fresh_session=1", () => {
+		const { sql } = harness();
+		expect(row(sql).fresh_session).toBe(1);
+		expect(row(sql).last_session_id).toBeNull();
+	});
+
+	it("fresh_session=1：连续两轮各建一个会话，last_session_id 指向第二次的会话", async () => {
+		const { sql, service } = harness();
+		const fake = runner();
+		await runDueAutomations(service.due(NOW), NOW, service, fake.impl);
+		expect(row(sql)).toMatchObject({ session_id: "s1", last_session_id: "s1", last_status: "ok", last_error: null });
+
+		await runDueAutomations(service.due(later()), NOW, service, fake.impl);
+		expect(row(sql)).toMatchObject({ session_id: "s2", last_session_id: "s2", last_status: "ok" });
+		expect(fake.calls.sessions).toEqual(["s1", "s2"]);
+	});
+
+	it("fresh_session=0：不建会话，沿用任务绑定的会话", async () => {
+		const { sql, service } = harness();
+		automationsRepo.update(sql, "a1", { freshSession: false });
+		const fake = runner();
+		await runDueAutomations(service.due(NOW), NOW, service, fake.impl);
+		expect(fake.calls.created).toBe(0);
+		expect(fake.calls.sessions).toEqual(["42"]);
+		expect(row(sql)).toMatchObject({ session_id: "42", last_session_id: "42", last_status: "ok" });
+	});
+
+	it("新建会话失败：记 failed + last_error，保留原会话绑定，本轮不执行", async () => {
+		const { sql, service } = harness();
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const fake = runner({
+				createSession: async () => {
+					throw new Error("harness down");
+				},
+			});
+			await runDueAutomations(service.due(NOW), NOW, service, fake.impl);
+			expect(row(sql)).toMatchObject({
+				last_status: "failed",
+				last_run_at: NOW,
+				last_error: "Error: harness down",
+				session_id: "42",
+				last_session_id: null,
+			});
+			expect(row(sql).next_run_at).toBeGreaterThan(NOW);
+			expect(fake.calls.run).toEqual([]);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	it("last_error 只留 300 字摘要", async () => {
+		const { sql, service } = harness();
+		automationsRepo.update(sql, "a1", { freshSession: false });
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			await runDueAutomations(service.due(NOW), NOW, service, {
+				...runner().impl,
+				run: async () => {
+					throw new Error("x".repeat(400));
+				},
+			});
+			expect(row(sql).last_error).toHaveLength(AUTOMATION_ERROR_MAX);
+			expect(row(sql).last_status).toBe("failed");
 		} finally {
 			warn.mockRestore();
 		}
