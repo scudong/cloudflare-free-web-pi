@@ -10,6 +10,12 @@
 - `GET /api/automations` 返回 `fresh_session` / `last_session_id`；`PATCH /api/automations` 接受 `fresh_session`（`false` = 固定使用 `session_id`，兼容显式绑定会话的任务）
 - alarm 与「立即运行」同一语义；建会话失败记为 `failed` 并保留原绑定，下一轮重试
 
+### 定时面板失败原因 + 产出指向最新会话（NERE-86）
+- 定时任务行在 `last_status=failed` 时显示 `last_error` 摘要（截断 160 字，悬停 `title` 看全文）；成功 / 顺延 / 无原因不显示（沿用 v1.0.4 行为，本次补测试锁定）
+- 「查看产出」改跳 `last_session_id`——最近一次执行实际用的会话；老数据 / 未执行过回落到 `session_id`
+- 编辑弹窗新增「每次执行用新会话」开关：默认开，存量任务回填服务端当前值，保存随 PATCH 提交 `fresh_session`
+- 列表解析同步 `last_session_id` / `fresh_session`（snake_case 兼容，缺失不误读为关闭）；`tsc -p src/web/tsconfig.json`、`npm run build:web` 通过
+
 ## v1.0.4（2026-10-23）
 
 ### 定时任务失败原因落库 + 面板立即运行（v1.0.4）

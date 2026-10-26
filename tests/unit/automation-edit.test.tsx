@@ -93,6 +93,19 @@ describe("列表解析保留编辑所需字段（NERE-65）", () => {
 		const [job] = parseAutomations({ automations: [{ id: "a1", name: "x", prompt: "y", schedule: "{oops" }] });
 		expect(job?.scheduleLabel).toBe("每天 09:00");
 	});
+
+	it("last_session_id / fresh_session 兼容 snake_case，缺失不误读为关闭（NERE-86）", () => {
+		const jobs = parseAutomations({
+			automations: [
+				{ id: "a1", last_session_id: "4890", fresh_session: true },
+				{ id: "a2", lastSessionId: "42", freshSession: false },
+				{ id: "a3", fresh_session: 0 },
+				{ id: "a4" },
+			],
+		});
+		expect(jobs.map((job) => job.lastSessionId)).toEqual(["4890", "42", undefined, undefined]);
+		expect(jobs.map((job) => job.freshSession)).toEqual([true, false, false, undefined]);
+	});
 });
 
 describe("打开弹窗回填（NERE-65 验收 1）", () => {
@@ -104,7 +117,13 @@ describe("打开弹窗回填（NERE-65 验收 1）", () => {
 			time: "08:03",
 			minutes: "60",
 			sessionId: "2991",
+			freshSession: true,
 		});
+	});
+
+	it("每轮新建会话：存量任务回填服务端当前值，缺失按默认开（NERE-86）", () => {
+		expect(draftFromJob({ ...JOB, freshSession: false }).freshSession).toBe(false);
+		expect(draftFromJob({ ...JOB, freshSession: undefined }).freshSession).toBe(true);
 	});
 
 	it("interval：kind 与 minutes 回填", () => {
@@ -164,7 +183,15 @@ describe("前端先拦非法输入（NERE-65 验收 4）", () => {
 			schedule: { kind: "daily", time: "08:03" },
 			sessionId: "2991",
 			enabled: true,
+			fresh_session: true,
 		});
+	});
+
+	it("开关关闭时 PATCH 带 fresh_session=false（NERE-86 往返）", () => {
+		const result = validateAutomationDraft(draft({ freshSession: false }));
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(buildAutomationPatch(JOB, result.value).fresh_session).toBe(false);
 	});
 
 	it("切换为 interval 时载荷只带 minutes", () => {
@@ -194,6 +221,7 @@ describe("保存流程（NERE-65 验收 3 / 4）", () => {
 			schedule: { kind: "daily", time: "08:03" },
 			sessionId: "2991",
 			enabled: true,
+			fresh_session: true,
 		});
 		expect(result.ok).toBe(true);
 	});
@@ -235,6 +263,20 @@ describe("PATCH 返回值落地列表（NERE-65 验收 3）", () => {
 	it("缺少 id 的返回值不参与合并", () => {
 		expect(parseAutomationUpdate({ name: "x" })).toBeNull();
 		expect(parseAutomationUpdate(null)).toBeNull();
+	});
+
+	it("fresh_session / last_session_id 进入增量并合并回列表（NERE-86）", () => {
+		const update = parseAutomationUpdate({ id: "a-1", fresh_session: false, last_session_id: "4890" });
+		expect(update).toEqual({ id: "a-1", freshSession: false, lastSessionId: "4890" });
+		const [merged] = mergeAutomationUpdate([JOB], update!);
+		expect(merged.freshSession).toBe(false);
+		expect(merged.lastSessionId).toBe("4890");
+	});
+
+	it("响应缺少 fresh_session 时不覆盖列表旧值", () => {
+		const update = parseAutomationUpdate({ id: "a-1", name: "新名字" });
+		expect(update?.freshSession).toBeUndefined();
+		expect(mergeAutomationUpdate([{ ...JOB, freshSession: false }], update!)[0].freshSession).toBe(false);
 	});
 
 	it("只更新返回的字段，顺序与其它任务不变", () => {
@@ -295,6 +337,15 @@ describe("弹窗 SSR 标记（NERE-65 交付 2）", () => {
 		const html = render();
 		expect(html).toContain('maxLength="40"');
 		expect(html).toContain('maxLength="2000"');
+	});
+
+	it("「每次执行用新会话」开关回填当前值，缺失按默认开（NERE-86）", () => {
+		const on = render();
+		expect(on).toContain('role="switch"');
+		expect(on).toContain('aria-label="每次执行用新会话"');
+		expect(on).toContain('aria-checked="true"');
+		expect(on).toContain("开启后每轮新建空会话执行");
+		expect(render({ ...JOB, freshSession: false })).toContain('aria-checked="false"');
 	});
 });
 

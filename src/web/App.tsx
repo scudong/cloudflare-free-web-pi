@@ -999,6 +999,7 @@ export default function App() {
 				prompt: patch.prompt,
 				schedule: patch.schedule,
 				sessionId: patch.sessionId,
+				freshSession: patch.fresh_session,
 			};
 			setAutomations((prev) => mergeAutomationUpdate(prev, update));
 			return { ok: true };

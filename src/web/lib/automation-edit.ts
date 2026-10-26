@@ -8,7 +8,7 @@
 
 import type { AutomationInfo, AutomationPatch, AutomationSchedule } from "../types";
 import { DEFAULT_SCHEDULE, automationScheduleLabel, isDailyTime, parseAutomationSchedule } from "./automation-schedule";
-import { isObject, pickString } from "./collections";
+import { isObject, pickFreshSession, pickString } from "./collections";
 import { formatNextRunAt } from "./format";
 
 /** 与后端 create 一致：name 1–40、prompt 1–2000（按 UTF-16 长度截断）。 */
@@ -24,6 +24,8 @@ export type AutomationDraft = {
 	/** interval 的分钟数，输入框保持字符串。 */
 	minutes: string;
 	sessionId: string;
+	/** 每轮新建会话（NERE-84）：开关默认开，避免历史上下文越滚越大。 */
+	freshSession: boolean;
 };
 
 export type AutomationDraftField = "name" | "prompt" | "time" | "minutes";
@@ -34,6 +36,7 @@ export type AutomationDraftValue = {
 	prompt: string;
 	schedule: AutomationSchedule;
 	sessionId: string;
+	freshSession: boolean;
 };
 
 export type DraftValidation =
@@ -50,6 +53,8 @@ export function draftFromJob(job: AutomationInfo, fallbackSessionId = ""): Autom
 		time: schedule.kind === "daily" ? (schedule.time ?? "09:00") : "09:00",
 		minutes: String(schedule.kind === "interval" ? (schedule.minutes ?? 60) : 60),
 		sessionId: job.sessionId ?? fallbackSessionId,
+		// NERE-86：存量任务显示服务端当前值；老服务端没有该字段时按产品默认「开」。
+		freshSession: job.freshSession ?? true,
 	};
 }
 
@@ -73,12 +78,18 @@ export function validateAutomationDraft(draft: AutomationDraft): DraftValidation
 		if (!Number.isInteger(minutes) || minutes < 1) {
 			return { ok: false, field: "minutes", error: "间隔分钟需为不小于 1 的整数。" };
 		}
-		return { ok: true, value: { name, prompt, sessionId, schedule: { kind: "interval", minutes } } };
+		return {
+			ok: true,
+			value: { name, prompt, sessionId, freshSession: draft.freshSession, schedule: { kind: "interval", minutes } },
+		};
 	}
 
 	const time = draft.time.trim();
 	if (!isDailyTime(time)) return { ok: false, field: "time", error: "执行时间需为 HH:MM（00:00–23:59）。" };
-	return { ok: true, value: { name, prompt, sessionId, schedule: { kind: "daily", time } } };
+	return {
+		ok: true,
+		value: { name, prompt, sessionId, freshSession: draft.freshSession, schedule: { kind: "daily", time } },
+	};
 }
 
 /** 组装 PATCH 载荷。enabled 原样带回：编辑不改启停，也避免旧后端把缺省值当 false。 */
@@ -93,6 +104,8 @@ export function buildAutomationPatch(
 		schedule: value.schedule,
 		sessionId: value.sessionId,
 		enabled: job.enabled,
+		// NERE-86：后端契约字段是 snake_case，整表单每次全量提交，开关也随之往返。
+		fresh_session: value.freshSession,
 	};
 }
 
@@ -125,8 +138,13 @@ export type AutomationUpdate = {
 	sessionId?: string;
 	enabled?: boolean;
 	nextRunAt?: number;
+	/** 每轮新建会话（NERE-86）：PATCH 返回后即时回填，不必等下次刷新。 */
+	freshSession?: boolean;
+	/** 最近一次执行会话（NERE-86）：服务端随 automation 视图返回。 */
+	lastSessionId?: string;
 };
 
+/** 宽容解析 PATCH 返回值（含 NERE-86 的 fresh_session / last_session_id）。 */
 export function parseAutomationUpdate(raw: unknown): AutomationUpdate | null {
 	if (!isObject(raw)) return null;
 	const id = pickString(raw, ["id"]);
@@ -143,6 +161,10 @@ export function parseAutomationUpdate(raw: unknown): AutomationUpdate | null {
 	else if (typeof raw.enabled === "number") update.enabled = raw.enabled !== 0;
 	const next = typeof raw.next_run_at === "number" ? raw.next_run_at : raw.nextRunAt;
 	if (typeof next === "number") update.nextRunAt = next;
+	const freshSession = pickFreshSession(raw);
+	if (freshSession !== undefined) update.freshSession = freshSession;
+	const lastSessionId = pickString(raw, ["last_session_id", "lastSessionId"]);
+	if (lastSessionId) update.lastSessionId = lastSessionId;
 	return update;
 }
 
@@ -162,7 +184,19 @@ export function mergeAutomationUpdate(items: AutomationInfo[], update: Automatio
 				? { schedule: update.schedule, scheduleLabel: automationScheduleLabel(update.schedule) }
 				: {}),
 			...(update.nextRunAt !== undefined ? { nextLabel: formatNextRunAt(update.nextRunAt) } : {}),
+			...(update.freshSession !== undefined ? { freshSession: update.freshSession } : {}),
+			...(update.lastSessionId !== undefined ? { lastSessionId: update.lastSessionId } : {}),
 		};
 	});
 	return matched ? next : items;
+}
+
+/**
+ * 「查看产出」的跳转目标（NERE-86）：优先最近一次执行实际用的会话 `last_session_id`，
+ * 老数据 / 尚未执行过时回落到任务绑定的 `session_id`（向后兼容）。
+ */
+export function automationOutputSessionId(
+	job: Pick<AutomationInfo, "lastSessionId" | "sessionId">,
+): string | undefined {
+	return job.lastSessionId || job.sessionId || undefined;
 }
