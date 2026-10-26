@@ -210,6 +210,20 @@ const automationLastError: Migration = {
 	},
 };
 
+/**
+ * v10：定时任务执行隔离（NERE-84）。`fresh_session = 1` 的任务每轮新建会话，
+ * 避免把全部历史塞进单轮上下文；`last_session_id` 记录最近一次执行实际用的会话。
+ * 存量任务默认 1：0803 日报失败过两次，升级后下一次执行就从空会话开始。
+ */
+const automationFreshSession: Migration = {
+	version: 10,
+	name: "automation-fresh-session",
+	up(sql) {
+		ensureColumn(sql, "automations", "fresh_session INTEGER NOT NULL DEFAULT 1");
+		ensureColumn(sql, "automations", "last_session_id TEXT");
+	},
+};
+
 export const MIGRATIONS: readonly Migration[] = [
 	initialSchema,
 	vfsRootConversation,
@@ -220,6 +234,7 @@ export const MIGRATIONS: readonly Migration[] = [
 	skillEvents,
 	automationLastStatus,
 	automationLastError,
+	automationFreshSession,
 ];
 
 // 版本号是账本的唯一真源：重复或乱序会被 INSERT OR IGNORE 静默跳过，模块加载时就暴露。

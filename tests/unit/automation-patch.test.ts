@@ -90,6 +90,19 @@ describe("buildAutomationPatch（字段组合与 next_run_at）", () => {
 		expect(buildAutomationPatch({ enabled: true }, NOW)).toEqual({ enabled: true, nextRunAt: NOW + 60_000 });
 	});
 
+	it("只传 fresh_session：只改开关，不动 next_run_at（NERE-84）", () => {
+		expect(buildAutomationPatch({ fresh_session: false }, NOW)).toEqual({ freshSession: false });
+		expect(buildAutomationPatch({ fresh_session: true }, NOW)).toEqual({ freshSession: true });
+		expect(statusOf(() => buildAutomationPatch({ fresh_session: "1" }, NOW))).toBe(400);
+	});
+
+	it("启用同时改 fresh_session：不套用 60s 提前量", () => {
+		expect(buildAutomationPatch({ enabled: true, fresh_session: true }, NOW)).toEqual({
+			enabled: true,
+			freshSession: true,
+		});
+	});
+
 	it("编辑同时带回 enabled=true：以 schedule 为准，不受 60s 影响", () => {
 		const patch = buildAutomationPatch(
 			{ name: "日报", prompt: "跑", schedule: { kind: "interval", minutes: 5 }, sessionId: "2991", enabled: true },
@@ -133,6 +146,8 @@ describe("automationView", () => {
 				last_run_at: 123,
 				last_status: "failed",
 				last_error: "Error: boom",
+				fresh_session: 1,
+				last_session_id: "4890",
 				next_run_at: 456,
 			}),
 		).toEqual({
@@ -145,6 +160,8 @@ describe("automationView", () => {
 			last_run_at: 123,
 			last_status: "failed",
 			last_error: "Error: boom",
+			fresh_session: true,
+			last_session_id: "4890",
 			next_run_at: 456,
 		});
 	});
@@ -160,8 +177,28 @@ describe("automationView", () => {
 			last_run_at: null,
 			last_status: null,
 			last_error: null,
+			fresh_session: 1,
+			last_session_id: null,
 			next_run_at: 0,
 		});
 		expect(view.schedule).toEqual({ kind: "daily", time: "09:00" });
+	});
+
+	it("fresh_session / last_session_id 原样透出（NERE-84）", () => {
+		const row = automationView({
+			id: "a1",
+			name: "x",
+			prompt: "y",
+			session_id: "",
+			schedule: '{"kind":"daily","time":"08:03"}',
+			enabled: 1,
+			last_run_at: null,
+			last_status: null,
+			last_error: null,
+			fresh_session: 0,
+			last_session_id: "4890",
+			next_run_at: 0,
+		});
+		expect(row).toMatchObject({ fresh_session: false, last_session_id: "4890" });
 	});
 });

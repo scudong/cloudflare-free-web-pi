@@ -50,6 +50,8 @@ export type AutomationPatchInput = {
 	sessionId?: unknown;
 	schedule?: unknown;
 	enabled?: unknown;
+	/** PATCH `fresh_session`（NERE-84）：每轮新建会话开关。 */
+	fresh_session?: unknown;
 };
 
 /** PATCH 返回给前端的任务形态；`next_run_at` 与列表同一口径。 */
@@ -65,11 +67,17 @@ export type AutomationView = {
 	last_status: automationsRepo.AutomationLastStatus | null;
 	/** 上次失败原因（v1.0.4）：仅 failed 时有值，成功 / 顺延 / 老数据为 null。 */
 	last_error: string | null;
+	/** 每轮新建会话（NERE-84）：1 = 不继承历史，0 = 固定使用 `sessionId`。 */
+	fresh_session: boolean;
+	/** 最近一次执行实际用的会话（NERE-84）；没有执行过为 null。 */
+	last_session_id: string | null;
 	next_run_at: number;
 };
 
 export const AUTOMATION_NAME_MAX = 40;
 export const AUTOMATION_PROMPT_MAX = 2000;
+/** `last_error` 上限（NERE-84）：只留错误摘要，够定位即可。 */
+export const AUTOMATION_ERROR_MAX = 300;
 const DAILY_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** 编辑的调度校验：不合法直接 400，不做 create 那种静默兜底。 */
@@ -129,8 +137,18 @@ export function buildAutomationPatch(body: AutomationPatchInput, now = Date.now(
 		if (typeof body.enabled !== "boolean") throw new AutomationApiError(400, "enabled 需为布尔值");
 		patch.enabled = body.enabled;
 	}
+	if (body.fresh_session !== undefined) {
+		if (typeof body.fresh_session !== "boolean") throw new AutomationApiError(400, "fresh_session 需为布尔值");
+		patch.freshSession = body.fresh_session;
+	}
 
-	const onlyEnabled = body.enabled !== undefined && body.name === undefined && body.prompt === undefined && body.sessionId === undefined && body.schedule === undefined;
+	const onlyEnabled =
+		body.enabled !== undefined &&
+		body.name === undefined &&
+		body.prompt === undefined &&
+		body.sessionId === undefined &&
+		body.schedule === undefined &&
+		body.fresh_session === undefined;
 	if (schedule) patch.nextRunAt = nextRunAt(schedule, now);
 	else if (onlyEnabled && body.enabled === true) patch.nextRunAt = now + 60_000;
 	return patch;
@@ -156,6 +174,8 @@ export function automationView(row: automationsRepo.AutomationRow): AutomationVi
 		last_run_at: row.last_run_at,
 		last_status: automationsRepo.parseLastStatus(row.last_status),
 		last_error: row.last_error ?? null,
+		fresh_session: row.fresh_session === 1,
+		last_session_id: row.last_session_id ?? null,
 		next_run_at: row.next_run_at,
 	};
 }
@@ -170,8 +190,16 @@ export type AutomationService = {
 	due(now: number): automationsRepo.AutomationDueRow[];
 	/** 会话忙：顺延 5 分钟，只记 `last_status = deferred`（不改 last_run_at）。 */
 	defer(id: string, now: number): void;
-	/** 执行完一轮：写 last_run_at、last_status（ok / failed）与下一次 next_run_at；失败附原因（v1.0.4）。 */
-	markRun(job: { id: string; schedule: string }, now: number, status: "ok" | "failed", error?: string): void;
+	/** 执行完一轮：写 last_run_at、last_status（ok / failed）、last_session_id 与下一次 next_run_at；失败附原因（v1.0.4）。 */
+	markRun(
+		job: { id: string; schedule: string },
+		now: number,
+		status: "ok" | "failed",
+		error?: string,
+		sessionId?: string | null,
+	): void;
+	/** 把任务绑定到实际执行的会话（NERE-84，fresh_session 轮换时调用）。 */
+	bindSession(id: string, sessionId: string): void;
 	/** 本轮处理过任务时，把仍落在过去的时间统一顺延 60s。 */
 	rescheduleOverdue(now: number): void;
 	/** alarm：到点且 active 的目标会话。 */
@@ -182,15 +210,19 @@ export type AutomationService = {
 	nextAlarmAt(): number | null;
 };
 
-/** alarm 每轮需要的执行端口：会话忙判断、提交一轮、失败后的会话恢复。 */
+/** alarm 每轮需要的执行端口：新建会话、会话忙判断、提交一轮、失败后的会话恢复。 */
 export type AutomationRunner = {
+	/** 新建一个空会话并返回 id（NERE-84，复用 `/sessions` 的创建路径）。 */
+	createSession(): Promise<string>;
 	hasActive(sessionId: string): boolean;
 	run(job: automationsRepo.AutomationDueRow): Promise<void>;
 	recover(): Promise<void>;
 };
 
 /**
- * 执行一轮到点任务（NERE-68 三态）：
+ * 执行一轮到点任务（NERE-68 三态 + NERE-84 会话隔离）：
+ * - `fresh_session = 1` → 先新建空会话并绑定到任务（`session_id` / `last_session_id`），
+ *   失败原因与历史长度无关，也不会在下一轮继续累积；
  * - 会话忙 → `deferred` 且不改 last_run_at（顺延不算一次运行）；
  * - 成功 → `ok`；异常 → `failed`（console.warn 保留，原因写入 last_error），两者都更新 last_run_at；
  * - 单个任务的异常不外抛，后续任务照常执行。
@@ -198,24 +230,36 @@ export type AutomationRunner = {
 export async function runDueAutomations(
 	jobs: readonly automationsRepo.AutomationDueRow[],
 	now: number,
-	service: Pick<AutomationService, "defer" | "markRun">,
+	service: Pick<AutomationService, "defer" | "markRun" | "bindSession">,
 	runner: AutomationRunner,
 ): Promise<void> {
 	for (const job of jobs) {
+		let sessionId = job.session_id || "1";
+		if (job.fresh_session === 1) {
+			// 新建会话失败（Harness/存储故障）→ 记 failed 但保留原会话绑定，下一轮重新尝试。
+			try {
+				sessionId = await runner.createSession();
+				service.bindSession(job.id, sessionId);
+			} catch (err) {
+				console.warn(`automation ${job.id} create session failed`, String(err).slice(0, 200));
+				service.markRun(job, now, "failed", String(err));
+				continue;
+			}
+		}
 		// 会话正忙时跳过这一轮，避免并发 submit 破坏会话状态（v0.17.1）
-		if (runner.hasActive(job.session_id || "1")) {
+		if (runner.hasActive(sessionId)) {
 			service.defer(job.id, now);
 			continue;
 		}
 		let status: "ok" | "failed" = "ok";
 		let error: string | undefined;
 		try {
-			await runner.run(job);
+			await runner.run({ ...job, session_id: sessionId });
 		} catch (err) {
 			console.warn(`automation ${job.id} failed`, String(err).slice(0, 200));
 			status = "failed";
 			// 失败原因落库（v1.0.4）：console.warn 会丢，SQL 里要能查到当时为什么失败。
-			error = String(err).slice(0, 500);
+			error = String(err);
 			// recover 失败不能吞掉本次运行结果，也不能中断后续任务。
 			try {
 				await runner.recover();
@@ -223,7 +267,7 @@ export async function runDueAutomations(
 				console.warn(`automation ${job.id} recover failed`, String(recoverErr).slice(0, 200));
 			}
 		}
-		service.markRun(job, now, status, error);
+		service.markRun(job, now, status, error, sessionId);
 	}
 }
 
@@ -274,14 +318,19 @@ export function createAutomationService(sql: SqlHandle): AutomationService {
 			automationsRepo.markDeferred(sql, id, now + 5 * 60_000);
 		},
 
-		markRun(job, now, status, error) {
+		markRun(job, now, status, error, sessionId) {
 			let schedule: Schedule = DAILY_DEFAULT;
 			try {
 				schedule = JSON.parse(job.schedule) as Schedule;
 			} catch {
 				// 保持默认
 			}
-			automationsRepo.markRun(sql, job.id, now, nextRunAt(schedule, Date.now()), status, error);
+			const summary = error ? error.slice(0, AUTOMATION_ERROR_MAX) : null;
+			automationsRepo.markRun(sql, job.id, now, nextRunAt(schedule, Date.now()), status, summary, sessionId);
+		},
+
+		bindSession(id, sessionId) {
+			automationsRepo.bindSession(sql, id, sessionId);
 		},
 
 		rescheduleOverdue(now) {

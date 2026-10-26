@@ -1054,6 +1054,20 @@ describe("定时任务编辑（NERE-64）", () => {
 		expect(res.json.automation).toMatchObject({ last_run_at: null, last_status: null });
 	});
 
+	it("新任务默认每轮新建会话，PATCH 可关闭并回显 last_session_id（NERE-84）", async () => {
+		const id = await create({ kind: "interval", minutes: 20 });
+		expect(await row(id)).toMatchObject({ fresh_session: 1, last_session_id: null });
+
+		const res = await patch("/api/automations", { id, fresh_session: false });
+		expect(res.status).toBe(200);
+		expect(res.json.automation).toMatchObject({ fresh_session: false, last_session_id: null });
+		expect(await row(id)).toMatchObject({ fresh_session: 0 });
+
+		// 非法类型 400，不改库
+		expect((await patch("/api/automations", { id, fresh_session: "off" })).status).toBe(400);
+		expect(await row(id)).toMatchObject({ fresh_session: 0 });
+	});
+
 	it("改 daily 08:03 → next_run_at 为下一个 08:03（UTC+8）", async () => {
 		const id = await create({ kind: "interval", minutes: 30 });
 		const res = await patch("/api/automations", { id, schedule: { kind: "daily", time: "08:03" }, enabled: true });

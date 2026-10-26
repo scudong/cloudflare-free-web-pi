@@ -4,6 +4,7 @@ import { AppError, toResponse } from "../http/errors";
 import { createAutomationService, type AutomationPatchInput, type AutomationService } from "../services/automation-service";
 import { createChatService } from "../services/chat-service";
 import { createGoalService } from "../services/goal-service";
+import { createSessionService } from "../services/session-service";
 import { readPlan } from "../services/plan-service";
 
 /**
@@ -54,6 +55,7 @@ export const automationRoutes: readonly Route[] = [
 	},
 	// 立即运行（v0.55.1）：诊断定时任务失败 / 手动补跑，不走 alarm。
 	// v1.0.4：手动运行同样记 last_run_at / last_status / last_error，面板能看到结果。
+	// NERE-84：与 alarm 同一语义——fresh_session=1 先建新会话，避免手动补跑又吃一遍历史。
 	{
 		method: "POST",
 		path: "/automations/run",
@@ -65,13 +67,20 @@ export const automationRoutes: readonly Route[] = [
 			const job = service.list().find((item) => item.id === id);
 			if (!job) throw new AppError("automation_not_found", 404, "定时任务不存在");
 			const chat = createChatService({ sql: ctx.sql(), runtime: ctx.chatRuntime });
+			let sessionId = job.session_id || undefined;
+			let usedSessionId = job.session_id || "1";
 			try {
-				const result = await chat.chat({ message: job.prompt, sessionId: job.session_id || undefined });
-				service.markRun({ id: job.id, schedule: job.schedule }, Date.now(), "ok");
-				return Response.json({ ok: true, answer: result.answer, tools: result.tools });
+				if (job.fresh_session === 1) {
+					sessionId = (await createSessionService({ sql: ctx.sql(), runtime: ctx.sessionRuntime }).create()).id;
+					usedSessionId = sessionId;
+					service.bindSession(job.id, sessionId);
+				}
+				const result = await chat.chat({ message: job.prompt, sessionId });
+				service.markRun({ id: job.id, schedule: job.schedule }, Date.now(), "ok", undefined, usedSessionId);
+				return Response.json({ ok: true, answer: result.answer, tools: result.tools, sessionId });
 			} catch (err) {
 				const message = err instanceof Error ? err.message.slice(0, 500) : "unknown error";
-				service.markRun({ id: job.id, schedule: job.schedule }, Date.now(), "failed", message);
+				service.markRun({ id: job.id, schedule: job.schedule }, Date.now(), "failed", message, usedSessionId);
 				throw err;
 			}
 		},
