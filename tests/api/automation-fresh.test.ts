@@ -149,7 +149,7 @@ describe("定时任务会话隔离（NERE-84）", () => {
 		});
 		const id = String(created.json?.id ?? "");
 		const off = await patch("/api/automations", { id, fresh_session: false });
-		expect(off.status).toBe(200);
+		expect(off.status, off.text).toBe(200);
 		expect(off.json?.automation).toMatchObject({ fresh_session: false, last_session_id: null });
 
 		expect(await runNow(id)).toBe(sessionId);
@@ -161,5 +161,55 @@ describe("定时任务会话隔离（NERE-84）", () => {
 			last_status: "ok",
 		});
 		expect(await assistantCount(sessionId)).toBe(2);
+	});
+});
+
+/**
+ * NERE-85 验收（端到端，假 provider）：
+ * 上游一次断流不再报废整轮；3 次尝试都失败时错误摘要进 `last_error`，
+ * 且重试只发生在 fetch 包装层（不会叠加 pi-durable 的整轮重试）。
+ */
+describe("provider 断流重试（NERE-85）", () => {
+	async function createAutomation(name: string): Promise<string> {
+		const created = await post("/api/automations", {
+			name,
+			prompt: "跑一轮日报",
+			schedule: { kind: "interval", minutes: 60 },
+		});
+		expect(created.status).toBe(200);
+		return String(created.json?.id ?? "");
+	}
+
+	it("第一次连接失败、第二次成功：一轮完成，任务状态 ok 且只有一条回答", async () => {
+		const id = await createAutomation("断流重试任务");
+		fake.setSteps([{ text: "重试之后的日报" }]);
+		const before = fake.droppedCount();
+		fake.dropNext(1);
+
+		const sessionId = await runNow(id);
+		expect(fake.droppedCount() - before).toBe(1);
+		expect(await assistantCount(sessionId)).toBe(1);
+		expect(await automationRow(id)).toMatchObject({ last_status: "ok", last_error: null, last_session_id: sessionId });
+	});
+
+	it("一直连不上：3 次尝试后失败，原因写进 last_error", async () => {
+		const id = await createAutomation("持续断流任务");
+		const before = fake.droppedCount();
+		fake.dropNext(3);
+
+		const startedAt = Date.now();
+		const res = await post("/api/automations/run", { id });
+		const elapsed = Date.now() - startedAt;
+
+		expect(res.status, res.text).toBe(500);
+		expect(res.text).toContain("model_error");
+		// 恰好 3 次连接：再多的重试会浪费按量计费的配额。
+		expect(fake.droppedCount() - before).toBe(3);
+		// 500ms + 2s 的退避确实发生了。
+		expect(elapsed).toBeGreaterThanOrEqual(2400);
+		const row = await automationRow(id);
+		expect(row).toMatchObject({ last_status: "failed" });
+		expect(String(row.last_error)).toContain("Connection error");
+		expect(String(row.last_error)).toContain("model_error");
 	});
 });

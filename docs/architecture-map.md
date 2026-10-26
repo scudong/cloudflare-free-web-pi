@@ -41,7 +41,7 @@ src/worker/routes/           14 个域文件 + index 路由表（零 SQL）
 src/worker/services/         24 个域服务与外部适配器（零 Response、零 Harness 类型）
 src/worker/repo/             19 个仓储（只做 SQL）
 src/worker/tools/            模型工具扩展（显式依赖，按请求构造）
-src/worker/lib/              8 个纯函数模块（markdown、token、分块、审计…）
+src/worker/lib/              9 个纯函数模块（markdown、token、分块、审计、供应商 fetch 重试…）
 ```
 
 | 逻辑模块 | 位置（符号） | 职责 | 主要依赖 | 数据 |

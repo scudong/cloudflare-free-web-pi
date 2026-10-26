@@ -7,6 +7,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, createRegistry, Harness, UsageDoc, watchEvents } from "@earendil-works/pi-durable";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { demoShareToken, demoShareUrl } from "./worker/lib/share-render";
+import { createProviderFetch, withProviderFetch } from "./worker/lib/provider-fetch";
 import { userContent } from "./worker/lib/chat-content";
 import { migrate, migrateRegistry, type SqlHandle } from "./worker/db/migrations";
 import { buildContext, type AppEnv } from "./worker/http/context";
@@ -249,8 +250,13 @@ export class SpikeAgent extends DurableObject {
 			// v0.27.0：启用自定义供应商时用它，否则回落到 DeepSeek 官方（env DEEPSEEK_API_KEY）
 			const activeId = activeProviderId(deps.sql);
 			const providerRow = activeId ? providersRepo.find(deps.sql, activeId) : undefined;
-			if (providerRow) models.setProvider(this.buildCustomProvider(providerRow) as never);
-			else models.setProvider(deepseekProvider());
+			// NERE-85：模型请求统一走带重试 + 空闲看门狗的 fetch；上游一次断流不再报废整轮。
+			const providerFetch = createProviderFetch();
+			if (providerRow) {
+				models.setProvider(withProviderFetch(this.buildCustomProvider(providerRow), providerFetch) as never);
+			} else {
+				models.setProvider(withProviderFetch(deepseekProvider(), providerFetch) as never);
+			}
 			const registry = createRegistry();
 			this.registryRef = registry as unknown as typeof this.registryRef;
 			this.baseExt = createAgentExtensions({
@@ -278,7 +284,16 @@ export class SpikeAgent extends DurableObject {
 			if (this.customExt) registry.install(this.customExt as never);
 			this.harness = await Harness.open(
 				storage,
-				{ models, registry, settings: { compaction: compactionSettings(this.settingsPort(deps).get) } },
+				{
+					models,
+					registry,
+					settings: {
+						compaction: compactionSettings(this.settingsPort(deps).get),
+						// NERE-85：瞬时失败的重试收敛到 provider fetch 层（3 次尝试 + 退避），
+						// 关掉内核按错误文本再重试整轮生成，否则一次断流会放大成 3×4 次请求、重复计费。
+						retry: { enabled: false },
+					},
+				},
 				ctx,
 			);
 			this.harnessOpens++;
@@ -288,7 +303,7 @@ export class SpikeAgent extends DurableObject {
 	}
 
 	/** 把一条供应商记录构造成 pi-ai 的 Provider（OpenAI 兼容端点）。 */
-	private buildCustomProvider(row: providersRepo.ProviderRow): unknown {
+	private buildCustomProvider(row: providersRepo.ProviderRow): object {
 		const modelIds = splitModels(row.models);
 		return createProvider({
 			id: row.id,
